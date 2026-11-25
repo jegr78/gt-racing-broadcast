@@ -229,6 +229,10 @@ def event_track(event):
     return track, float(length)
 
 
+# Auto-arm pinned, so a maintainer's environment cannot switch the scenarios to manual arm.
+STACK_ENV = {"RACECAST_UPDATE_CHECK": "0", "RACECAST_MANUAL_FEED_ARM": "0"}
+
+
 def child_env(base, extra):
     """`base` without any inherited RACECAST_* value, plus `extra`."""
     env = {k: v for k, v in base.items() if not k.startswith("RACECAST_")}
@@ -435,7 +439,7 @@ class Stack:
             fakes.update(fake.env())
         env = child_env(os.environ, {**fakes, **port_env((feed_a, feed_b, pov), http_port, ui_port),
                                      "RACECAST_PROFILE": PROFILE,
-                                     "RACECAST_UPDATE_CHECK": "0",
+                                     **STACK_ENV,
                                      "RACECAST_CONSOLE_SECRET": self.secret,
                                      **({"RACECAST_TELEMETRY_PROBE": "1"} if self.scn.event.get("probe") else {}),
                                      "PYTHONDONTWRITEBYTECODE": "1"})

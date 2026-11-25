@@ -160,6 +160,9 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
             "event_timing": lambda new=False, serve=None: {"ok": True, "active": True, "renewed": new,
                                                            "serve": serve,
                                                "funnel": "https://h/console/timing?l=x", "tailnet": None},
+            "feed_arm_write": lambda mode: (
+                {"ok": True, "mode": mode} if mode in ("auto", "manual")
+                else {"ok": False, "error": "feed arming is auto or manual"}),
             "gt7_forward_write": lambda targets: (
                 {"ok": True, "value": targets} if "!" not in (targets or "")
                 else {"ok": False, "error": "x!: use HOST:PORT"}),
@@ -4566,6 +4569,37 @@ def t_api_gt7_forward_route_saves_or_names_the_mistake():
         assert code == 400 and "HOST:PORT" in json.loads(body)["error"], body
     finally:
         httpd.shutdown()
+
+
+def t_api_feed_arm_route_saves_or_names_the_mistake():
+    httpd, port = _serve(_ctx())
+    try:
+        code, body = _post_json(port, "/api/feed-arm", {"mode": "manual"})
+        assert code == 200 and json.loads(body) == {"ok": True, "mode": "manual"}, body
+        code, body = _post_json(port, "/api/feed-arm", {"mode": "x"})
+        assert code == 400 and "auto or manual" in json.loads(body)["error"], body
+    finally:
+        httpd.shutdown()
+
+
+def t_api_feed_arm_answers_400_for_a_mode_that_is_no_string():
+    source_dir = os.path.join(ROOT, 'src')
+    sys.path.insert(0, source_dir)
+    try:
+        import racecast
+    finally:
+        sys.path.remove(source_dir)
+    fd, path = tempfile.mkstemp(suffix=".env"); os.close(fd)
+    ctx = _ctx()
+    ctx["feed_arm_write"] = lambda mode: racecast.feed_arm_write_data(mode, path=path)
+    httpd, port = _serve(ctx)
+    try:
+        for mode in (["manual"], {"m": 1}, 1):
+            code, body = _post_json(port, "/api/feed-arm", {"mode": mode})
+            assert code == 400 and "auto or manual" in json.loads(body)["error"], (mode, code, body)
+    finally:
+        httpd.shutdown()
+        os.remove(path)
 
 
 def t_api_ps_save_rejects_bad_ip():

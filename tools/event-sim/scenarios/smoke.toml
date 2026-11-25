@@ -99,15 +99,17 @@ expect = ["sheet.write_count('schedule') == 1",
 timeout = "15s"
 
 [[step]]
-id = "arm"
+id = "warm"
 at = "after:approve"
 role = "director"
-do = "arm_feed"
-args = { feed = "A" }
+do = "view"
+args = { area = "handover" }
+expect = ["relay.status.feeds.A.state == 'serving'"]
+timeout = "90s"
 
 [[step]]
 id = "on_air"
-at = "after:arm"
+at = "after:warm"
 role = "director"
 do = "scene"
 args = { scene = "Stint" }

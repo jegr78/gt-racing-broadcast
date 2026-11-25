@@ -7517,6 +7517,25 @@ def t_env_edit_reaches_services_the_control_center_starts_later():
         f"file values follow the edit, a removed key goes, a real environment value wins: {env}"
 
 
+def t_feed_arm_write_stores_the_mode_as_the_relay_flag():
+    fd, path = tempfile.mkstemp(suffix=".env"); os.close(fd)
+    try:
+        for mode in ("sometimes", ["manual"], {"m": 1}, None):
+            try:
+                bad = m.feed_arm_write_data(mode, path=path)
+            except TypeError as exc:
+                bad = {"ok": None, "error": f"raised {exc}"}
+            assert bad["ok"] is False and "auto or manual" in bad["error"], f"{mode!r} is refused, never raises: {bad}"
+        # "on", not the old template's "1", so the Control Center can tell the two apart.
+        for mode, flag in (("manual", "on"), ("auto", "off")):
+            res = m.feed_arm_write_data(mode, path=path)
+            assert res["ok"] is True and res["mode"] == mode, res
+            with open(path, encoding="utf-8") as f:
+                assert f"RACECAST_MANUAL_FEED_ARM={flag}" in f.read(), f"{mode} writes the relay's flag {flag}"
+    finally:
+        os.remove(path)
+
+
 def t_gt7_forward_write_validates_normalises_and_clears():
     fd, path = tempfile.mkstemp(suffix=".env"); os.close(fd)
     try:
@@ -8371,6 +8390,31 @@ def t_rundown_reports_each_step_once():
     names = [r.name for r in results]
     assert len(names) == len(set(names)), [n for n in names if names.count(n) > 1]
     assert len(names) == len(m._sm().RUNDOWN), (len(names), len(m._sm().RUNDOWN))
+
+def t_rundown_under_auto_arm_waits_for_bytes_without_arming():
+    saved = {name: getattr(m, name) for name in
+             ("_smoke_relay_get", "_smoke_relay_post", "_smoke_apply",
+              "_smoke_wait_bytes")}
+    applied, said = [], []
+    m._smoke_relay_get = lambda path, **kw: {"manual_feed_arm": False,
+                                             "live": {"feed": "B"}}
+    m._smoke_relay_post = lambda path, body, **kw: {"ok": True, "scene": None,
+                                                    "sources": [], "audio": []}
+    m._smoke_apply = lambda step: applied.append(step.kind) or {"ok": True}
+    m._smoke_wait_bytes = lambda which, say: True
+    saved_pause = m.SMOKE_STEP_PAUSE_S
+    m.SMOKE_STEP_PAUSE_S = 0
+    try:
+        results = m._smoke_rundown(said.append)
+    finally:
+        for name, fn in saved.items():
+            setattr(m, name, fn)
+        m.SMOKE_STEP_PAUSE_S = saved_pause
+    arms = [r for r in results if "_arm_" in r.name]
+    assert "arm" not in applied, f"auto-arm refuses feed/X/activate, so no ARM call is sent: {applied}"
+    assert arms and all(r.severity == m._sm().PASS and "self-armed" in r.note for r in arms), arms
+    assert any("auto-arm" in s for s in said), said
+
 
 def t_smoketest_tears_down_even_when_event_start_aborts():
     """`event start` exits non-zero when its readiness report has a FAIL, but by

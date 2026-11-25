@@ -77,6 +77,11 @@ your installed toolchain still works.
      -> INTERVIEW -> OUTRO -> STANDBY
    ```
 
+   With auto-arm (the default, see [At a driver change](Director#at-a-driver-change))
+   the feeds arm themselves: an **ARM** step sends no request and only waits for that
+   feed's bytes, and its result notes *feed self-armed (auto-arm)*. With manual arm it
+   arms the feed first.
+
 8. **Observes** for the window (5 minutes by default), then stops the event,
    including the post-event report and its Discord message.
 

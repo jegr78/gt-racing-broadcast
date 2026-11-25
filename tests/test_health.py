@@ -17,8 +17,7 @@ _cj = importlib.util.spec_from_file_location(
     "cookie_jar", os.path.join(ROOT, "src", "scripts", "cookie_jar.py"))
 cookie_jar = importlib.util.module_from_spec(_cj); _cj.loader.exec_module(cookie_jar)
 
-# Manual feed arm defaults ON (#492), so a bare Relay would start feeds paused. These
-# checks exercise the auto-pull path, so pin the opt-out.
+# These checks exercise the auto-arm path; pin it against a developer's environment.
 os.environ.setdefault("RACECAST_MANUAL_FEED_ARM", "0")
 
 

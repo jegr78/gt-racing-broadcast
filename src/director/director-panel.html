@@ -855,6 +855,7 @@
       <div class="area" data-area="handover">
         <section class="bus" id="handoverSec"><div class="cap">Handover</div>
           <div class="hocards"><div class="hocard air" id="hoOnAir"></div><div class="hocard" id="hoNext"></div></div>
+          <div class="hint" id="hoArmMode"></div>
           <div id="hoUpcoming"></div>
         </section>
       </div>
@@ -3699,16 +3700,16 @@ $("#pvToggle").onclick = () => {
   if(opening){ pvStart(); } else { pvStop(); }
   try{ localStorage.setItem(PV_KEY, opening ? "1" : "0"); }catch(e){}
 };
-// The feeds the relay has no still for: a stopped feed that is not on air (the on-air
+// The feeds the relay has no still for: an off-air feed that does not serve (the on-air
 // one is an OBS shot) and a POV that is not shown. Without fan-out the preview pulls
-// a stopped feed on its own: that one stays out of the answer, so it backs off.
+// such a feed on its own: that one stays out of the answer, so it backs off.
 function pvIdleFeeds(d){
   const idle = {};
   if (d.feeds && d.feeds.A && d.feeds.B){
     const live = d.feeds.A.index <= d.feeds.B.index ? "A" : "B";
     for (const k of ["A", "B"]){
-      const stopped = k !== live && d.feeds[k].state === "stopped";
-      if (!stopped || d.fanout !== false) idle[k] = stopped;
+      const dark = k !== live && d.feeds[k].state !== "serving";
+      if (!dark || d.fanout !== false) idle[k] = dark;
     }
   }
   if (d.pov) idle.POV = !d.pov.shown;
@@ -4075,12 +4076,17 @@ function hoCard(el, cls, key, value, sub){
   }
 }
 function stintName(i){ const r = schedRows[i]; return r && r.name ? " · " + r.name : ""; }
-function renderHandover(lf, live, of, off){
+function renderHandover(lf, live, of, off, manual, noLink, end){
   const serving = of.state === "serving";
   hoCard($("#hoOnAir"), "air", "On air", `Stint ${lf.stint}${stintName(lf.index)}`, "Feed " + live);
-  hoCard($("#hoNext"), serving ? "ready" : "",
-         serving ? "Up next · ready" : of.armed ? "Up next · starting" : "Up next · not armed",
+  const state = manual ? (serving ? "ready" : of.armed ? "starting" : "not armed")
+              : end ? "end of the schedule" : serving ? "running warm"
+              : noLink ? "waiting for its link" : "warming up";
+  hoCard($("#hoNext"), serving ? "ready" : "", "Up next · " + state,
          `Stint ${of.stint}${stintName(of.index)}`, `Feed ${off} · ${of.state || "idle"}`);
+  $("#hoArmMode").textContent = manual
+    ? "Manual arm: ARM the next stint's feed a few minutes before the swap."
+    : "Auto-arm: the next stint's feed runs warm as soon as its link is in the Schedule.";
   const box = $("#hoUpcoming");
   box.replaceChildren();
   for (let i = lf.index + 1; i <= lf.index + 3 && i < schedRows.length; i++){
@@ -4152,11 +4158,12 @@ function renderLive(d){
   $("#nextStep").hidden = !step;
   $("#nextStepText").textContent = step;
   setNav("handover", serving ? "ok" : "", end ? "end of schedule"
-         : serving ? `stint ${of.stint} ready` : armed ? `stint ${of.stint} starting` : `arm stint ${of.stint}`);
+         : serving ? `stint ${of.stint} ready` : manual && !armed ? `arm stint ${of.stint}`
+         : !manual && noLink ? `stint ${of.stint}: no link` : `stint ${of.stint} starting`);
   // Only the next stint warns; stints further out stay neutral.
   if (noLink)
     setNav("schedule", "warn", ho.pending ? `stint ${ho.stint}: link submitted` : `stint ${ho.stint}: no link`);
-  renderHandover(lf, live, of, off);
+  renderHandover(lf, live, of, off, manual, noLink, end);
 }
 async function handoverPoll(){
   if (document.body.classList.contains("solo")) return;

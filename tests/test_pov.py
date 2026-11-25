@@ -3,9 +3,9 @@
 import contextlib, importlib.util, json, os, tempfile, time
 import threading, urllib.request, urllib.error
 
-# Manual-arm is ON by default (#492). These tests exercise the legacy auto-pull
-# machinery (index/dedup/qualifying), so they pin the opt-out path. A test that needs
-# manual mode sets r.manual_feed_arm/paused explicitly.
+# These tests exercise the auto-arm machinery (index/dedup/qualifying); pinning it
+# keeps a developer's own environment out. A test that needs manual mode sets
+# r.manual_feed_arm/paused explicitly.
 os.environ.setdefault("RACECAST_MANUAL_FEED_ARM", "0")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -414,13 +414,13 @@ def t_next_auto_freed_disarmed_at_next_slot():
     assert r.A.idx == 2 and r.A.paused is True
 
 
-def t_next_auto_legacy_no_autostop():
+def t_next_auto_auto_arm_no_autostop():
     r = _relay(["s1", "s2", "s3", "s4"])
-    r.manual_feed_arm = False           # legacy auto pre-roll opt-out
+    r.manual_feed_arm = False
     r.feeds["A"].phase = "serving"; r.feeds["B"].phase = "serving"
     r.A.paused = False; r.B.paused = False
     r.next_auto()
-    assert r.A.paused is False          # legacy: freed keeps pre-rolling, no auto-stop
+    assert r.A.paused is False, "auto-arm keeps the freed feed warm on the next stint"
 
 
 def t_set_stint_reflects_live_feed_without_cut():
@@ -2368,36 +2368,29 @@ def t_resync_to_stint_no_op_when_no_feed_serves():
 
 
 def t_manual_feed_arm_enabled():
-    # Default-ON: absent or empty means manual arm on.
-    assert m.manual_feed_arm_enabled({}) is True
-    assert m.manual_feed_arm_enabled({"RACECAST_MANUAL_FEED_ARM": ""}) is True
+    for env in ({}, {"RACECAST_MANUAL_FEED_ARM": ""}, {"RACECAST_MANUAL_FEED_ARM": "maybe"}):
+        assert m.manual_feed_arm_enabled(env) is False, f"auto-arm is the default: {env}"
     for v in ("1", "true", "yes", "on", "TRUE", "On"):
         assert m.manual_feed_arm_enabled({"RACECAST_MANUAL_FEED_ARM": v}) is True, v
     for v in ("0", "false", "no", "off", "OFF", "No"):
         assert m.manual_feed_arm_enabled({"RACECAST_MANUAL_FEED_ARM": v}) is False, v
 
 
-def t_relay_manual_arm_starts_feeds_disarmed():
+def t_relay_auto_arm_is_the_default_and_manual_starts_disarmed():
     rows = [("uA", "A", "S1", 1), ("uB", "B", "S2", 2)]
     entry = os.environ.get("RACECAST_MANUAL_FEED_ARM")   # capture true entry state
     try:
-        # Opt-out (flag "0"): legacy auto-pull, feeds armed.
-        os.environ["RACECAST_MANUAL_FEED_ARM"] = "0"
-        r0 = m.Relay(_StubSource(["uA", "uB"], rows), (53001, 53002), LOGDIR)
-        assert r0.manual_feed_arm is False
-        assert r0.A.paused is False and r0.B.paused is False
-        assert r0.status()["feeds"]["A"]["armed"] is True
-        # New DEFAULT (flag absent): manual arm on, feeds disarmed.
         os.environ.pop("RACECAST_MANUAL_FEED_ARM", None)
         rd = m.Relay(_StubSource(["uA", "uB"], rows), (53005, 53006), LOGDIR)
-        assert rd.manual_feed_arm is True
-        assert rd.A.paused is True and rd.B.paused is True
-        assert rd.status()["manual_feed_arm"] is True
-        assert rd.status()["feeds"]["A"]["armed"] is False
-        # Explicit "1": same as default (disarmed).
+        assert rd.manual_feed_arm is False, "without the flag the relay auto-arms"
+        assert rd.A.paused is False and rd.B.paused is False, "auto-arm feeds run warm"
+        assert rd.status()["manual_feed_arm"] is False
+        assert rd.status()["feeds"]["A"]["armed"] is True
         os.environ["RACECAST_MANUAL_FEED_ARM"] = "1"
         r2 = m.Relay(_StubSource(["uA", "uB"], rows), (53003, 53004), LOGDIR)
-        assert r2.manual_feed_arm is True and r2.A.paused is True
+        assert r2.manual_feed_arm is True and r2.A.paused is True and r2.B.paused is True, \
+            "manual arm starts both feeds disarmed"
+        assert r2.status()["feeds"]["A"]["armed"] is False
     finally:
         # Restore the exact entry state, not the post-del state.
         if entry is None:
@@ -3552,11 +3545,7 @@ def t_redact_console_status_reduces_the_mic_block_to_its_state():
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
-            # Re-pin the legacy-path guard before each test: some tests temporarily
-            # mutate RACECAST_MANUAL_FEED_ARM to exercise the absent/default and the
-            # explicit-value cases (they restore their own entry state in a finally).
-            # The setdefault only re-adds the guard when the var is missing, so it
-            # never clobbers a test that set an explicit value on purpose.
+            # Re-pin the auto-arm guard: a test that pops the flag restores it itself.
             os.environ.setdefault("RACECAST_MANUAL_FEED_ARM", "0")
             fn(); print("ok", name)
     print("ALL PASS")

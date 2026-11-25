@@ -648,17 +648,15 @@ def auto_failover_enabled(environ):
     return str(environ.get("RACECAST_AUTO_FAILOVER", "")).strip().lower() in _FAILOVER_TRUTHY
 
 
-_MANUAL_FEED_ARM_FALSEY = {"0", "false", "no", "off"}
+_MANUAL_FEED_ARM_TRUTHY = {"1", "true", "yes", "on"}
 
 
 def manual_feed_arm_enabled(environ):
-    """True unless RACECAST_MANUAL_FEED_ARM is an explicit falsey token. Default ON:
-    feed URLs are entered into the schedule but do NOT pull until the director arms
-    the feed, and `/next` auto-stops the outgoing feed after a handover cut. The
-    durable single-puller workflow (#489/#505). Set RACECAST_MANUAL_FEED_ARM=0 to
-    restore the legacy auto-pull + seamless whole-stint pre-roll. Pure so the switch
-    is unit-testable."""
-    return str(environ.get("RACECAST_MANUAL_FEED_ARM", "")).strip().lower() not in _MANUAL_FEED_ARM_FALSEY
+    """True only when RACECAST_MANUAL_FEED_ARM is an explicit truthy token. Default
+    OFF (auto-arm, #1325): the off-air feed pulls its stint as soon as the link is in
+    the Schedule. Manual arm saves the producer's bandwidth: a stint pulls only after
+    the director arms the feed, and `/next` stops the outgoing feed after a cut."""
+    return str(environ.get("RACECAST_MANUAL_FEED_ARM", "")).strip().lower() in _MANUAL_FEED_ARM_TRUTHY
 
 
 # ---------- On-air program-audio monitor (#program-audio) ------------------
@@ -9777,9 +9775,7 @@ class Relay:
             self.A.on_step_down = self._record_feed_step_down
             self.B.on_step_down = self._record_feed_step_down
             self.feeds = {"A": self.A, "B": self.B}
-            # Two-stage feed scheduling (#492): when RACECAST_MANUAL_FEED_ARM is set,
-            # both A/B feeds start DISARMED (paused), a URL at the index does not pull
-            # until the director arms the feed. Default off = auto-pull unchanged.
+            # Manual arm (#492): both A/B feeds start disarmed and pull only once armed.
             if self.manual_feed_arm:
                 self.A.paused = True
                 self.B.paused = True
@@ -11881,7 +11877,7 @@ class Relay:
         # #489/#505: on a real handover cut, stop the outgoing pull so only ONE feed
         # ever pulls googlevideo between handovers (the durable single-puller fix). Gated
         # on cut (never stop a feed we did not cut away from -> never blacks the program)
-        # and on manual arm (the legacy opt-out keeps its whole-stint pre-warm).
+        # and on manual arm (auto-arm keeps the freed feed warm on the next stint).
         stop_freed = cut and self.manual_feed_arm
         # Pause BEFORE re-indexing: set_index's advance.set() wakes the freed feed's run
         # loop, so paused must already be True, otherwise the loop could spawn one
@@ -12230,7 +12226,7 @@ class Relay:
         #492). Mirrors pov_reload. Manual-mode only, an error otherwise so the auto
         pre-warm/handover logic and manual arm never fight."""
         if not self.manual_feed_arm:
-            return {"error": "manual feed arm disabled (set RACECAST_MANUAL_FEED_ARM=1)"}
+            return {"error": "the relay auto-arms its feeds (Feed arming is Auto in the Control Center settings)"}
         f = self.feeds.get(which.upper())
         if not f:
             return {"error": f"unknown feed {which!r}"}
@@ -12254,7 +12250,7 @@ class Relay:
         """Disarm Feed A/B: stop its pull, kill the process, close the port (frees
         bandwidth): mirrors pov_stop. Manual-mode only (#492)."""
         if not self.manual_feed_arm:
-            return {"error": "manual feed arm disabled (set RACECAST_MANUAL_FEED_ARM=1)"}
+            return {"error": "the relay auto-arms its feeds (Feed arming is Auto in the Control Center settings)"}
         f = self.feeds.get(which.upper())
         if not f:
             return {"error": f"unknown feed {which!r}"}

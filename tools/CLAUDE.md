@@ -672,8 +672,11 @@ service log (each distinct line once, with its count), a missing screenshot.
 
 Writing scenarios against the relay:
 - A cockpit submission names the stint by its Schedule label: `stint = "Stint 2"`, not `2`.
-- Feeds start disarmed (`RACECAST_MANUAL_FEED_ARM` is on by default): a feed pulls only after
-  `GET /feed/A/activate` (the director's arm), so arm it before checking the program picture.
+- The stack pins auto-arm (`RACECAST_MANUAL_FEED_ARM=0`): a feed pulls its stint as soon as
+  the link is in the Schedule, so no step arms one. Before a program check or a handover,
+  wait for the feed with a check such as `relay.status.feeds.A.state == 'serving'`, or
+  `relay.status.handover_next.stint == N` plus
+  `relay.status.feeds[relay.status.handover_next.feed].state == 'serving'` for the incoming feed.
 - The relay's feed cover hides a feed for about 25 s after it starts, so a program identity
   check needs a timeout of a minute or more.
 - A new lobby's driver takes a team over only after standing in the box for the relay's box
@@ -795,7 +798,7 @@ action and acts on the controls a person uses; the drivers have no page.
 | Role (`role =`) | Surface | Actions (`do =`) |
 |---|---|---|
 | `producer` | Control Center `/` | `open`, `pick_track` (track), `race_settings` (formation, finish_mode, laps), `start_event` (stint, qualifying), `stop_event`, `relay_restart` |
-| `director` | Director Panel `/panel` | `open`, `approve_link` (stint; `area = "schedule"` approves it in the Schedule area's pending list, which also holds the stint on air and a qualifying link), `arm_feed` (feed), `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode` (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name), `play` (media: intro, trailer or outro; returns at the end of the loop the clip plays, from OBS's `mediaDuration` and `mediaCursor` read after the air light: the panel shows no media state and the clips loop), `view` (area) |
+| `director` | Director Panel `/panel` | `open`, `approve_link` (stint; `area = "schedule"` approves it in the Schedule area's pending list, which also holds the stint on air and a qualifying link), `next`, `scene` (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode` (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name), `play` (media: intro, trailer or outro; returns at the end of the loop the clip plays, from OBS's `mediaDuration` and `mediaCursor` read after the air light: the panel shows no media state and the clips loop), `view` (area) |
 | `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers`, `reject_driver` (name), `correct_driver` (name, entry, stint: changed on the waiting request, then approved), `compound` (entry, code), `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason), `set_time` and `add_lap` (entry, time; qualifying mode), `note` (text, target), `confirm_dc` (entry), `class_laps` (class, laps), `view` (area) |
 | `commentator:<crew name>` | `/cockpit` with that person's token; the name must be in `[[event.commentators]]` or a Commentator of a `[sheet.tabs] Crew`, checked at load | `open`, `submit_link` (url, stint), `chat` (text) |
 | `viewer` | `/console/timing` on the event's timing link | `open`, `read` (cars) |
@@ -886,7 +889,7 @@ of the role code.
 `t_every_selector_names_something_the_shipped_page_has` fails when a page renames an id,
 class, label or button text a role uses, on every OS and without a browser.
 
-`page(role)` facts: `producer` (`summary`, `relay`, `job`), `director` (`on_air`, `arm`,
+`page(role)` facts: `producer` (`summary`, `relay`, `job`), `director` (`on_air`, `up_next`,
 `next`, `next_ready`, `next_step`, `red_flag`), `race_control` (`waiting`, `status`,
 `status_error`, `lap_line`), `commentator` (`tally`, `on_air`, `pending`, `message`), `viewer`
 (`session`, `state`, `fastest`, `rows`, `cars`), `drivers` (`registered`, `cars` with `entry`,
@@ -894,7 +897,7 @@ class, label or button text a role uses, on every OS and without a browser.
 
 `scenarios/smoke.toml` plays each role once: the producer picks the track, sets the race
 and starts the event (the relay's PID and port must stay the stack's), a commentator
-submits a link in the cockpit, the director approves it, arms Feed A and cuts to Stint
+submits a link in the cockpit, the director approves it, waits for Feed A to serve and cuts to Stint
 (`'comms1' in obs.program_channels`), shows the Standings graphic, sets the HUD's Race
 Control field and starts Part 1 (`obs.streaming`), four drivers register, Race Control
 approves them, they race, a viewer reads the public timing, Race Control calls the final

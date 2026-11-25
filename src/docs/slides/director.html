@@ -24,10 +24,11 @@ Note: Welcome to the director onboarding. As director, you drive the entire show
 
 <section data-markdown><script type="text/template">
 ## Your job in one sentence
-Choose what viewers see, and hand over at every driver change with **ARM**, **SPLIT** and **NEXT**.
+Choose what viewers see, and hand over at every driver change with **SPLIT** and **NEXT**
+(plus **ARM** when the producer runs manual arm).
 The producer only starts and stops; everything in between is yours.
 
-Note: Here is your job in one sentence. You choose what the viewers see, and at every driver change you hand over with three keys. Arm the next feed, cut to the splitscreen, then press next. The producer only starts and stops the show. Everything in between is yours.
+Note: Here is your job in one sentence. You choose what the viewers see, and at every driver change you hand over. Cut to the splitscreen, then press next. If the producer runs manual arm, you arm the next feed first. The producer only starts and stops the show. Everything in between is yours.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -47,7 +48,7 @@ Note: Before the event, open the Console link the producer sends you. It works o
 
 ![Director Panel](assets/img/director-panel.png)
 
-**Navigation** (Handover, Graphics, HUD, Intermission, Cues, Audio; Race, Broadcast, Schedule, Setup, Troubleshoot) · **live column** with preview, PGM keys, **ARM**, **NEXT** · **workspace** · **chat rail**.
+**Navigation** (Handover, Graphics, HUD, Intermission, Cues, Audio; Race, Broadcast, Schedule, Setup, Troubleshoot) · **live column** with preview, PGM keys, **NEXT** (and **ARM** with manual arm) · **workspace** · **chat rail**.
 [Director guide](https://github.com/jegr78/gt-racing-broadcast/wiki/Director#the-director-panel)
 
 Note: This is the Director Panel. It is a fixed frame of four columns. On the left, the navigation lists the areas. Handover, Graphics, H U D, Cues and Audio are the on-air areas. Race, Broadcast, Schedule, Setup and Troubleshoot are the operations areas. Each one carries a status dot and a short reason. The live column holds the program preview, the scene keys and the handover keys Arm and Next. The middle shows the area you picked, with a next step line above it. On the right, the chat rail shows the crew chat and the broadcast chat. On a phone the page becomes one column.
@@ -64,12 +65,12 @@ Note: You can also drive the same actions from the Web Buttons on a tablet, powe
 
 <section data-markdown><script type="text/template">
 ## The event flow
-The show is a loop: go live, then at each driver change arm the next feed, hand over and
-re-dress the scene. The steps follow.
+The show is a loop: go live, then at each driver change wait for the next feed, hand over
+and re-dress the scene. The steps follow.
 
 ![Event flow](assets/img/diagrams/director-event-flow.svg)
 
-Note: The show is a loop. You go live, and then at each driver change you arm the next feed, hand over and re-dress the scene. A red flag can interrupt the loop at any time. The individual steps follow on the next slides.
+Note: The show is a loop. You go live, and then at each driver change you wait for the next feed, hand over and re-dress the scene. A red flag can interrupt the loop at any time. The individual steps follow on the next slides.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -82,15 +83,15 @@ Note: Step one is Standby to go live. Start on the Standby cover. When the produ
 
 <section data-markdown><script type="text/template">
 ### 2 · Each driver change
-1. **Enter the next link early** in the **Schedule** area. Nothing pulls yet.
-2. **ARM** the off-air feed a few minutes ahead. Wait until it is **serving** and **NEXT** turns green.
-3. Cut to **Splitscreen** with **SPLIT**.
-4. Press **NEXT** once. The relay cuts to Stint on the new feed and stops the old one.
+1. **Enter the next link early** in the **Schedule** area. With auto-arm (the default) the off-air feed starts pulling it.
+2. Manual arm only: **ARM** the off-air feed a few minutes ahead.
+3. Wait until it is **serving** and **NEXT** turns green. Cut to **Splitscreen** with **SPLIT**.
+4. Press **NEXT** once. The relay cuts to Stint on the new feed; with manual arm it stops the old one.
 
-On the Companion buttons: **ARM A** / **ARM B**, **SPLIT**, **Feeds Next**. NEXT before serving cuts nothing.
+On the Companion buttons: **SPLIT**, **Feeds Next**. NEXT before serving cuts nothing.
 [At a driver change](https://github.com/jegr78/gt-racing-broadcast/wiki/Director#at-a-driver-change)
 
-Note: Step two happens at each driver change. First, enter the next link early in the Schedule area. It just sits there, and nothing pulls yet. A few minutes before the swap, press Arm. It always targets the off-air feed. The relay starts pulling that stream, which takes ten to thirty seconds. The key turns amber while the feed starts and green once it is serving, and Next turns green with it. Then cut to the splitscreen with Split. Finally press Next once. The relay cuts the program back to Stint on the new commentator, switches the audio, sets the H U D, and stops the outgoing feed. On the Companion buttons the same steps are Arm A or Arm B, Split, then Feeds Next. If you press Next before the feed is serving, nothing is cut and the current program stays on air.
+Note: Step two happens at each driver change. First, enter the next link early in the Schedule area. With auto-arm, the default, the off-air feed starts pulling it right away, which takes ten to thirty seconds, and the Handover area shows it warming up, then running warm. If the producer runs manual arm, nothing pulls yet: a few minutes before the swap, press Arm. It always targets the off-air feed, and the key turns amber while the feed starts and green once it is serving. Either way, wait until Next turns green. Then cut to the splitscreen with Split. Finally press Next once. The relay cuts the program back to Stint on the new commentator, switches the audio and sets the H U D. With manual arm it also stops the outgoing feed. On the Companion buttons the same steps are Split, then Feeds Next. If you press Next before the feed is serving, nothing is cut and the current program stays on air.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -225,7 +226,7 @@ Note: When things go wrong, for example a black feed or an unresponsive panel, w
 
 <section data-markdown><script type="text/template">
 ## Recap
-- At every driver change: link early, **ARM**, wait for serving, **SPLIT**, **NEXT**.
+- At every driver change: link early, wait for serving (**ARM** first with manual arm), **SPLIT**, **NEXT**.
 - Dress the scene; take or decline crew graphic requests.
 - **RED FLAG** holds the race; **Restart released** ends the hold.
 - Only you put the driver dashboard on air.
@@ -234,7 +235,7 @@ Note: When things go wrong, for example a black feed or an unresponsive panel, w
 Go deeper: [Who does what](https://github.com/jegr78/gt-racing-broadcast/wiki/Who-does-what) ·
 [Director guide](https://github.com/jegr78/gt-racing-broadcast/wiki/Director)
 
-Note: To recap. At every driver change, enter the link early, arm the off-air feed, wait until it serves, cut to the splitscreen and press Next. Dress the scene, and take or decline the crew's graphic requests. The red flag holds the race, and Restart released ends the hold. Only you put the driver dashboard on air. Cue your commentators, and cut to the interview at the end. To go deeper, see the Who does what page and the Director guide.
+Note: To recap. At every driver change, enter the link early, arm the off-air feed if the producer runs manual arm, wait until it serves, cut to the splitscreen and press Next. Dress the scene, and take or decline the crew's graphic requests. The red flag holds the race, and Restart released ends the hold. Only you put the driver dashboard on air. Cue your commentators, and cut to the interview at the end. To go deeper, see the Who does what page and the Director guide.
 </script></section>
 
 </div></div>

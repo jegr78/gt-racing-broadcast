@@ -456,9 +456,8 @@ class ProducerRole(Surface):
 
 @register
 class DirectorRole(LiveColumn, CrewChat, Surface):
-    """The director on the Director Panel: `approve_link` (stint, area), `arm_feed` (feed),
-    `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby,
-    Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode`
+    """The director on the Director Panel: `approve_link` (stint, area), `next`, `scene`
+    (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode`
     (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text,
     target, level), `chat` (text, name), `play` (media: intro, trailer or outro), `view`
     (area), `fit`."""
@@ -498,29 +497,6 @@ class DirectorRole(LiveColumn, CrewChat, Surface):
                       "/submissions/approve", f"APPROVE {stint}")
         self.until(lambda: not self.count(row), f"{stint}: the submission approved")
         return {"stint": stint}
-
-    def act_arm_feed(self, args):
-        feed = str(args.get("feed", "")).upper()
-        if feed not in ("A", "B"):
-            raise StepError("arm_feed needs args.feed = 'A' or 'B'")
-        self.area("fault")
-        self.answered(lambda: self.click(self.sel("feed_arm", feed=feed), f"ARM feed {feed}"),
-                      f"/feed/{feed}/activate", f"ARM feed {feed}")
-        state = self.sel("feed_state", feed=feed)
-        self.until(lambda: "STOP" not in self.text(state), f"feed {feed} armed")
-        return {"feed": feed, "state": self.text(state)}
-
-    def act_arm(self, args):
-        arm = self.sel("arm")
-        self.control(arm, "ARM")
-        label = self.text(arm)
-        feed = self.attr(arm, "data-feed")
-        if self.attr(arm, "data-on") != "1":
-            raise StepError(f"ARM: the button offers no arming, it reads {label!r}")
-        self.answered(lambda: self.click(arm, "ARM"), f"/feed/{feed}/activate", "ARM")
-        self.until(lambda: {"starting", "ready"} & set(self._classes(arm)) and self.text(arm) != label,
-                   f"the panel showing feed {feed} armed")
-        return {"feed": feed, "label": label, "shows": self.text(arm)}
 
     def act_next(self, args):
         try:
@@ -680,7 +656,7 @@ class DirectorRole(LiveColumn, CrewChat, Surface):
 
     def facts(self):
         return {"on_air": self.text(self.sel("on_air")),
-                "arm": self.text(self.sel("arm")), "next": self.text(self.sel("next_sub")),
+                "up_next": self.text(self.sel("up_next")), "next": self.text(self.sel("next_sub")),
                 "next_ready": bool(self.count(self.sel("next_ready"))),
                 "next_step": self.text(self.sel("next_step")),
                 "red_flag": "on" in self._classes(self.sel("red_flag"))}

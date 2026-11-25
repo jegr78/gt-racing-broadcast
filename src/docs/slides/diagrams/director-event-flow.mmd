@@ -1,7 +1,7 @@
 flowchart LR
   A["Standby cover"] --> B["Go live"]
   B --> C["Driver change?"]
-  C -->|link early| K["ARM off-air feed"]
+  C -->|link early| K["Off-air feed warm (ARM if manual arm)"]
   K -->|serving| S["SPLIT, then NEXT"]
   S --> E["Scene + graphics"]
   E --> F["Cue commentators"]

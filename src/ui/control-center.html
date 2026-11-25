@@ -677,6 +677,23 @@
             <button id="gt7data-update" onclick="updateGt7Data()" title="Fetch the latest car and track data now; a running relay uses it within a minute">
               <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Update now</button></div>
         </section>
+        <div class="viewhead endurance-only"><h3>Feeds</h3><span class="sub">how Feed A and Feed B start their stints. Shared across all leagues</span></div>
+        <section class="endurance-only">
+          <div class="row"><span class="name">Feed arming</span>
+            <select id="feed-arm" style="flex:1" aria-label="Feed arming">
+              <option value="auto">Auto-arm (default)</option>
+              <option value="manual">Manual arm</option>
+            </select>
+            <button id="feed-arm-save" onclick="saveFeedArm()">Save</button></div>
+          <p class="envhint" id="feed-arm-old" hidden>Set by an older template: switch to Auto-arm if you want the new default.</p>
+          <p class="envhint" id="feed-arm-hint">Auto-arm: the off-air feed pulls the next stint as soon as its link
+            is in the Schedule, so it runs warm before the handover. Manual arm: a feed pulls only after the Director
+            presses ARM in the Director Panel, and NEXT stops the outgoing feed, which saves this computer's bandwidth.</p>
+          <p class="envhint" id="feed-arm-status" hidden></p>
+          <p class="envhint">Stored as RACECAST_MANUAL_FEED_ARM in the .env (off = auto, on = manual). A machine set
+            up before auto-arm became the default keeps manual arm from its .env until you switch it here. A value
+            set in this computer's environment wins over the .env. The relay reads it when it starts.</p>
+        </section>
         <div class="viewhead"><h3>Overlay fonts</h3><span class="sub">machine-wide font library for the Overlay Builder. Shared across all leagues</span>
           <span class="vhbtns">
           <button id="font-restore" onclick="restoreBundledFonts()" title="Overwrite the fonts that ship with this install, in the library and in every league profile">
@@ -2635,6 +2652,10 @@ async function loadSettings(force) {
   const c = $('envrows');
   c.textContent = '';
   d.entries.forEach(e => c.appendChild(settingsRow(e.key, e.value)));
+  const arm = $('feed-arm');
+  if (arm.value === (arm.dataset.saved || 'auto')) arm.value = feedArmMode(d.entries);  // keeps an unsaved pick
+  arm.dataset.saved = feedArmMode(d.entries);
+  $('feed-arm-old').hidden = !feedArmFromTemplate(d.entries);
   const fwd = d.entries.find(e => e.key === GT7_FORWARD_ENV);
   const field = $('gt7-fwd');
   if (field.value === (field.dataset.saved || '')) field.value = fwd ? fwd.value : '';  // keeps unsaved input
@@ -2775,6 +2796,33 @@ async function saveGt7Forward(){
       loadSettings();
     } else { hint.textContent = 'Could not save: ' + (d.error || 'unknown error'); }
   }catch(e){ hint.textContent = 'Save failed: ' + e; }
+}
+
+// The relay's own parse: only a truthy RACECAST_MANUAL_FEED_ARM means manual arm.
+function feedArmMode(entries) {
+  const e = entries.find(x => x.key === 'RACECAST_MANUAL_FEED_ARM');
+  return e && ['1', 'true', 'yes', 'on'].includes(String(e.value).trim().toLowerCase()) ? 'manual' : 'auto';
+}
+
+// The old .env.example shipped RACECAST_MANUAL_FEED_ARM=1; the Control Center writes on/off.
+function feedArmFromTemplate(entries) {
+  const e = entries.find(x => x.key === 'RACECAST_MANUAL_FEED_ARM');
+  return !!e && String(e.value).trim() === '1';
+}
+
+async function saveFeedArm(){
+  const status = $('feed-arm-status');
+  status.hidden = false;
+  try{
+    const r = await fetch('/api/feed-arm', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({mode: $('feed-arm').value})});
+    const d = await r.json();
+    if(d.ok){
+      $('feed-arm').dataset.saved = d.mode;
+      status.textContent = (d.mode === 'manual' ? 'Saved manual arm' : 'Saved auto-arm') + ', restart the relay to apply.';
+      loadSettings();
+    } else { status.textContent = 'Could not save: ' + (d.error || 'unknown error'); }
+  }catch(e){ status.textContent = 'Save failed: ' + e; }
 }
 
 // Machine-wide overlay font library (General Settings)

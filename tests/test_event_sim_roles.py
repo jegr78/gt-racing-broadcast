@@ -295,7 +295,7 @@ def fails(fn, *needles):
 # -- every role, every selector ---------------------------------------------------
 def t_the_registry_has_every_party_and_its_actions():
     want = {"producer": {"open", "pick_track", "race_settings", "start_event", "stop_event", "relay_restart"},
-            "director": {"open", "approve_link", "arm_feed", "arm", "next", "scene", "red_flag",
+            "director": {"open", "approve_link", "next", "scene", "red_flag",
                          "show_dashboard", "cue", "chat", "graphic", "pov", "hud", "mode", "start_part",
                          "end_part", "fit", "view", "play"},
             "race_control": {"open", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
@@ -973,38 +973,8 @@ def t_every_control_action_is_timed_with_what_it_pressed():
     assert failed and not failed[0]["ok"], f"a control that never showed is recorded as failed: {failed}"
 
 
-def t_arm_refuses_a_button_that_would_stop_the_feed():
+def t_scene_names_its_key():
     role, page, _ = make(party.DirectorRole)
-    arm = page.add("#armBtn", text="FEED B SERVING · STOP", attrs={"data-feed": "B", "data-on": "0", "class": "k ready"})
-    fails(lambda: role.do("arm", {}), "offers no arming", "SERVING")
-    assert "#armBtn" not in page.clicks
-    arm.text, arm.attrs = "ARM → STINT 2 (FEED B)", {"data-feed": "B", "data-on": "1", "class": "k armkey"}
-
-    def click():
-        page.respond("/feed/B/activate")
-        arm.attrs["class"] = "k armkey starting"
-    arm.on_click = click
-    fails(lambda: role.do("arm", {}), "the panel showing feed B armed")
-
-    def armed():
-        arm.text, arm.attrs = "STARTING FEED B … STOP", {"data-feed": "B", "data-on": "0", "class": "k armkey starting"}
-    arm.text, arm.attrs = "ARM → STINT 2 (FEED B)", {"data-feed": "B", "data-on": "1", "class": "k armkey"}
-    arm.on_click = lambda: (page.respond("/feed/B/activate"), page.after(1.5, armed))
-    assert role.do("arm", {}) == {"feed": "B", "label": "ARM → STINT 2 (FEED B)", "shows": "STARTING FEED B … STOP"}, \
-        "ARM returns once the panel's own label shows the feed armed"
-
-
-def t_arm_feed_and_scene_name_their_key():
-    role, page, _ = make(party.DirectorRole)
-    fails(lambda: role.do("arm_feed", {"feed": "C"}), "'A' or 'B'")
-    page.add('.navbtn[data-area="fault"]')
-    page.add("#stA", text="A S1 STOP")
-
-    def arm():
-        page.respond("/feed/A/activate")
-        page.els["#stA"].text = "A S1 IDLE"
-    page.add('#feedQuality .armbtn[data-feed="A"][data-on="1"]', on_click=arm)
-    assert role.do("arm_feed", {"feed": "a"}) == {"feed": "A", "state": "A S1 IDLE"}
     fails(lambda: role.do("scene", {"scene": "Nowhere"}), "0 matching scene keys")
     key = '#pgmBus button.k:has-text("STINT")'
 
@@ -2204,9 +2174,10 @@ def t_the_full_scenario_plays_the_twelve_chapters_of_the_storyboard():
     submit = first(lambda s: s.role == "commentator:Comms 1" and s.do == "submit_link", "submits the first link")
     approve = first(lambda s: s.do == "approve_link" and s.args.get("stint") == submit.args["stint"],
                     "approves the first link")
-    arm_a = first(lambda s: s.do == "arm_feed" and s.args.get("feed") == "A", "arms feed A")
+    warm_a = first(lambda s: s.do == "view" and "relay.status.feeds.A.state == 'serving'" in s.expect,
+                   "waits for feed A to run warm")
     on_air = first(lambda s: s.do == "scene" and s.args.get("scene") == "Stint", "puts Comms 1 on program")
-    assert submit.index < approve.index < arm_a.index < on_air.index, "the first link is approved, then armed"
+    assert submit.index < approve.index < warm_a.index < on_air.index, "the first link is approved, then runs warm"
     page = first(lambda s: s.role == "driver" and s.do == "register", "registers on the invite page")
     field = first(lambda s: s.role == "drivers" and s.do == "register", "registers the other drivers")
     assert page.index < field.index, "a driver registers on the invite page, the others follow"

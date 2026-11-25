@@ -2,7 +2,7 @@
 # stint 2 is on air with Comms 2 when the relay dies without a stop. OBS keeps streaming.
 # The producer presses a plain Start event, which leaves the live program alone:
 # the relay comes back on stint 2 with the same driver codes, the drivers' telemetry counts
-# again without a new approval, the director arms the feed and Comms 2 is back on program.
+# again without a new approval, Feed A auto-arms and Comms 2 is back on program.
 # Stint 3 then runs to the finish.
 description = "Relay killed in stint 2; a plain Start event resumes the stint and the driver codes."
 max_minutes = 14
@@ -59,15 +59,17 @@ do = "start_event"
 expect = ["obs.scene == 'Standby'", "relay.up"]
 
 [[step]]
-id = "arm_a"
+id = "warm_a"
 at = "after:start_event"
 role = "director"
-do = "arm_feed"
-args = { feed = "A" }
+do = "view"
+args = { area = "handover" }
+expect = ["relay.status.feeds.A.state == 'serving'"]
+timeout = "90s"
 
 [[step]]
 id = "stint1_on_air"
-at = "after:arm_a"
+at = "after:warm_a"
 role = "director"
 do = "scene"
 args = { scene = "Stint" }
@@ -129,14 +131,18 @@ expect = ["page('drivers').standing == 4"]
 timeout = "90s"
 
 [[step]]
-id = "arm_b"
+id = "warm_b"
 at = "after:box1"
 role = "director"
-do = "arm"
+do = "view"
+args = { area = "handover" }
+expect = ["relay.status.handover_next.stint == 2",
+          "relay.status.feeds[relay.status.handover_next.feed].state == 'serving'"]
+timeout = "90s"
 
 [[step]]
 id = "next2"
-at = "after:arm_b"
+at = "after:warm_b"
 role = "director"
 do = "next"
 expect = ["'comms2' in obs.program_channels", "'comms1' not in obs.program_channels",
@@ -194,17 +200,10 @@ expect = ["relay.up", "relay.status.live.stint == 2", "relay.status.mode == 'rac
           "obs.streaming", "obs.scene == 'Stint'"]
 timeout = "30s"
 
-# The relay comes back with stint 2 on Feed A and its feeds stopped under manual arm.
-[[step]]
-id = "rearm"
-at = "after:restart_event"
-role = "director"
-do = "arm_feed"
-args = { feed = "A" }
-
+# The relay comes back with stint 2 on Feed A, which auto-arms and pulls it again.
 [[step]]
 id = "stint2_back"
-at = "after:rearm"
+at = "after:restart_event"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
@@ -242,14 +241,18 @@ expect = ["page('drivers').standing == 4"]
 timeout = "90s"
 
 [[step]]
-id = "arm3"
+id = "warm3"
 at = "after:box2"
 role = "director"
-do = "arm"
+do = "view"
+args = { area = "handover" }
+expect = ["relay.status.handover_next.stint == 3",
+          "relay.status.feeds[relay.status.handover_next.feed].state == 'serving'"]
+timeout = "90s"
 
 [[step]]
 id = "next3"
-at = "after:arm3"
+at = "after:warm3"
 role = "director"
 do = "next"
 expect = ["'comms3' in obs.program_channels", "'comms2' not in obs.program_channels"]
