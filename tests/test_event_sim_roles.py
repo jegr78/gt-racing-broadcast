@@ -921,6 +921,22 @@ def t_approve_link_waits_for_link_ready():
     assert page.clicks[0] == '.navbtn[data-area="handover"]', "the director opens the Handover area first"
 
 
+def t_approve_link_in_the_schedule_area_takes_a_link_the_handover_does_not_list():
+    role, page, _ = make(party.DirectorRole)
+    page.add('.navbtn[data-area="schedule"]')
+    row = page.add('#subsBody tr:has(td.rn:text-is("Qualifying"))', count=0)
+    page.after(0.5, lambda: setattr(row, "count", 1))
+
+    def approve():
+        page.respond("/submissions/approve")
+        page.after(0.5, lambda: setattr(row, "count", 0))
+    page.add('#subsBody tr:has(td.rn:text-is("Qualifying")) button.approve', on_click=approve)
+    assert role.do("approve_link", {"stint": "Qualifying", "area": "schedule"}) == {"stint": "Qualifying"}
+    assert row.count == 0, "the action returns once the submission left the pending list"
+    assert page.clicks[0] == '.navbtn[data-area="schedule"]', "the director opens the Schedule area first"
+    fails(lambda: role.do("approve_link", {"stint": 2, "area": "setup"}), "area is handover or schedule")
+
+
 def t_next_needs_a_serving_feed_and_shows_the_new_stint():
     role, page, _ = make(party.DirectorRole)
     page.add("#nextSub", text="arm stint 2 first")
@@ -2093,6 +2109,180 @@ def t_the_bundled_events_run_three_lobbies_and_check_each_commentator_on_program
         assert free == [], f"{name}: without a browser these steps would not be skipped with their chain: {free}"
         assert loaded.steps[-1].do == "stop_event", f"{name}: Stop event ends the relay, so it is the last step"
         assert all(s.expect for s in loaded.steps if s.role == "api"), f"{name}: every probe step asserts something"
+
+
+FULL_SHOTS = {   # the deck's images as `full` takes them: name -> (step id, role, element)
+    'approval-requests-1': ('desk_requests', 'race_control', '.area[data-area="drivers"]'),
+    'approval-approved-1': ('approve_drivers', 'race_control', '.area[data-area="drivers"]'),
+    'quali-desk-1': ('quali_desk', 'race_control', '.area[data-area="qualifying"]'),
+    'quali-public-1': ('quali_timing', '', ''),
+    'quali-cockpit-1': ('shot_quali_cockpit_1', 'commentator:Comms 1', '#timingCard'),
+    'quali-tower-gap-1': ('shot_quali_tower_gap_1', 'page:overlay', '#drivers-tower'),
+    'formation-1': ('shot_formation_1', 'page:overlay', ''),
+    'formation-2': ('shot_formation_2', 'viewer', ''),
+    'start-1': ('shot_start_1', 'race_control', '.area[data-area="race"] .tbl'),
+    'start-2': ('shot_start_2', 'page:overlay', ''),
+    'new-cockpit-timing-1': ('shot_new_cockpit_timing_1', 'commentator:Comms 1', '#timingCard'),
+    'pits-1': ('shot_pits_1', 'race_control', '.area[data-area="race"] .tbl'),
+    'pits-2': ('shot_pits_2', 'page:overlay', ''),
+    'tower-full-1': ('shot_tower_full_1', 'page:overlay', '#drivers-tower'),
+    'dc-suspected-1': ('shot_dc_suspected_1', 'race_control', '.area[data-area="race"] .tbl'),
+    'dc-suspected-2': ('shot_dc_suspected_2', 'race_control', '.area[data-area="race"] .tbl >> nth=1'),
+    'dc-tower-1': ('shot_dc_tower_1', 'page:overlay', '#drivers-tower'),
+    'dc-decided-1': ('desk_events', 'race_control', '.area[data-area="race"] .tbl >> nth=1'),
+    'dc-tower-2': ('shot_dc_tower_2', 'page:overlay', '#drivers-tower'),
+    'dc-onair-3': ('dc_public', '', ''),
+    'est-onair-1': ('shot_est_onair_1', 'page:overlay', '#drivers-tower'),
+    'est-desk-1': ('estimate', 'race_control', '.area[data-area="corrections"]'),
+    'est-onair-2': ('shot_est_onair_2', 'page:overlay', '#drivers-tower'),
+    'est-onair-3': ('shot_est_onair_3', 'viewer', ''),
+    'est-onair-4': ('shot_est_onair_4', 'page:overlay', '#drivers-map'),
+    'new-dnf-1': ('desk_dnf', 'race_control', '.area[data-area="race"] .tbl'),
+    'new-dnf-6': ('shot_new_dnf_6', 'viewer', ''),
+    'new-dnf-tower-1': ('shot_new_dnf_tower_1', 'page:overlay', '#drivers-tower'),
+    'swaps-1': ('shot_swaps_1', 'race_control', '.area[data-area="race"] .tbl'),
+    'swaps-2': ('shot_swaps_2', 'page:overlay', '#drivers-map'),
+    'swaps-3': ('shot_swaps_3', 'race_control', '.area[data-area="race"] .tbl'),
+    'director-1': ('shot_director_1', 'director', ''),
+    'dc-rejoin-desk-1': ('shot_dc_rejoin_desk_1', 'race_control', '.area[data-area="race"] .tbl'),
+    'dc-rejoin-tower-1': ('shot_dc_rejoin_tower_1', 'page:overlay', '#drivers-tower'),
+    'dc-rejoin-public-1': ('shot_dc_rejoin_public_1', 'viewer', ''),
+    'dc-states-3': ('shot_dc_states_3', 'race_control', '.area[data-area="race"] .tbl >> nth=1'),
+    'lapped-1': ('shot_lapped_1', 'race_control', '.area[data-area="race"] .tbl'),
+    'restart-1': ('red_flag', 'race_control', '.area[data-area="race"] .tbl'),
+    'redflag-1': ('shot_redflag_1', 'page:overlay', ''),
+    'redflag-2': ('shot_redflag_2', 'viewer', ''),
+    'restart-2': ('restart_released', 'race_control', '.area[data-area="race"] .tbl'),
+    'restart-3': ('shot_restart_3', 'race_control', '.area[data-area="race"] .tbl'),
+    'restart-tower-1': ('shot_restart_tower_1', 'page:overlay', '#drivers-tower'),
+    'finallap-2': ('shot_finallap_2', 'page:overlay', ''),
+    'finallap-1': ('desk_final', 'race_control', '.area[data-area="race"] .tbl'),
+    'chequered-1': ('shot_chequered_1', 'page:overlay', ''),
+    'chequered-2': ('shot_chequered_2', 'viewer', ''),
+    'finished-1': ('shot_finished_1', 'page:overlay', ''),
+    'finished-2': ('shot_finished_2', 'viewer', ''),
+    'new-cockpit-finished': ('shot_new_cockpit_finished', 'commentator:Comms 3', '#timingCard'),
+}
+FULL_CHAPTERS = ["Start the event", "First link", "Drivers sign up", "On air: qualifying", "Race start",
+                 "Stint 1 at the desk", "Next commentator", "Driver swap 1", "Stint 2 at the desk",
+                 "Driver swap 2", "The finish", "Off air"]
+
+
+def _full():
+    return scenario.load(os.path.join(SIM, "scenarios", "full.toml"), REG)
+
+
+def t_the_full_scenario_keeps_the_decks_50_shots():
+    shots = {s.shot.name: (s.id, s.shot.role, s.shot.element) for s in _full().steps if s.shot}
+    assert len(FULL_SHOTS) == 50, "the deck's race-day subset"
+    assert shots == FULL_SHOTS, \
+        f"each name stays at its step, role and element: {sorted(set(shots.items()) ^ set(FULL_SHOTS.items()))}"
+
+
+def t_the_full_scenario_plays_the_twelve_chapters_of_the_storyboard():
+    steps = _full().steps
+    at = {s.id: s.index for s in steps}
+    assert [s.chapter for s in steps if s.chapter] == FULL_CHAPTERS, [s.chapter for s in steps if s.chapter]
+    quiet = [s.id for s in steps if (REG[scenario.role_kind(s.role)].recorded or s.role == "drivers")
+             and s.do not in ("open", "view") and not s.caption]
+    assert quiet == [], f"every party step the film shows has a caption: {quiet}"
+    assert all(s.caption for s in steps if s.chapter), "each chapter opens on a captioned step"
+
+    def first(pred, what):
+        found = [s for s in steps if pred(s)]
+        assert found, f"full has no step that {what}"
+        return found[0]
+    submit = first(lambda s: s.role == "commentator:Comms 1" and s.do == "submit_link", "submits the first link")
+    approve = first(lambda s: s.do == "approve_link" and s.args.get("stint") == submit.args["stint"],
+                    "approves the first link")
+    arm_a = first(lambda s: s.do == "arm_feed" and s.args.get("feed") == "A", "arms feed A")
+    on_air = first(lambda s: s.do == "scene" and s.args.get("scene") == "Stint", "puts Comms 1 on program")
+    assert submit.index < approve.index < arm_a.index < on_air.index, "the first link is approved, then armed"
+    page = first(lambda s: s.role == "driver" and s.do == "register", "registers on the invite page")
+    field = first(lambda s: s.role == "drivers" and s.do == "register", "registers the other drivers")
+    assert page.index < field.index, "a driver registers on the invite page, the others follow"
+    everyone = at["approve_drivers"]
+    for do in ("correct_driver", "reject_driver"):
+        assert first(lambda s, do=do: s.do == do, do).index < everyone, f"{do} before approve_drivers takes the rest"
+    plays = [(s.args.get("media"), s.index) for s in steps if s.do == "play"]
+    assert [m for m, _ in plays] == ["intro", "trailer", "outro"], plays
+    assert plays[1][1] < on_air.index and plays[2][1] > at["final_lap"] and plays[2][1] < at["off_air"], \
+        "intro and trailer before the program, the outro after the finish"
+    pits = [s for s in steps if s.role == "drivers" and s.do == "pit"]
+    codes = [s for s in steps if s.do == "compound"]
+    assert len(pits) == len(codes) == 2, (pits, codes)
+    for pit, code, (lo, hi) in zip(pits, codes, (("racing", "next2"), ("next2", "next3")), strict=True):
+        assert at[lo] < pit.index < code.index < at[hi], f"a pit stop and its compound between {lo} and {hi}"
+    assert codes[0].args["entry"] == codes[1].args["entry"] and codes[0].args["code"] != codes[1].args["code"], \
+        f"stint 2's stop changes the compound: {[c.args for c in codes]}"
+    for box, nxt, (out, inn) in (("box2", "next2", ("comms1", "comms2")), ("box3", "next3", ("comms2", "comms3"))):
+        split = [s for s in steps if at[box] < s.index < at[nxt] and s.do == "scene" and s.args.get("scene") == "Split"]
+        assert split, f"the splitscreen is on program while the cars box, before {nxt}"
+        back = [s for s in steps if s.index > at[nxt] and s.do == "scene" and s.args.get("scene") == "Stint"][:1]
+        assert back and f"'{inn}' in obs.program_channels" in back[0].expect \
+            and f"'{out}' not in obs.program_channels" in back[0].expect, \
+            f"after {nxt} the director cuts back to the stint, which shows only {inn}: {back}"
+
+
+def t_the_full_scenario_shows_each_switch_in_four_quarters_with_both_cockpits_open():
+    steps = _full().steps
+    four = [s for s in steps if s.focus and len(s.focus) == 4]
+    assert [s.id for s in four] == ["next2", "next3"], [s.id for s in four]
+    for step, (out, inn) in zip(four, (("Comms 1", "Comms 2"), ("Comms 2", "Comms 3")), strict=True):
+        cockpits = [f"commentator:{out}", f"commentator:{inn}"]
+        assert set(step.focus) == {"director", "program", *cockpits}, step.focus
+        for role in cockpits:
+            assert any(s.role == role and s.index < step.index for s in steps), f"{role} is open at {step.id}"
+
+
+def t_every_focus_of_the_full_scenario_shows_an_open_page():
+    steps = _full().steps
+    early = [(s.id, v) for s in steps for v in s.focus or () if v != "program"
+             and not any(o.role == v and o.index <= s.index for o in steps)]
+    assert early == [], f"a focus names a page no step has opened yet: {early}"
+    blind = [s.id for s in steps if s.caption and not s.focus and not REG[scenario.role_kind(s.role)].recorded]
+    assert blind == [], f"a captioned step of a role without a page names the views to enlarge: {blind}"
+
+
+def t_the_full_scenarios_driver_page_seats_drive_with_an_approved_code():
+    steps = _full().steps
+    field = [s for s in steps if s.role == "drivers" and s.do == "register"][0]
+    skip = {(seat["entry"], seat["stint"]) for seat in field.args.get("skip", [])}
+    assert len(skip) == 3 and {st for _, st in skip} == {1, 2, 3}, f"one page seat per stint: {skip}"
+    page = [s for s in steps if s.role == "driver" and s.do == "register"]
+    names = [s.args["name"] for s in page]
+    assert len(set(names)) == len(names), f"the desk finds a request by its name: {names}"
+    decided = {s.args["name"]: s for s in steps if s.do in ("correct_driver", "reject_driver")}
+    checks = " ".join(e for s in steps for e in s.expect + s.soft)
+    for entry, stint in sorted(skip):
+        regs = [s for s in page if (s.args["entry"], s.args["stint"]) == (entry, stint)]
+        assert len(regs) == 1, (f"{entry} stint {stint}: one page registration, not {len(regs)}; the page keeps "
+                                "a code under the seat the form sent, so a corrected or rejected one there drives")
+        reg, name = regs[0], regs[0].args["name"]
+        assert name == drive.driver_name(entry, stint - 1) and name not in decided, name
+        assert entry not in checks, f"{entry} is no team a check reads, so the page seat changes no expectation"
+        need = [s for s in steps if s.role == "drivers" and
+                (s.do == "start" if stint == 1 else s.do == "lobby" and s.args.get("stint") == stint)][0]
+        approved = [s for s in steps if reg.index < s.index < need.index and s.role == "race_control" and
+                    (s.do == "approve_drivers" or s.do == "approve_driver" and s.args.get("name") == name)]
+        assert approved, f"{name} is approved before {need.id} hands the car its code"
+    for name, step in decided.items():
+        reg = [s for s in page if s.args["name"] == name]
+        assert len(reg) == 1 and reg[0].index < step.index, f"{step.id} decides a request the page sent"
+
+
+def t_a_cockpit_timing_shot_finds_the_timing_area_open():
+    # The cockpit keeps its last area across reloads, and submit_link leaves it on My stint.
+    for name in sorted(f[:-5] for f in os.listdir(os.path.join(SIM, "scenarios")) if f.endswith(".toml")):
+        area = {}
+        for st in scenario.load(os.path.join(SIM, "scenarios", name + ".toml"), REG).steps:
+            if st.role.startswith("commentator:") and st.do == "submit_link":
+                area[st.role] = "stint"
+            elif st.role.startswith("commentator:") and st.do == "view":
+                area[st.role] = st.args.get("area")
+            if st.shot and st.shot.role.startswith("commentator:") and st.shot.element == "#timingCard":
+                assert area.get(st.shot.role, "timing") == "timing", \
+                    f"{name}: shot {st.shot.name} of {st.shot.role} while its {area[st.shot.role]} area is open"
 
 
 def t_the_probe_rehearsal_changes_drivers_twice_and_asserts_the_report():

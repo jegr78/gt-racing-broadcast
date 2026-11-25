@@ -218,6 +218,50 @@ def t_a_commentator_step_names_a_commentator_of_the_scenario():
     _refused([{"role": "rec", "do": "go"}], "event.commentators[0]", event=event, sheet={"tabs": dropped})
 
 
+def t_film_keys_are_checked_at_load():
+    view = {"role": "director", "do": "view", "args": {"area": "handover"}}
+    read = {"id": "read", "role": "viewer", "do": "read"}
+    scn = _scn([dict(view, caption="The director opens the handover", chapter="On air",
+                     focus=["director", "program"]), read, {"id": "go", "role": "rec", "do": "go"}])
+    first = scn.steps[0]
+    assert (first.caption, first.chapter, first.focus) == \
+        ("The director opens the handover", "On air", ["director", "program"]), "the keys reach the step"
+    assert (scn.steps[1].caption, scn.steps[1].chapter, scn.steps[1].focus) == (None, None, None), \
+        "a step without them carries none"
+    for key in ("caption", "chapter"):
+        for bad in ("", "  ", 3, ["x"]):
+            _refused([dict(view, **{key: bad})], f"{key} must be a non-empty string")
+    for bad in ("director", [], [3]):
+        _refused([dict(view, focus=bad), read], "focus must be a list of view names")
+    _refused([dict(view, focus=["director", "director"]), read], "names 'director' twice")
+    _refused([dict(view, focus=["race_control"]), read], "'race_control' is no view of this run")
+    _refused([dict(view, focus=["rec"]), read, {"id": "go", "role": "rec", "do": "go"}],
+             "'rec' is no view of this run")
+    assert _scn([view, dict(read, focus=["program"])]).steps[1].focus == ["program"], "program is always a view"
+    assert _scn([dict(view, focus=["viewer"]), read]).steps[0].focus == ["viewer"], \
+        "a view a later step opens counts too"
+
+
+def t_a_focus_names_one_two_or_four_views():
+    steps = [{"id": r, "role": r, "do": "open"} for r in ("director", "viewer", "producer", "race_control")]
+    for views in (["director"], ["director", "viewer"], ["director", "program", "viewer", "producer"]):
+        assert _scn([dict(steps[0], focus=views), *steps[1:]]).steps[0].focus == views, views
+    for views in (["director", "program", "viewer"],
+                  ["director", "program", "viewer", "producer", "race_control"]):
+        _refused([dict(steps[0], focus=views), *steps[1:]], "1, 2 or 4 views")
+
+
+def t_film_keys_change_nothing_outside_record_mode():
+    plain = [{"id": "a", "role": "rec", "do": "go"}, {"id": "b", "at": "after:a", "role": "rec", "do": "go"}]
+    film = [dict(plain[0], caption="Go", chapter="Start", focus=["program"]), dict(plain[1], caption="Again")]
+    runs = [_run(steps)[0] for steps in (plain, film)]
+    keep = ("id", "role", "do", "status", "result", "checks")
+    assert [{k: s.get(k) for k in keep} for s in runs[0]["steps"]] == \
+        [{k: s.get(k) for k in keep} for s in runs[1]["steps"]], "the keys change no step of a plain run"
+    assert "caption" not in json.dumps(runs[1]) and "Again" not in json.dumps(runs[1]), \
+        "a plain run's report carries no caption"
+
+
 def t_role_instances_share_the_kind():
     scn = _scn([{"role": "rec:Comms 2", "do": "go"}])
     assert scenario.role_kind(scn.steps[0].role) == "rec"
@@ -558,6 +602,9 @@ def t_expect_is_retried_until_true_and_slowness_is_soft():
     assert data["ok"] and late["checks"][0]["ok"], data
     assert late["checks"][0]["elapsed"] > 2
     assert any(f["severity"] == "soft" and "took" in f["message"] for f in data["findings"]), data["findings"]
+    assert late["acted"] is not None and late["started"] <= late["acted"] <= late["started"] + 0.5 \
+        and late["started"] + late["duration"] - late["acted"] > 2, \
+        f"acted is when the action returned, before its expects were awaited: {late}"
 
 
 def t_a_false_expect_is_a_hard_failure_with_its_last_value():
@@ -776,6 +823,29 @@ def t_sheet_tabs_follow_the_event():
                                 ["", "Comms 2", "Stint 2"], ["", "", "Stint 3"]], tabs["Schedule"]
     assert [r[2] for r in tabs["Configuration"][1:3]] == ["Comms 1", "Comms 2"]
     assert tabs["POV"][1] == ["sim://pov", "Dan"], "the scenario's own tabs win"
+
+
+def t_the_stint_vocabulary_holds_every_label_the_schedule_tabs_use():
+    quali = [["URL", "Streamer", "Stint"], ["", "Comms 1", "Qualifying"]]
+    scn = _scn([{"role": "rec", "do": "go"}], event={"stints": 2, "commentators": [{"name": "Comms 1", "channel": "c1"}]},
+               sheet={"tabs": {"Qualifying": quali}})
+    config = stack.sheet_tabs(scn)["Configuration"]
+    vocab = scenario._relay().parse_config_vocab(scenario._csv(config))["stint"]
+    assert vocab == ["Stint 1", "Stint 2", "Qualifying"], \
+        f"the relay writes a Schedule or Qualifying label only from the Configuration Stints column: {vocab}"
+
+
+def t_a_link_step_names_a_stint_of_the_configuration_vocabulary():
+    event = {"stints": 2, "commentators": [{"name": "Comms 1", "channel": "c1"}]}
+    submit = {"role": "commentator:Comms 1", "do": "submit_link", "args": {"url": "sim://c1", "stint": 2}}
+    approve = {"id": "ok", "role": "director", "do": "approve_link", "args": {"stint": "Stint 2"}}
+    assert _scn([submit, approve], event=event).steps, "the event's own stints are in the vocabulary"
+    _refused([dict(submit, args={"url": "sim://c1", "stint": 3})], "'Stint 3' is not in the Configuration stint",
+             event=event)
+    _refused([dict(approve, args={"stint": "Qualifying", "area": "schedule"})],
+             "'Qualifying' is not in the Configuration stint", event=event)
+    quali = {"Qualifying": [["URL", "Streamer", "Stint"], ["", "Comms 1", "Qualifying"]]}
+    _scn([dict(approve, args={"stint": "Qualifying", "area": "schedule"})], event=event, sheet={"tabs": quali})
 
 
 def t_make_home_copies_into_the_temp_dir():

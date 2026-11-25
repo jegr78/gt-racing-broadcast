@@ -456,13 +456,14 @@ class ProducerRole(Surface):
 
 @register
 class DirectorRole(LiveColumn, CrewChat, Surface):
-    """The director on the Director Panel: `approve_link` (stint), `arm_feed` (feed),
+    """The director on the Director Panel: `approve_link` (stint, area), `arm_feed` (feed),
     `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby,
     Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode`
     (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text,
     target, level), `chat` (text, name), `play` (media: intro, trailer or outro), `view`
     (area), `fit`."""
     kind = "director"
+    vocab_stint_actions = ("approve_link",)   # their `stint` is a label of the Configuration Stints column
     path, ready = "/panel", selectors.READY["DIRECTOR"]
     sources = selectors.SOURCES["DIRECTOR"]
     live_required = selectors.LIVE_REQUIRED["DIRECTOR"]
@@ -474,12 +475,28 @@ class DirectorRole(LiveColumn, CrewChat, Surface):
         return self.attr(selector, "class").split()
 
     def act_approve_link(self, args):
-        stint = stint_label(args.get("stint", ""))
+        """APPROVE a submitted link in the Handover area, or with `area = "schedule"` in the
+        Schedule area's pending list, which also holds the links the handover never lists
+        (the stint on air, qualifying)."""
+        stint, area = stint_label(args.get("stint", "")), args.get("area", "handover")
+        if area == "schedule":
+            return self._approve_submission(stint)
+        if area != "handover":
+            raise StepError(f"approve_link: area is handover or schedule, not {area!r}")
         self.area("handover")
         row = self.sel("handover_row", stint=stint)
         self.answered(lambda: self.click(self.sel("approve", stint=stint), f"APPROVE {stint}"),
                       "/submissions/approve", f"APPROVE {stint}")
         self.until(lambda: "link ready" in self.text(row), f"{stint}: link ready")
+        return {"stint": stint}
+
+    def _approve_submission(self, stint):
+        self.area("schedule")
+        row = self.sel("submission", stint=stint)
+        self.until(lambda: self.count(row) == 1, f"one pending submission for {stint}")
+        self.answered(lambda: self.click(self.sel("submission_approve", stint=stint), f"APPROVE {stint}"),
+                      "/submissions/approve", f"APPROVE {stint}")
+        self.until(lambda: not self.count(row), f"{stint}: the submission approved")
         return {"stint": stint}
 
     def act_arm_feed(self, args):
@@ -905,6 +922,7 @@ class CommentatorRole(LiveColumn, CrewChat, Surface):
     stint; it opens My stint), `chat` (text), `view` (area), `fit` (with `rows`, the
     timing cars). `page(role)` reads the tally and counts the timing rows."""
     kind = "commentator"
+    vocab_stint_actions = ("submit_link",)   # their `stint` is a label of the Configuration Stints column
     by_commentator = True
     path, ready = "/cockpit", selectors.READY["COMMENTATOR"]
     sources = selectors.SOURCES["COMMENTATOR"]

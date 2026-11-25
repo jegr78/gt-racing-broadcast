@@ -237,6 +237,7 @@ class PageRole(Role):
     when the role closes, a failed resource load a soft one. Without Playwright, `open`
     is skipped. A screenshot blacks out the invite and timing links of any page."""
     kind = "page"
+    recorded = True
     viewport = {"width": 1440, "height": 900}
     clock = staticmethod(time.monotonic)
 

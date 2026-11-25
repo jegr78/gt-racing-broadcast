@@ -385,6 +385,31 @@ def t_the_relays_race_engine_reads_the_field_as_a_race():
         f"the stop costs the car its place and counts once: {rows[-1]}"
 
 
+def t_scenario_checks_read_only_fields_a_race_row_has():
+    import re
+    import tomllib
+    wire = Wire()
+    f = field(wire, cars=1, stints=1)
+    race = race_distance.Race(f.line.trace, formation=False)
+    race.set_roster(TEAMS[:1])
+    f.start()
+    for _ in range(int(5 / drive.TICK_S)):
+        wire.now += drive.TICK_S
+        f.step(wire.now, drive.TICK_S)
+    for s in wire.samples.get("c0s0", []):
+        race.update(TEAMS[0], "c0s0", "D0S0", s)
+    known = set(race.standings(wire.now)["entries"][0]) | {"brand", "brand_name"}   # driver_race.with_brands
+    reads = re.compile(r"row\(race\.entries, *'entry', *'[^']+'\)\.(\w+)")
+    folder = os.path.join(SIM, "scenarios")
+    unknown = set()
+    for name in sorted(os.listdir(folder)):
+        with open(os.path.join(folder, name), "rb") as fh:
+            steps = tomllib.load(fh).get("step", [])
+        unknown |= {(name, m) for st in steps for e in st.get("expect", []) + st.get("soft", [])
+                    for m in reads.findall(e) if m not in known}
+    assert unknown == set(), f"/drivers/race rows have no such field, the check could never pass: {sorted(unknown)}"
+
+
 def t_the_runner_steps_on_its_clock_and_stops():
     wire = Wire()
     f = field(wire, cars=1)

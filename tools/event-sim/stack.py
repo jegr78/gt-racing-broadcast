@@ -140,12 +140,21 @@ def sheet_tabs(scn):
         c = next((c for c in comms if c.stint == n), None)
         url = f"sim://{c.channel}" if c and c.scheduled else ""
         schedule.append([url, c.name if c else "", f"Stint {n}"])
-    vocab_rows = max(stints, len(names), len(teams), len(RACE_CONTROL))
+    # The relay writes a Schedule or Qualifying row only with a label of the Stints column.
+    labels = [f"Stint {n}" for n in range(1, stints + 1)]
+    quali = scn.tabs.get("Qualifying") or [[]]
+    header = [h.strip().lower() for h in quali[0]]
+    col = header.index("stint") if "stint" in header else None
+    for row in quali[1:] if col is not None else ():
+        label = row[col].strip() if len(row) > col else ""
+        if label and label not in labels:
+            labels.append(label)
+    vocab_rows = max(len(labels), len(names), len(teams), len(RACE_CONTROL))
     classes = event_classes(scn.event, teams)
     config = [["Teams", "Stints", "Streamers", "Session", "Race Control", "Flag"] + (["Class"] if classes else [])]
     for i in range(vocab_rows):
         config.append([teams[i] if i < len(teams) else "",
-                       f"Stint {i + 1}" if i < stints else "", names[i] if i < len(names) else "",
+                       labels[i] if i < len(labels) else "", names[i] if i < len(names) else "",
                        "Race" if i == 0 else "", RACE_CONTROL[i] if i < len(RACE_CONTROL) else "",
                        "Green Flag" if i == 0 else ""] + ([classes[i] if i < len(teams) else ""] if classes else []))
     first = comms[0].name if comms else ""

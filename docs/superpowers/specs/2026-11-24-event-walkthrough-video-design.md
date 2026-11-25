@@ -65,8 +65,10 @@ in the normal CI, real league data or real race footage.
 
 ### Pace
 
-- A step with a caption plays in real time, with a lead-in and a hold after it so the
-  result is readable on every view it changes.
+- A step with a caption plays its action in real time, from `start` to `acted` in the
+  timeline, with a lead-in and a hold after it so the result is readable on every view
+  it changes. From `acted` to `end` the step only waits for its checks, and that part is
+  waiting time like any other.
 - Stretches where the scenario only waits (for a lap, a pit exit, a lobby) are sped up
   by a factor chosen so that the timing still moves continuously. No stretch is cut out:
   positions never jump.
@@ -87,8 +89,8 @@ The order is the order of `full`. New steps are marked **new**.
 | 1 | Start the event | Producer picks the track, sets the race, starts the event | Control Center |
 | 2 | First link | **new:** Comms 1 submits the stream link, the director approves it and arms feed A | Cockpit, Director |
 | 3 | Drivers sign up | **new:** a driver registers on the invite page; the others follow. Race Control approves, **new:** corrects one registration, **new:** rejects one | Driver, Race Control |
-| 4 | On air: qualifying | Director starts the part: **new:** intro, **new:** trailer, then program with Comms 1. Race Control adds qualifying laps, the public page ranks them | Program, Director, then Race Control, Timing |
-| 5 | Race start | Director switches to race mode. Formation lap, start | Program, Timing |
+| 4 | On air: qualifying | **new:** intro, **new:** trailer, then program with Comms 1. Race Control adds qualifying laps, the public page ranks them | Program, Director, then Race Control, Timing |
+| 5 | Race start | Director switches to race mode and starts the part (the relay allows a race part only in race mode). Formation lap, start | Program, Timing |
 | 6 | Stint 1 at the desk | Pit stop and **new:** tyre compound confirmed. A disconnect: suspected, confirmed, marked for rejoin. A sender stops: estimate behind another car. A retirement | Race Control, Timing |
 | 7 | Next commentator | Comms 2 submits late, the director approves and arms | Cockpit, Director |
 | 8 | Driver swap 1 | **new:** the next driver requests telemetry for stint 2 on the invite page and Race Control approves it. Cars box, splitscreen, new lobby, release, switch to stint 2 | Driver, Race Control; at the switch the four quarters: Director, Program, Cockpit Comms 1, Cockpit Comms 2 |
@@ -131,8 +133,9 @@ Three stages, each usable on its own.
 - **Intro, trailer, outro.** Generated the same way as short clips (8 to 10 s) into the
   run's media directory, where the demo collection's media sources expect them. Nothing
   is committed and nothing is downloaded.
-- **Timeline.** The run writes `timeline.json`: per step its id, role, action, start and
-  end time, caption, chapter and focus, plus each recording's start offset.
+- **Timeline.** The run writes `timeline.json`: per step its id, role, action, start
+  time, `acted` (when the action returned, before the step's checks were awaited), end
+  time, caption, chapter and focus, plus each recording's start offset.
 
 ### 2. Scenario: `full`, extended
 
@@ -154,8 +157,11 @@ New actions:
 | `driver` | `register` | registers through the invite page |
 | `commentator` | `submit_link` | exists; used for Comms 1 before the event goes on air |
 
-The deck's 50 image names and their content stay as they are. A test compares the set of
-shot names before and after, and the new steps carry no deck shot names.
+The deck's 50 image names stay, and each still shows the same situation. Numbers and lists
+inside an image may follow the extended run: 40 requests waiting instead of 42, Reserve 44
+and Driver 10-1 in the approved list, a tyre mark in the tower. A test pins each name to
+its step, role and element, not to its content, and the new steps carry no deck shot
+names. The deck images are regenerated only at the next deck update.
 
 ### 3. Render: `tools/build-event-video.py DIR`
 

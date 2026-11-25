@@ -20,6 +20,8 @@ DIRECTOR = {
     "area": '.navbtn[data-area="{area}"]',
     "approve": '#hoUpcoming .hrow:has-text("{stint}") button:has-text("APPROVE")',
     "handover_row": '#hoUpcoming .hrow:has-text("{stint}")',
+    "submission": '#subsBody tr:has(td.rn:text-is("{stint}"))',
+    "submission_approve": '#subsBody tr:has(td.rn:text-is("{stint}")) button.approve',
     "feed_arm": '#feedQuality .armbtn[data-feed="{feed}"][data-on="1"]', "feed_state": "#st{feed}",
     "arm": "#armBtn", "next": "#nextBtn", "next_ready": "#nextBtn.ready", "next_sub": "#nextSub",
     "on_air": "#liveOnAir", "next_step": "#nextStepText",

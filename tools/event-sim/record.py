@@ -145,14 +145,17 @@ class Recorder:
 
     def timeline(self, scenario, steps, start):
         """The timeline of a run whose engine started at `start` (this recorder's clock).
-        `steps` are the report's steps; their scenario steps add caption, chapter and focus."""
+        `steps` are the report's steps; their scenario steps add caption, chapter and focus.
+        A step's action ran from `start` to `acted`; from `acted` to `end` it waited for its expects."""
         by_id = {s.id: s for s in getattr(scenario, "steps", [])}
         out = []
         for s in steps:
             if s.get("started") is None:
                 continue
+            acted = s["started"] if s.get("acted") is None else s["acted"]
             row = {"id": s["id"], "role": s["role"], "action": s["do"], "status": s["status"],
-                   "start": round(s["started"], 3), "end": round(s["started"] + (s.get("duration") or 0.0), 3)}
+                   "start": round(s["started"], 3), "acted": round(acted, 3),
+                   "end": round(s["started"] + (s.get("duration") or 0.0), 3)}
             src = by_id.get(s["id"])
             for key in STEP_KEYS:
                 value = getattr(src, key, None)

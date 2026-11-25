@@ -147,15 +147,17 @@ def t_the_timeline_lists_steps_and_recording_offsets_since_the_engine_start():
     scn = SimpleNamespace(name="t", steps=[SimpleNamespace(id="a", caption="Producer starts the event",
                                                            chapter="Start the event", focus=["producer"]),
                                            SimpleNamespace(id="b")])
-    steps = [{"id": "a", "role": "producer", "do": "start_event", "status": "ok", "started": 1.0, "duration": 2.5},
+    steps = [{"id": "a", "role": "producer", "do": "start_event", "status": "ok", "started": 1.0, "duration": 2.5,
+              "acted": 1.25},
              {"id": "b", "role": "drivers", "do": "start", "status": "failed", "started": 4.0, "duration": 0.25},
              {"id": "c", "role": "x", "do": "y", "status": "skipped", "started": None, "duration": 0.0}]
     tl = rec.timeline(scn, steps, start=20.0)
     assert tl["steps"][0] == {"id": "a", "role": "producer", "action": "start_event", "status": "ok", "start": 1.0,
-                              "end": 3.5, "caption": "Producer starts the event", "chapter": "Start the event",
+                              "acted": 1.25, "end": 3.5, "caption": "Producer starts the event", "chapter": "Start the event",
                               "focus": ["producer"]}, tl["steps"][0]
-    assert set(tl["steps"][1]) == {"id", "role", "action", "status", "start", "end"}, \
+    assert set(tl["steps"][1]) == {"id", "role", "action", "status", "start", "acted", "end"}, \
         "a step without caption, chapter or focus carries none of them"
+    assert tl["steps"][1]["acted"] == tl["steps"][1]["start"], "a step that never noted its action counts as acted at once"
     assert [s["id"] for s in tl["steps"]] == ["a", "b"], "a step that never started has no place on the timeline"
     by_view = {r["view"]: r for r in tl["recordings"]}
     assert by_view["program"]["start"] == -10.0, "a recording started before the engine has a negative offset"

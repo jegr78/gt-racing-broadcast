@@ -32,7 +32,10 @@ _STATE = re.compile(r"^state:([a-z_]{1,32})$")
 DEFAULT_CHECK_TIMEOUT = 5.0
 DEFAULT_MAX_MINUTES = 12
 MAX_MAX_MINUTES = 120              # the spec's CI timeout for the longest scenario, `full`
-STEP_KEYS = {"id", "at", "role", "do", "args", "expect", "soft", "timeout", "wait", "shot"}
+STEP_KEYS = {"id", "at", "role", "do", "args", "expect", "soft", "timeout", "wait", "shot",
+             "caption", "chapter", "focus"}
+PROGRAM_VIEW = "program"           # OBS's own recording, a view in every run
+FOCUS_SIZES = (1, 2, 4)            # four views are the quarters of a driver swap
 TOP_KEYS = {"name", "description", "max_minutes", "wait", "event", "sheet", "tolerances", "step"}
 EVENT_KEYS = {"stints", "track", "track_length_m", "cars", "classes", "parts", "qualifying_part", "seed",
               "commentators", "probe"}
@@ -105,6 +108,9 @@ class Step:
     timeout: float = DEFAULT_CHECK_TIMEOUT
     wait: float = None                 # seconds a trigger may take to fire; None: until the run ends
     shot: Shot = None
+    caption: str = None                # the film's keys, read only by a record run
+    chapter: str = None
+    focus: list = None
 
     @property
     def label(self):
@@ -290,6 +296,53 @@ def _shot(raw, where):
     return Shot(name, str(raw.get("role") or ""), str(raw.get("element") or ""))
 
 
+def _text(raw, key, where):
+    value = raw.get(key)
+    if value is not None and not (isinstance(value, str) and value.strip()):
+        raise ScenarioError(f"{where}: {key} must be a non-empty string")
+    return value
+
+
+def _focus(raw, where):
+    focus = raw.get("focus")
+    if focus is None:
+        return None
+    if not (isinstance(focus, list) and focus and all(isinstance(v, str) for v in focus)):
+        raise ScenarioError(f"{where}: focus must be a list of view names")
+    for view in focus:
+        if focus.count(view) > 1:
+            raise ScenarioError(f"{where}: focus names {view!r} twice")
+    if len(focus) not in FOCUS_SIZES:
+        raise ScenarioError(f"{where}: focus names 1, 2 or 4 views, not {len(focus)}")
+    return list(focus)
+
+
+def _check_focus(steps, registry):
+    """Refuse a focus on a view the run never records: a page role of a step, or program."""
+    views = {PROGRAM_VIEW} | {s.role for s in steps if getattr(registry[role_kind(s.role)], "recorded", False)}
+    for step in steps:
+        for view in step.focus or ():
+            if view not in views:
+                raise ScenarioError(f"{step.label}: focus {view!r} is no view of this run "
+                                    f"(views: {', '.join(sorted(views))})")
+
+
+def _check_stint_labels(steps, registry, event, comms, tabs):
+    """Refuse a link step whose stint the relay would refuse to write: a label outside the
+    Configuration tab's Stints column."""
+    import stack
+    from roles.party import stint_label
+    config = {k.lower(): v for k, v in stack.sheet_tabs(SimpleNamespace(event=event, commentators=comms,
+                                                                         tabs=tabs)).items()}["configuration"]
+    vocab = _relay().parse_config_vocab(_csv(config))["stint"]
+    for step in steps:
+        if step.do in getattr(registry[role_kind(step.role)], "vocab_stint_actions", ()) and "stint" in step.args:
+            label = stint_label(step.args["stint"])
+            if label not in vocab:
+                raise ScenarioError(f"{step.label}: {label!r} is not in the Configuration stint vocabulary "
+                                    f"(it has: {', '.join(vocab) or 'none'})")
+
+
 def _step(i, raw, registry, roots, default_wait=None, commentators=None):
     where = f"step {i + 1}"
     if not isinstance(raw, dict):
@@ -332,7 +385,8 @@ def _step(i, raw, registry, roots, default_wait=None, commentators=None):
     except ScenarioError as exc:
         raise ScenarioError(f"{where}: {exc}") from None
     return Step(i, sid, role, do, at, args, _checks(raw.get("expect"), where, "expect", roots),
-                _checks(raw.get("soft"), where, "soft", roots), timeout, wait, shot)
+                _checks(raw.get("soft"), where, "soft", roots), timeout, wait, shot,
+                _text(raw, "caption", where), _text(raw, "chapter", where), _focus(raw, where))
 
 
 def from_dict(data, registry, name="scenario", path="", roots=expect.ROOTS):
@@ -376,6 +430,8 @@ def from_dict(data, registry, name="scenario", path="", roots=expect.ROOTS):
                                     "earlier step")
         ids[step.id] = i
         steps.append(step)
+    _check_focus(steps, registry)
+    _check_stint_labels(steps, registry, event, comms, tabs)
     tolerances = data.get("tolerances") or {}
     if not isinstance(tolerances, dict):
         raise ScenarioError("tolerances must be a table")

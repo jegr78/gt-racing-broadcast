@@ -621,8 +621,13 @@ from the start); an unknown key or a value the stack would refuse fails the load
 `[sheet.tabs]` (replaces tabs built from the event), `[tolerances] state_s` (default 2) and
 `[[step]]`: `id` (default `do`, unique, letters, digits, `_` and `-`, no dot), `at`, `role`
 (`kind` or `kind:instance`, the instance letters, digits, space, `.`, `_`, `-`), `do`, `args`,
-`expect`, `soft`, `timeout` (per check, default 5 s), `wait` and `shot` (a name, or
-`{name, role, element}`). `at` is a duration since the run started, `after:<id>[+dur]`
+`expect`, `soft`, `timeout` (per check, default 5 s), `wait`, `shot` (a name, or
+`{name, role, element}`) and the walkthrough film's `caption` (the line shown while the step
+runs), `chapter` (a chapter title starting here) and `focus` (the views to enlarge: 1, 2 or 4
+of the run's page roles and `program`; four are the quarters of a driver swap). Only a record
+run reads those three, into `timeline.json`. The stint of a `submit_link` or `approve_link` must be a
+label of the served Configuration tab's Stints column, the event's stints plus the Qualifying
+tab's labels, since the relay writes no other; the load refuses any other. `at` is a duration since the run started, `after:<id>[+dur]`
 (after that step ended; skipped when it failed), `lap:leader=N` (`race.lap >= N`) or
 `state:<name>` (`race.state`); the leader's lap is the relay's `race.lap.leader`. `${id.key}` in args reads an earlier step's result; such a
 step waits for that step and is skipped when it failed. `after:` and `${...}` must name an
@@ -790,7 +795,7 @@ action and acts on the controls a person uses; the drivers have no page.
 | Role (`role =`) | Surface | Actions (`do =`) |
 |---|---|---|
 | `producer` | Control Center `/` | `open`, `pick_track` (track), `race_settings` (formation, finish_mode, laps), `start_event` (stint, qualifying), `stop_event`, `relay_restart` |
-| `director` | Director Panel `/panel` | `open`, `approve_link` (stint), `arm_feed` (feed), `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode` (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name), `play` (media: intro, trailer or outro; returns at the end of the loop the clip plays, from OBS's `mediaDuration` and `mediaCursor` read after the air light: the panel shows no media state and the clips loop), `view` (area) |
+| `director` | Director Panel `/panel` | `open`, `approve_link` (stint; `area = "schedule"` approves it in the Schedule area's pending list, which also holds the stint on air and a qualifying link), `arm_feed` (feed), `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode` (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name), `play` (media: intro, trailer or outro; returns at the end of the loop the clip plays, from OBS's `mediaDuration` and `mediaCursor` read after the air light: the panel shows no media state and the clips loop), `view` (area) |
 | `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers`, `reject_driver` (name), `correct_driver` (name, entry, stint: changed on the waiting request, then approved), `compound` (entry, code), `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason), `set_time` and `add_lap` (entry, time; qualifying mode), `note` (text, target), `confirm_dc` (entry), `class_laps` (class, laps), `view` (area) |
 | `commentator:<crew name>` | `/cockpit` with that person's token; the name must be in `[[event.commentators]]` or a Commentator of a `[sheet.tabs] Crew`, checked at load | `open`, `submit_link` (url, stint), `chat` (text) |
 | `viewer` | `/console/timing` on the event's timing link | `open`, `read` (cars) |
@@ -908,8 +913,13 @@ times on a maintainer machine, start and teardown included:
   event suspected, then confirmed, and DC on the public timing), the swaps (driver and pit
   stop count) and the finish.
 - `full` (about 36 min on GitHub's runner, real time): the deck's race day with 14 cars on a
-  Suzuka-length lap: qualifying, approval of 42 drivers, formation, a pit stop, a DC, an
-  estimate, a DNF, a late stream link, a red flag with a keep restart, the final lap. It
+  Suzuka-length lap: Comms 1's qualifying link submitted and approved, one driver on the
+  invite page, one request corrected and one rejected, approval of the other 40, intro and
+  trailer, qualifying, formation, a pit stop with its compound, a DC, an estimate, a DNF, a
+  late stream link, before each swap a next-stint driver on the invite page, a red flag with a
+  keep restart, a pit stop with a compound change, the final lap, the outro. Its steps carry
+  the walkthrough film's twelve chapters, captions and focus; `tests/test_event_sim_roles.py`
+  holds the 50 shot names to their steps, roles and elements, not to their content. It
   runs in the workflow; locally it exceeds the 2 GiB E2E unit. Its 50 screenshots carry
   deck image names (`<slide>-<n>`, e.g. `dc-tower-1`), the race-day subset of the deck's
   151. Not produced: multiclass (`mc-*`), qualifying details (`quali-addlap-*`,
@@ -964,9 +974,10 @@ python3 tools/event-sim/event_sim.py --restore-obs   # macOS: put back the OBS c
   match black. The mask changes paint only, so the roles still read the masked text. A
   click, fill or choice first moves the mouse to the control in `POINTER_STEPS` moves.
 - `DIR/timeline.json`: `steps` (each step that ran: `id`, `role`, `action`, `status`,
-  `start`, `end`, plus `caption`, `chapter` and `focus` when the scenario step has them) and
-  `recordings` (`view`, `kind` page or program, `file` relative to DIR, `size`, `start`). All
-  times are seconds since the engine started; a recording started before has a negative
+  `start`, `acted`, `end`, plus `caption`, `chapter` and `focus` when the scenario step has
+  them) and `recordings` (`view`, `kind` page or program, `file` relative to DIR, `size`,
+  `start`). `acted` is when the action returned; from there to `end` the step waited for its
+  expects, which the film treats as waiting time. All times are seconds since the engine started; a recording started before has a negative
   start. It goes through the run's redaction.
 - Feeds and clips: the stream stub runs the `card` look, and before the relay starts the
   run renders every title in one Chromium session (the cards of the scenario's
