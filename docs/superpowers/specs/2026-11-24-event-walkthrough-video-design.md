@@ -103,7 +103,7 @@ Three stages, each usable on its own.
 ### 1. Record: `event_sim.py --scenario full --record DIR`
 
 - **Pages.** Every page role records its page for the whole run. Which mechanism
-  (Playwright's video recording or CDP screencast frames) is decided by gate G2.
+  is Playwright's video recording (gate G2).
 - **Pointer.** In record mode an init script draws the pointer and the click mark. It is
   not injected in any other mode, so tests and deck screenshots stay as they are.
 - **Driver page.** A new `driver` page role opens `/console/drive` with the invite link in
@@ -180,6 +180,28 @@ user before anything else is built.
 | G2 | Which page capture is sharp enough? | text of a desk in a rail preview and in a large slot is readable in a 1440p test frame |
 | G3 | How long does frame-by-frame rendering take? | a 60 s test film with six views renders in a time that makes the whole film practical (target: under two hours for the film) |
 | G4 | Does the run fit the machine? | six recordings plus OBS stay under the stated memory limit for the whole run |
+
+### Results
+
+- **G1 passed.** A second OBS starts next to the user's with `XDG_CONFIG_HOME` pointing
+  into the run's work dir and `--multi --minimize-to-tray --disable-missing-files-check
+  --profile Sim --collection Sim`, plus its own `plugin_config/obs-websocket/config.json`.
+  It records the demo collection with the HUD browser source, and none of the user's OBS
+  configuration files changed. The only changed files under the user's configuration
+  directory were browser caches (`plugin_config/obs-browser/**/GPUCache`,
+  `DawnWebGPUCache`, `GraphiteDawnCache`), written by the user's own running OBS, so the
+  byte comparison excludes them. Two requirements follow for #1310: the run stops the
+  recording and quits OBS over the WebSocket, because a SIGTERM kills the browser's GPU
+  process and can leave the recording unfinished; and the run never kills the user's OBS.
+- **G2 passed with Playwright's video recording** (`record_video_dir`, recorded at the
+  page's viewport size). Text in a large slot is readable. In a rail preview the views
+  are recognizable, not readable, so the rail serves orientation and the readable text
+  always sits in one of the two large views.
+- **G3 passed.** Seeking a VP8 recording with keyframes far apart dominates the frame
+  time. Transcoding each recording once to all-keyframe VP8 (`-c:v libvpx -g 1 -b:v 4M
+  -deadline realtime -cpu-used 8`) and rendering with four parallel workers, each on its
+  own slice of frames, brings a 30-minute film to about 80 minutes on the 6-core
+  workstation.
 
 ## Tests
 
