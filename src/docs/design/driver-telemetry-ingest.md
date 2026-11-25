@@ -109,14 +109,24 @@ where a missing field keeps the request's value, and `/reject` takes `{conn}`. T
 404 for an unknown request and 409 when the status does not allow the decision. Only a
 pending request is approved, only an approved one corrected, and a rejection is final.
 `POST /drivers/requests/reject-pending` rejects every waiting request and answers `{ok,
-rejected}` with their count; if requests keep coming, renew the invite. A rejection
-stops new data and leaves what the code sent before in the race and the recording;
-`/drivers/reassign` and `/drivers/race/change` answer 409 for a rejected connection.
-A decision or a Move (`/drivers/reassign`) answers 404 when the invite was renewed
-meanwhile and 500 when the file could not be written, which leaves the request, and for
-a Move the sender's entry, as it was. Each decision appends `driver_approve`, `driver_correct`,
-`driver_reject` or `driver_reject_pending` with `who` to `driver-race-audit.jsonl`, the
-single decisions with the new values and `before`.
+rejected}` with their count; if requests keep coming, renew the invite.
+`POST /drivers/requests/approve-pending` takes `{requests: [{conn, entry?, segment?,
+name?}]}`, the waiting requests the desk shows with the values its Approve would send
+(1 to 200 items, unknown keys dropped, a missing value keeps the request's; anything
+else answers 400). It approves them in the list's order, each exactly as a single
+approval with those values would, and answers `{ok, approved: [{conn, entry, segment,
+name}], skipped: [{conn, entry, segment, name, reason}]}`. A request that approval
+refuses stays waiting, named in `skipped` with its error, as does one no longer pending
+(`this request is approved`) or unknown; a request missing from the list stays waiting.
+The whole batch is one write: 500 approves none. Both desks reach it like
+`reject-pending`. A rejection stops new data and leaves what the code sent before in the
+race and the recording; `/drivers/reassign` and `/drivers/race/change` answer 409 for a
+rejected connection. A decision or a Move (`/drivers/reassign`) answers 404 when the
+invite was renewed meanwhile and 500 when the file could not be written, which leaves
+the request, and for a Move the sender's entry, as it was. Each decision appends
+`driver_approve`, `driver_correct`, `driver_reject` or `driver_reject_pending` with `who`
+to `driver-race-audit.jsonl`, the single decisions with the new values and `before`;
+`approve-pending` writes one `driver_approve` line per approved request.
 
 ## Limits
 

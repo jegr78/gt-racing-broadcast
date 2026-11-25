@@ -51,6 +51,7 @@
     ".dd .req>.row>.grow{flex:1 1 0}",
     ".dd .req.waiting{border-left:3px solid #ffb454;padding-left:8px}",
     ".dd button.go{border-color:#3ecf6e;color:#3ecf6e}",
+    ".dd button.go.armed{border-color:#ff4d5e;color:#fff}",
     ".dd [hidden]{display:none!important}",
     ".dd select{width:auto;max-width:100%}",
     ".dd .send select{width:100%;min-width:0}",
@@ -281,6 +282,20 @@
     if (multi) body.segment = d.segment || rec.segment;
     return body;
   }
+  // The status line after Approve all waiting: the count and why each skipped request still waits.
+  function approveAllSummary(d) {
+    var n = (d.approved || []).length, skipped = d.skipped || [];
+    var text = n ? n + (n === 1 ? " driver approved" : " drivers approved") : "No driver approved";
+    if (!skipped.length) return text;
+    return text + "; " + skipped.length + " still waiting: " + skipped.map(function (s) {
+      return s.name + " (" + s.reason + ")";
+    }).join(", ");
+  }
+  // The Approve all body: the waiting requests as listed, each as its Approve would send it.
+  function approveAllBody(reqs, drafts, multi) {
+    return {requests: requestRows(reqs).filter(function (r) { return r.status === "pending"; })
+      .map(function (r) { return requestBody(r, drafts[r.conn], multi); })};
+  }
   // A readiness cell as [text, pill class] pairs; a pending driver never counts as a sender.
   function readyPills(senders, max) {
     var live = senders.filter(function (s) { return s.live; });
@@ -415,6 +430,7 @@
     async function act(path, body, done) {
       var where = part;
       var d = await call(path, body || {}, false, where);
+      if (d && typeof done === "function") done = done(d);
       if (d) { say(done || "", false, where); refresh(); }
       return d;
     }
@@ -870,7 +886,15 @@
     var rejectAll = button("Reject all waiting", "warn", "rej-all", function () {
       decide("/drivers/requests/reject-pending", {}, "Every waiting driver rejected");
     });
-    var reqBar = el("div", {cls: "row", hidden: ""}, [rejectAll,
+    // Approves the waiting requests on screen as Approve on each would; a skipped one keeps its edits.
+    var approveAll = button("Approve all waiting", "go", "app-all", function () {
+      if (!shownReq) return;
+      decide("/drivers/requests/approve-pending", approveAllBody(shownReq.requests, reqDraft, shownMulti), function (d) {
+        (d.approved || []).forEach(function (a) { delete reqDraft[a.conn]; delete reqOpen[a.conn]; });
+        return approveAllSummary(d);
+      });
+    });
+    var reqBar = el("div", {cls: "row", hidden: ""}, [approveAll, rejectAll,
       el("span", {cls: "muted", text: "Requests keep coming? Renew the invite link."})]);
     var okSummary = el("summary", {cls: "muted", text: "Approved drivers"});
     var okList = el("div", {cls: "reqs"});
@@ -878,6 +902,7 @@
     var reqDraft = Object.create(null);   // conn -> unsaved name, entry and stint
     var reqOpen = Object.create(null);    // approved conns open for a correction
     var lastReq = null;
+    var shownReq = null, shownMulti = false;   // the requests the list shows right now
     // A decided row re-renders only once the pressed button gives up the focus.
     function decide(path, body, done) {
       if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -925,6 +950,7 @@
       reqBar.hidden = waiting < 2;
       if (!force && (reqList.contains(document.activeElement) || okList.contains(document.activeElement))) return;
       var multi = !!d.multi_lobby && (d.segments || []).length > 0;
+      shownReq = d; shownMulti = multi;
       var keep = Object.create(null);
       var items = rows.map(function (r) {
         keep[r.conn] = true;

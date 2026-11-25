@@ -322,7 +322,11 @@ connection line sits under **Troubleshoot**. In short:
   console, even when you opened the panel over the tailnet), and who made the last
   change and when
 - **Driver requests**, where each registration waits until you or Race Control approve
-  it, with name, entry and stint to correct first. **Reject** revokes its code, and
+  it, with name, entry and stint to correct first. **Reject** revokes its code.
+  **Approve all waiting** approves the waiting requests on screen exactly as **Approve**
+  on each would, including your edits; a request that arrived after the list was shown
+  stays waiting, and so does one **Approve** would refuse, with the reason in the status
+  line.
   **Reject all waiting** clears every waiting request at once. The approved drivers are
   listed under **Approved drivers** with **Correct** and **Reject**. See
   [approving drivers](Driver-Telemetry#approving-drivers).

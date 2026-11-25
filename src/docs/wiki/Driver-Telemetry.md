@@ -171,6 +171,14 @@ in the GT7 lobby.
 - A **duplicate** pill marks requests with the same name, entry and stint. Someone may
   have registered in another driver's name, or the driver registered twice. Approve only
   the one the driver confirms, for example by the registration time.
+- **Approve all waiting** shows from two waiting requests and takes two presses. It
+  approves the waiting requests on screen exactly as **Approve** on each would, oldest
+  first, including your edits in their fields. A request that arrived after the list was
+  shown stays waiting. It checks nothing that a single **Approve** does not, so look for
+  duplicates first. A request stays waiting when **Approve** would refuse it: its entry
+  or stint is no longer on the list, or its name breaks the name rule. The status line
+  counts the approvals and names each request still waiting with the reason, and that
+  request keeps your edits, so correct it and approve it on its own.
 - **Reject all waiting** shows from two waiting requests and rejects every one of them,
   for example after the invite link leaked. Approved drivers keep their approval. If
   requests keep coming, renew the invite link: every code and request of the old one

@@ -32,9 +32,10 @@ def t_driver_requests_are_desk_routes_only():
         assert _cap(["drivers", "requests", act], "POST") == (cp.DIRECTOR, False), act
         assert _cap(["race-control", "drivers", "requests", act], "POST") == (cp.RACE_CONTROL, False), act
         assert _cap(["drivers", "requests", act]) is None, "GET never decides"
-    for segs, cap in ((["drivers", "requests", "reject-pending"], cp.DIRECTOR),
-                      (["race-control", "drivers", "requests", "reject-pending"], cp.RACE_CONTROL)):
-        assert _cap(segs, "POST") == (cap, False), segs
+    for act in ("reject-pending", "approve-pending"):
+        for segs, cap in ((["drivers", "requests", act], cp.DIRECTOR),
+                          (["race-control", "drivers", "requests", act], cp.RACE_CONTROL)):
+            assert _cap(segs, "POST") == (cap, False), f"who may reject all may approve all: {segs}"
     assert _cap(["drivers", "requests", "delete"], "POST") is None
 
 
@@ -499,6 +500,33 @@ def t_the_desk_sends_the_corrected_request():
                  'decide("/drivers/requests/reject-pending"'):
         assert call in desk, f"a decision drops the focus so its row re-renders: {call}"
     assert "document.activeElement.blur()" in desk
+
+
+def t_the_desk_says_what_approve_all_did_and_why_a_request_still_waits():
+    one = {"conn": "c1", "name": "Ann"}
+    got = _desk_fn("approveAllSummary", "[" + ",".join("approveAllSummary(" + json.dumps(d) + ")" for d in (
+        {"approved": [one, one], "skipped": []}, {"approved": [one], "skipped": []},
+        {"approved": [], "skipped": [{"name": "Lea", "reason": "pick an entry from the list"},
+                                     {"name": "Zed", "reason": "pick a stint or segment from the list"}]})) + "]")
+    if got is None:
+        return
+    waits = "No driver approved; 2 still waiting: Lea (pick an entry from the list), " \
+        + "Zed (pick a stint or segment from the list)"
+    assert got == ["2 drivers approved", "1 driver approved", waits], got
+    reqs = [{"conn": "a", "status": "approved", "ts": 1, "entry": "T1", "segment": "S1", "name": "Old"},
+            {"conn": "b", "status": "pending", "ts": 3, "entry": "T1", "segment": "S1", "name": "Ann"},
+            {"conn": "c", "status": "pending", "ts": 2, "entry": "T2", "segment": "S2", "name": "Max"}]
+    body = _desk_fn("requestRows,requestBody,approveAllBody",
+                    "approveAllBody(" + json.dumps(reqs) + ", {b: {name: 'Ann K', entry: 'T2'}}, true)")
+    assert body == {"requests": [{"conn": "c", "entry": "T2", "name": "Max", "segment": "S2"},
+                                 {"conn": "b", "entry": "T2", "name": "Ann K", "segment": "S1"}]}, \
+        f"the desk sends the waiting requests it shows, oldest first, with its edits: {body}"
+    with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
+        desk = fh.read()
+    assert 'button("Approve all waiting", "go", "app-all"' in desk, "approve all takes two clicks"
+    assert 'decide("/drivers/requests/approve-pending"' in desk, "approve all drops the focus like every decision"
+    bar = desk[desk.index("var reqBar"):desk.index("var okSummary")]
+    assert "approveAll" in bar and "rejectAll" in bar, f"both bulk decisions sit in one bar: {bar}"
 
 
 def t_the_desk_keeps_tyre_rows_in_place_so_a_focused_select_keeps_its_focus():
@@ -1262,6 +1290,14 @@ def t_a_first_poll_that_answers_while_the_desk_loads_finds_the_frame():
             slow.close()
     assert errors == [] and area == ["qualifying"], \
         f"a first poll answered before the page finished loading still opens Qualifying: {errors} {area}"
+
+
+def t_an_armed_go_button_reads_like_every_armed_button():
+    with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
+        js = fh.read()
+    go, armed = js.index(".dd button.go{"), js.index(".dd button.go.armed{")
+    assert armed > go and "color:#fff" in js[armed:js.index("}", armed)], \
+        "an armed green button turns white on red like the other armed buttons"
 
 
 if __name__ == "__main__":
