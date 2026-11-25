@@ -58,15 +58,17 @@ do = "start_event"
 expect = ["obs.scene == 'Standby'", "relay.up"]
 
 [[step]]
-id = "arm_a"
+id = "warm_a"
 at = "after:start_event"
 role = "director"
-do = "arm_feed"
-args = { feed = "A" }
+do = "view"
+args = { area = "handover" }
+expect = ["relay.status.feeds.A.state == 'serving'"]
+timeout = "90s"
 
 [[step]]
 id = "stint1_on_air"
-at = "after:arm_a"
+at = "after:warm_a"
 role = "director"
 do = "scene"
 args = { scene = "Stint" }
@@ -156,14 +158,18 @@ expect = ["page('drivers').standing == 3"]
 timeout = "90s"
 
 [[step]]
-id = "arm_b"
+id = "warm_b"
 at = "after:box1"
 role = "director"
-do = "arm"
+do = "view"
+args = { area = "handover" }
+expect = ["relay.status.handover_next.stint == 2",
+          "relay.status.feeds[relay.status.handover_next.feed].state == 'serving'"]
+timeout = "90s"
 
 [[step]]
 id = "next2"
-at = "after:arm_b"
+at = "after:warm_b"
 role = "director"
 do = "next"
 expect = ["'comms2' in obs.program_channels", "'comms1' not in obs.program_channels",
@@ -225,14 +231,18 @@ expect = ["page('drivers').standing == 4"]
 timeout = "90s"
 
 [[step]]
-id = "arm3"
+id = "warm3"
 at = "after:box2"
 role = "director"
-do = "arm"
+do = "view"
+args = { area = "handover" }
+expect = ["relay.status.handover_next.stint == 3",
+          "relay.status.feeds[relay.status.handover_next.feed].state == 'serving'"]
+timeout = "90s"
 
 [[step]]
 id = "next3"
-at = "after:arm3"
+at = "after:warm3"
 role = "director"
 do = "next"
 expect = ["'comms3' in obs.program_channels", "'comms2' not in obs.program_channels"]

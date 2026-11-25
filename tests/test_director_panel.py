@@ -344,10 +344,12 @@ def t_idle_feed_tiles_request_no_still():
 const feeds = (a, ai, b, bi) => ({A: {state: a, index: ai}, B: {state: b, index: bi}});
 const idle = [pvIdleFeeds({feeds: feeds('stopped', 0, 'stopped', 1), pov: {state: 'stopped', shown: false}}),
               pvIdleFeeds({feeds: feeds('stopped', 2, 'stopped', 1), pov: {state: 'stopped', shown: true}}),
-              pvIdleFeeds({feeds: feeds('serving', 0, 'connecting', 1), pov: {state: 'serving', shown: true}}),
+              pvIdleFeeds({feeds: feeds('serving', 0, 'serving', 1), pov: {state: 'serving', shown: true}}),
               pvIdleFeeds({solo: true}), pvIdleFeeds({feeds: feeds('serving', 0, 'serving', 1)}),
               pvIdleFeeds({fanout: false, feeds: feeds('stopped', 0, 'stopped', 1), pov: {shown: false}}),
-              pvIdleFeeds({fanout: true, feeds: feeds('stopped', 0, 'stopped', 1), pov: {shown: false}})];
+              pvIdleFeeds({fanout: true, feeds: feeds('stopped', 0, 'stopped', 1), pov: {shown: false}}),
+              pvIdleFeeds({feeds: feeds('serving', 0, 'connecting', 1)}),
+              pvIdleFeeds({fanout: false, feeds: feeds('serving', 0, 'connecting', 1)})];
 const a = tile('A'), b = tile('B'), cap = tile('CAPTURE', 'capture');
 pvPollFeed(a); pvPollFeed(b); pvPollFeed(cap);
 const unknown = requested.splice(0), unknownTile = a.shown();
@@ -362,8 +364,9 @@ console.log(JSON.stringify({idle, unknown, unknownTile, stopped, stoppedTile, ru
         assert d["idle"] == [{"A": False, "B": True, "POV": True}, {"A": True, "B": False, "POV": False},
                              {"A": False, "B": False, "POV": False}, {},
                              {"A": False, "B": False, "POV": True},
-                             {"A": False, "POV": True}, {"A": False, "B": True, "POV": True}], \
-            f"idle is the stopped feed off air (unknown without fan-out, where the preview pulls on its own) " \
+                             {"A": False, "POV": True}, {"A": False, "B": True, "POV": True},
+                             {"A": False, "B": True, "POV": True}, {"A": False, "POV": True}], \
+            f"idle is the off-air feed that does not serve (unknown without fan-out, where the preview pulls on its own) " \
             f"and the POV that is not shown or not configured: {d['idle']}"
         assert d["unknown"] == ["/preview/source/capture"] and d["unknownTile"] == "true/false/Load still", \
             f"before the first /status a feed tile waits untouched: {d['unknown']} {d['unknownTile']}"
@@ -1151,8 +1154,49 @@ def t_arm_targets_the_off_air_feed_only_in_manual_mode():
     src = _func_src(_html(), "renderLive")
     assert 'd.feeds.A.index <= d.feeds.B.index ? "A" : "B"' in src, "live feed = lower index"
     assert "arm.hidden = !manual || qual || end;" in src
+    assert "renderHandover(lf, live, of, off, manual, noLink, end);" in src
+    assert ": manual && !armed ? `arm stint ${of.stint}`" in src, "only manual arm asks for ARM in the nav"
     assert "arm.dataset.feed = off;" in src
     assert '$("#nextBtn").classList.toggle("ready", serving && !end);' in src
+
+
+_HO_HARNESS = r"""
+const el = () => ({className: '', textContent: '', hidden: false, kids: [],
+                   replaceChildren(...k) { this.kids = k; }, appendChild(k) { this.kids.push(k); },
+                   append(...k) { this.kids.push(...k); }, addEventListener() {},
+                   get children() { return this.kids; }});
+const nodes = {}; const $ = sel => nodes[sel] || (nodes[sel] = el());
+const document = {createElement: el};
+const schedRows = [], lastPending = [], stintName = () => "";
+const lf = {stint: 1, index: 0};
+const off = (state, armed) => ({stint: 2, index: 1, state, armed});
+const seen = [];
+const look = () => seen.push([$("#hoNext").kids[0].textContent, $("#hoArmMode").textContent]);
+"""
+
+
+def t_handover_shows_the_incoming_feed_running_warm_under_auto_arm():
+    html = _html()
+    assert '<div class="hint" id="hoArmMode"></div>' in _area(html, "handover")
+    funcs = "".join(_func_src(html, n) + "\n}\n" for n in ("hoCard", "renderHandover"))
+    out = _run_js(_HO_HARNESS + funcs + """
+for (const [of, manual, noLink] of [[off('serving', true), false, false], [off('connecting', true), false, false],
+                                    [off('idle', true), false, true], [off('serving', true), true, false],
+                                    [off('stopped', false), true, false], [off('connecting', true), true, false]]) {
+  renderHandover(lf, 'A', of, 'B', manual, noLink, false); look();
+}
+renderHandover(lf, 'A', off('idle', true), 'B', false, false, true); look();
+console.log(JSON.stringify(seen));""")
+    if out is None:
+        return
+    got = json.loads(out)
+    auto = "Auto-arm: the next stint's feed runs warm as soon as its link is in the Schedule."
+    manual = "Manual arm: ARM the next stint's feed a few minutes before the swap."
+    assert got == [["Up next · running warm", auto], ["Up next · warming up", auto],
+                   ["Up next · waiting for its link", auto], ["Up next · ready", manual],
+                   ["Up next · not armed", manual], ["Up next · starting", manual],
+                   ["Up next · end of the schedule", auto]], \
+        f"auto-arm names the warm incoming feed, manual keeps its arm states: {got}"
 
 
 def t_handover_matches_a_submission_by_sheet_row():

@@ -338,9 +338,8 @@ DISCORD_AUDIO = "Discord Audio Capture"
 RUNDOWN = (
     Step("STANDBY", "macro", scene="Standby", mute=(*_FEEDS, DISCORD_AUDIO)),
     Step("INTRO", "macro", scene="Intro", mute=(*_FEEDS, DISCORD_AUDIO)),
-    # Manual feed arm is default-on (#489/#505), so BOTH feeds start paused and
-    # `event start` arms neither; the director arms the one they are about to cut to.
-    # Without this the whole first stint pulls nothing and STINT A shows black.
+    # Under manual arm both feeds start paused and `event start` arms neither, so the
+    # first stint would show black. Under auto-arm the step only waits for the bytes.
     Step("ARM A", "arm", relay="feed/A/activate", wait_for_bytes=True),
     Step("STINT A", "macro", scene="Stint", relay_stint="A",
          show=(("Stint", "Feed A"),), hide=(("Stint", "Feed B"),),
@@ -353,8 +352,8 @@ RUNDOWN = (
     Step("TIMER START", "relay", relay="timer/start"),
     Step("TIMER PAUSE", "relay", relay="timer/stop"),   # panel: PAUSE -> timer/stop
     Step("TIMER RESET", "relay", relay="timer/reset"),
-    # The off-air feed is still paused: SPLIT against an unarmed feed would inspect
-    # a black half, hence the arm plus the byte wait.
+    # Under manual arm the off-air feed is still paused and SPLIT would inspect a
+    # black half, hence the arm plus the byte wait.
     Step("ARM B", "arm", relay="feed/B/activate", wait_for_bytes=True),
     Step("SPLIT", "macro", scene="Splitscreen", relay_split=True),
     Step("NEXT", "relay", relay="next"),
@@ -373,8 +372,8 @@ RUNDOWN = (
 def arm_violations(rundown=RUNDOWN):
     """Labels of steps that put an UNARMED feed on air. Empty == the rundown is sound.
 
-    Models the relay's manual-arm state machine (`RACECAST_MANUAL_FEED_ARM`, #492,
-    default-on): both feeds start paused, `feed/X/activate` arms one,
+    Models the relay's manual-arm state machine (`RACECAST_MANUAL_FEED_ARM=1`,
+    #492): both feeds start paused, `feed/X/activate` arms one,
     `feed/X/deactivate` disarms it, and a `next` handover disarms the OUTGOING feed
     (`stop_freed = cut and self.manual_feed_arm` in the relay, the #489/#505
     single-puller rule). A feed is "on air" for a step when the step unmutes it or
@@ -635,14 +634,14 @@ def step_error_verdict(error):
 def arm_verdict(manual_arm, bytes_ok):
     """(status, note) for an ARM step. Bytes are the signal, not the arm call.
 
-    With `RACECAST_MANUAL_FEED_ARM=0` the feeds pre-warm themselves and the relay
-    refuses `feed/X/activate` outright ("manual feed arm disabled"), so issuing it
-    would redden the run over a documented machine setting. The caller skips the
+    With auto-arm (the default) the feeds pre-warm themselves and the relay refuses
+    `feed/X/activate` outright, so issuing it would redden the run over a documented
+    machine setting. The caller skips the
     call in that mode; the byte wait still decides, because a feed that delivers
     nothing is a toolchain failure either way.
     """
     if bytes_ok:
-        return PASS, "" if manual_arm else "feed self-armed (manual arm off)"
+        return PASS, "" if manual_arm else "feed self-armed (auto-arm)"
     return FAIL, "no bytes after ARM"
 
 

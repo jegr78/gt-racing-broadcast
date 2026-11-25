@@ -196,8 +196,8 @@ memory:
 | Bus | What it does |
 |---|---|
 | **PGM** | one-press program switches (scene + feed visibility + mutes), one per scene ([Scene macros](Director#scene-macros)). STINT (the on-air feed), SPLIT, INTERVIEW, STANDBY, INTRO, OUTRO, TRAILER, INTERMISSION, RED FLAG. SPLIT also sets Race Control to *Driver Swaps*, STINT clears it, and RED FLAG toggles the Standby Cover together with the *Red Flag* message ([Director guide](Director#the-companion-web-buttons-board)); these Race Control writes need the sheet-write webhook |
-| **ARM / NEXT** (live column) | ARM pulls the off-air feed; NEXT is the driver change: cuts back to Stint and clears Race Control with the cut |
-| **FEEDS** (Troubleshoot) | relay control: per-feed ARM/STOP, feed reloads, POV reload/stop, FEEDS → STINT… |
+| **ARM / NEXT** (live column) | ARM pulls the off-air feed (manual arm only; with auto-arm it runs warm by itself); NEXT is the driver change: cuts back to Stint and clears Race Control with the cut |
+| **FEEDS** (Troubleshoot) | relay control: per-feed ARM/STOP (manual arm only), feed reloads, POV reload/stop, FEEDS → STINT… |
 | **HUD** | the Stint HUD label, Streamer, Session and Race Control dropdowns: changes show on the HUD immediately and are written back to the Setup tab ([Director guide](Director)) |
 | **Overlays** | picture-in-picture toggles (POV; solo also webcam and telemetry) |
 | **Raw scenes** (Troubleshoot) | scene switches that leave the audio as it is |
@@ -271,15 +271,17 @@ flowchart LR
   F2 -.->|"next change, roles swap"| F1
 ```
 
-At each change the director: **arms the incoming feed** a few minutes ahead (its
-scheduled link only starts pulling once armed. **ARM** in the panel's live column; wait for
-*serving*), cuts to **Splitscreen** (the combo sets **Race Control** to *Driver Swaps*
+At each change the director waits for the incoming feed to be *serving*. With auto-arm
+(the default) it pulls as soon as its link is in the Schedule; with manual arm the
+director **arms the incoming feed** a few minutes ahead (**ARM** in the panel's live
+column). Then the director cuts to **Splitscreen** (the combo sets **Race Control** to *Driver Swaps*
 with it), then, with the incoming feed warm, presses **Feeds Next**. The relay hands
 the feed over, cuts the program back to **Stint** on the incoming feed for you (no
 **STINT A/B** press needed), **clearing Race Control** with the cut, sets the HUD's
 **Stint** label and **Streamer** from the on-air **Schedule row** automatically (sourced
-from the Configuration vocab; a blank or off-vocab row leaves the field as-is), **and
-stops the outgoing feed's pull**, so only one commentator stream is pulled at a time.
+from the Configuration vocab; a blank or off-vocab row leaves the field as-is), and moves
+the outgoing feed on to the stint after next. With manual arm it **stops the outgoing
+feed's pull**, so only one commentator stream is pulled at a time.
 This is the **same workflow whether you produce in the cloud or at home**: the director
 arms then cuts, everywhere.
 The panel's **HUD row** provides the Stint / Streamer / Race Control dropdowns

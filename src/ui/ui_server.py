@@ -134,9 +134,10 @@ def make_handler(ctx):
     env_read() -> dict, env_write(entries) -> dict,
     devices_enumerate() -> dict (OBS video-device list for the solo capture
     input), devices_write(webcam, capture) -> dict (upsert into the .env),
-    ps_discover() -> dict (GT7 console LAN discovery), ps_write(ip) -> dict,
-    gt7_forward_write(targets) -> dict (GT7 packet forward targets, #1130)
+    ps_discover() -> dict (GT7 console LAN discovery), ps_write(ip) -> dict
     (upsert the PS4/PS5 IP into the .env),
+    gt7_forward_write(targets) -> dict (GT7 packet forward targets, #1130),
+    feed_arm_write(mode) -> dict (feed arming auto|manual in the .env, #1325),
     init_plan(browser) -> dict (wizard plan: per-step done/kind/op/instruction),
     init_step(key) -> dict (run one non-job wizard step, {ok, done} | {ok: False, error}),
     profile_export(name, assets) -> dict, profile_import(path, force) -> dict,
@@ -1092,6 +1093,18 @@ def make_handler(ctx):
                 except Exception as exc:
                     return self._json({"ok": False,
                                        "error": f"could not save PS IP: {exc}"},
+                                      code=500)
+                return self._json(result, code=200 if result.get("ok") else 400)
+            if path == "/api/feed-arm":
+                body = self._body_json()
+                if body is None:
+                    return self._json({"ok": False, "error": self._body_error},
+                                      code=400)
+                try:
+                    result = ctx["feed_arm_write"](body.get("mode"))
+                except Exception as exc:
+                    return self._json({"ok": False,
+                                       "error": f"could not save the feed arming: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/gt7-forward":

@@ -1,8 +1,9 @@
 # Full: the race day of the slide deck, in real time, over three stints in three
 # lobbies with one commentator each. 14 cars on a Suzuka-length lap (about 1:45).
 # Start event, then qualifying mode: Comms 1 submits the qualifying link, the director
-# approves and arms it. One driver registers on the invite page, the others over the API;
-# Race Control corrects one request, rejects one and approves the rest. Intro and trailer,
+# approves it and feed A runs warm with it (auto-arm). One driver registers on the invite
+# page, the others over the API; Race Control corrects one request, rejects one and
+# approves the rest. Intro and trailer,
 # then the desk adds qualifying laps, the director switches to race mode and goes live. A
 # formation lap, the start, a pit stop with its tyre compound; in stint 1 a car disconnects
 # (confirmed DC, rejoin mark), another one's sender stops (an estimate 3 s behind another
@@ -123,16 +124,18 @@ do = "view"
 args = { area = "timing" }
 
 [[step]]
-id = "arm_a"
+id = "warm_a"
 at = "after:cockpit1_timing"
 role = "director"
-do = "arm_feed"
-args = { feed = "A" }
-caption = "The director arms feed A with the qualifying stream"
+do = "view"
+args = { area = "handover" }
+expect = ["relay.status.feeds.A.state == 'serving'"]
+timeout = "90s"
+caption = "Feed A runs warm with the qualifying stream as soon as the link is approved"
 
 [[step]]
 id = "driver_signup"
-at = "after:arm_a"
+at = "after:warm_a"
 role = "driver"
 do = "register"
 args = { entry = "Juniper Motorsport #10", name = "Driver 10-1", stint = 1 }
@@ -855,8 +858,20 @@ expect = ["relay.up"]
 shot = { name = "swaps-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
 
 [[step]]
-id = "split2"
+id = "warm2"
 at = "after:shot_swaps_1"
+role = "director"
+do = "view"
+args = { area = "handover" }
+expect = ["relay.status.handover_next.stint == 2",
+          "relay.status.feeds[relay.status.handover_next.feed].state == 'serving'"]
+timeout = "90s"
+caption = "The feed of stint 2 runs warm: the Handover area shows it ready"
+focus = ["director"]
+
+[[step]]
+id = "split2"
+at = "after:warm2"
 role = "director"
 do = "scene"
 args = { scene = "Split" }
@@ -866,15 +881,8 @@ caption = "The director puts the splitscreen on program while the cars box"
 focus = ["program", "director"]
 
 [[step]]
-id = "arm2"
-at = "after:split2"
-role = "director"
-do = "arm"
-caption = "The director arms the feed of stint 2"
-
-[[step]]
 id = "next2"
-at = "after:arm2"
+at = "after:split2"
 role = "director"
 do = "next"
 expect = ["page('commentator:Comms 2').on_air"]
@@ -1271,8 +1279,20 @@ caption = "The cars come into the box for the driver swap"
 focus = ["program", "race_control"]
 
 [[step]]
-id = "split3"
+id = "warm3"
 at = "after:box3"
+role = "director"
+do = "view"
+args = { area = "handover" }
+expect = ["relay.status.handover_next.stint == 3",
+          "relay.status.feeds[relay.status.handover_next.feed].state == 'serving'"]
+timeout = "90s"
+caption = "The feed of stint 3 runs warm: the Handover area shows it ready"
+focus = ["director"]
+
+[[step]]
+id = "split3"
+at = "after:warm3"
 role = "director"
 do = "scene"
 args = { scene = "Split" }
@@ -1282,15 +1302,8 @@ caption = "The director puts the splitscreen on program while the cars box"
 focus = ["program", "director"]
 
 [[step]]
-id = "arm3"
-at = "after:split3"
-role = "director"
-do = "arm"
-caption = "The director arms the feed of stint 3"
-
-[[step]]
 id = "next3"
-at = "after:arm3"
+at = "after:split3"
 role = "director"
 do = "next"
 expect = ["page('commentator:Comms 3').on_air"]

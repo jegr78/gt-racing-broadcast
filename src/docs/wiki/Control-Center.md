@@ -239,6 +239,18 @@ Machine-wide (not league) configuration:
   layouts it knows. **Update now** fetches the latest copy in the background (the row says
   "updating…" until it ends, a failed file opens a message); a running relay uses it
   within a minute.
+- **Feeds** (endurance profiles): **Feed arming** picks how Feed A and Feed B start their
+  stints, then **Save** (writes `RACECAST_MANUAL_FEED_ARM`, `off` auto, `on` manual).
+  **Auto-arm** (the default) pulls the off-air feed's next stint as soon as its link is in
+  the Schedule, so it runs warm before the handover. **Manual arm** pulls a stint only
+  after the Director presses **ARM**, and **NEXT** stops the outgoing feed, which saves
+  the producer's bandwidth (one commentator stream between handovers instead of two). A value set
+  in the environment wins over the `.env`. The relay reads it when it starts, so restart
+  a running relay to apply it. See [At a driver change](Director#at-a-driver-change).
+  A machine set up before auto-arm became the default keeps manual arm: its `.env` still
+  holds the old template's `RACECAST_MANUAL_FEED_ARM=1` until you switch it here. The
+  select shows the current mode, and a line under it says when the value comes from that
+  older template.
 
 > **CLI alternative:** edit `.env` in any text editor; `racecast cookies <browser>`;
 > `racecast device-scan`.

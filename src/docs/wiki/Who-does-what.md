@@ -17,7 +17,7 @@ flowchart LR
   end
   subgraph D["Remote: Director"]
     D1["Choose scenes and graphics"]
-    D2["ARM, SPLIT, NEXT at driver changes"]
+    D2["SPLIT, NEXT at driver changes<br/>(ARM with manual arm)"]
     D3["Cut to interviews<br/>+ broadcast audio"]
   end
   subgraph RC["Remote: Race Control"]
@@ -44,8 +44,8 @@ flowchart LR
   audio). The interview conversation itself is moderated from inside the Discord voice
   channel by one of its participants, usually the final-stint streamer; the director can
   take that role but doesn't have to.
-- At each driver change: **ARM** the off-air feed a few minutes ahead, wait until it is
-  serving, cut to **SPLIT**, then press **NEXT** (Companion: **Feeds Next**). Details:
+- At each driver change: wait until the off-air feed is serving (with manual arm,
+  **ARM** it a few minutes ahead), cut to **SPLIT**, then press **NEXT** (Companion: **Feeds Next**). Details:
   [At a driver change](Director#at-a-driver-change).
 - Keeps every program control Race Control does not have, including putting the driver
   dashboard on air.

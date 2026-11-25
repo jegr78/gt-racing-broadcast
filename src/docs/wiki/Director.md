@@ -49,14 +49,14 @@ The page is a fixed frame of four columns, so nothing you need on air scrolls aw
   The order is not a procedure; open whichever area you need. The panel remembers the
   last area per browser.
 - **Live column**: the program preview with the feed tiles, what is on air, the handover
-  keys **ARM** and **NEXT** side by side, the PGM scene keys, and the overlays beside the
+  keys **ARM** (manual arm only) and **NEXT** side by side, the PGM scene keys, and the overlays beside the
   transition (stacked in solo). Graphic requests from the crew appear here too, under
   what is on air (see below). At 1440x900 every key row fits without scrolling: when
   the column runs short, for example with a pending graphic request while the header
   pills take a second row, the program tile shrinks, down to 40 % of its width.
 - **Workspace** (middle): the area you picked. Above it a "next step" line names the
   next handover step from the relay's state: a missing or submitted link for the next
-  stint first, then ARM, then the cut. Only the next stint's missing link turns the
+  stint first, then ARM (manual arm only), then the cut. Only the next stint's missing link turns the
   Schedule dot amber. The action log sits below the area.
 - **Chat rail** (right): crew chat above the broadcast chat, always visible. Drag the
   divider between them (or focus it and use the arrow keys) to share the height; the
@@ -70,14 +70,14 @@ on a wide screen. Below 1280 px the chats move into a drawer opened by the **Cha
 button in the header, which also counts unread crew messages. Below 900 px (a phone)
 the page becomes one column: live column, navigation, area, chats.
 
-![The director panel: navigation on the left, the live column with program preview, ARM and NEXT, scene, overlay and transition keys, the Handover area in the middle, and the crew and broadcast chats on the right](images/director-panel.png)
+![The director panel: navigation on the left, the live column with program preview, NEXT (and ARM under manual arm), scene, overlay and transition keys, the Handover area in the middle, and the crew and broadcast chats on the right](images/director-panel.png)
 
 Where each bus lives:
 
 | Bus | What's on it |
 |---|---|
 | **PGM** (live column) | one-press program looks: `STINT`, `SPLIT`, `INTERVIEW`, `STANDBY`, `INTRO`, `OUTRO`, `TRAILER`, `INTERMISSION`, `RED FLAG` (same behavior as the Companion combos below) |
-| **FEEDS** (Troubleshoot) | **`ARM A/B` / `STOP A/B`** per feed, per-feed reloads, `RESET A/B → LIVE` (reconnect OBS to one feed, see [Dropping a backlog](#dropping-a-backlog)), POV reload/stop, `FEEDS → STINT…` |
+| **FEEDS** (Troubleshoot) | **`ARM A/B` / `STOP A/B`** per feed (manual arm only), per-feed reloads, `RESET A/B → LIVE` (reconnect OBS to one feed, see [Dropping a backlog](#dropping-a-backlog)), POV reload/stop, `FEEDS → STINT…` |
 | **HUD** (HUD area) | the Stint label, Streamer, Session and Race Control dropdowns, they update the HUD live and write back to the Setup tab |
 | **Intermission** | live Chat visibility in Endurance and Solo, Webcam/Capture in Solo, and **Restore saved defaults**. Reads actual OBS item state and targets Intermission even while another scene is on air. Audio and Program PiP stay unchanged |
 | **Overlays** (live column) | picture-in-picture toggles: `POV`; in solo also `WEBCAM` and, for a POV profile, `TELEMETRY`, plus the `REC` recording key (solo POV) |
@@ -90,8 +90,9 @@ Where each bus lives:
 | **AUDIO** (Audio area) | per-source dB sliders, 0 dB reset and mutes; includes an **Intermission Music** fader for the music track in the Intermission scene |
 | **URLs** (Schedule area) | the editor for the schedule and POV URLs, next to the commentators' link submissions |
 
-The **Handover** area shows the on-air stint, the next stint with its feed state (not
-armed, starting, ready) and the three stints after it: `link ready`, `no link yet`, or a
+The **Handover** area shows the on-air stint, the next stint with its feed state and the
+arming mode under both cards (auto-arm: waiting for its link, warming up, running warm;
+manual arm: not armed, starting, ready), and the three stints after it: `link ready`, `no link yet`, or a
 commentator's pending link submission. One submission shows its link with an **APPROVE**
 key; two or more for the same stint point to the Schedule area, where each link is listed. **Setup** holds the
 graphics library, **Broadcast** the stream key and the substitution card, and
@@ -230,7 +231,7 @@ The POV feed joins the line while it is connecting or serving.
 A feed pill turns amber with **`ULL`** (`A S3 · LIVE · ULL`) when the commentator's
 YouTube stream runs in *ultra-low latency*: its HLS segments are 1 s long, and such
 streams drop and stall more often (hover the pill for the details). It shows as soon as
-the feed serves, so for the next stint it already appears after ARM, while there is
+the feed serves, so for the next stint it already appears while that feed runs warm, while there is
 still time to ask the commentator to switch the stream's latency setting. Twitch and
 local stints never show it.
 
@@ -765,45 +766,55 @@ or clear it to show nothing. The whole run, in order:
 ## At a driver change
 
 Every ~2 hours the commentator changes. You do this from your browser with the
-buttons (Companion or panel). Feeds are **armed on demand**: a link in the Schedule
-does **not** start pulling until you arm its feed, and **NEXT auto-stops the feed it
-cuts away from**, so only one commentator stream is ever pulled at a time (that is
-what keeps a cloud/datacenter producer under YouTube's per-IP limit: see *Why arm?*
-below).
+buttons (Companion or panel). How the incoming feed starts depends on the producer's
+**Feed arming** setting (Control Center, **General Settings → Feeds**):
+
+- **Auto-arm** (the default): the off-air feed pulls the next stint as soon as its link
+  is in the Schedule, so it runs warm before the swap. Both feeds pull between
+  handovers. The Handover area says so under its cards, and the ARM key is hidden.
+- **Manual arm**: a link in the Schedule does **not** start pulling until you arm its
+  feed, and **NEXT stops the feed it cuts away from**, so only one commentator stream is
+  pulled between handovers (see *Why manual arm?* below).
+
+A producer machine set up before auto-arm became the default still runs **manual arm**:
+its `.env` keeps the old template's value until the producer switches it under **General
+Settings → Feeds**, which shows the current mode. The Handover area always names the mode
+the relay runs.
 
 Per swap:
 
 1. **Enter the next link early**: ~20–30 min ahead, from the panel's **Schedule**
-   area (or the sheet's Schedule tab as a fallback). It just sits there; nothing
-   pulls yet.
-2. **Arm the incoming (off-air) feed** a few minutes before the swap: press **ARM**
-   in the panel's live column (it reads `ARM → STINT 4 (FEED B)` and always targets
-   the off-air feed), or **ARM A** / **ARM B** on the Companion deck. The relay
-   resolves and pulls it, a cold start of ~10–30 s, like POV Reload. The key turns
-   amber while the feed starts and green once it is **serving**, and **NEXT** turns
-   green with it: that is your "ready to cut" signal. (Arming onto a stream the other
-   feed already pulls is refused, so a same-URL back-to-back can never double-pull.)
-3. **Cut to Splitscreen** with the **SPLIT** combo (covers the handover window; also
-   sets **Race Control → Driver Swaps** for you).
-4. **Press NEXT once.** The relay hands over to the armed feed, shows the new
+   area (or the sheet's Schedule tab as a fallback). With auto-arm the off-air feed
+   starts pulling it at once (a cold start of ~10–30 s) and the **Up next** card reads
+   `warming up`, then `running warm`. With manual arm it just sits there.
+2. **Manual arm only: arm the incoming (off-air) feed** a few minutes before the swap:
+   press **ARM** in the panel's live column (it reads `ARM → STINT 4 (FEED B)` and
+   always targets the off-air feed), or **ARM A** / **ARM B** in the Troubleshoot
+   area's feed rows. The relay resolves and pulls it, a cold start of ~10–30 s, like
+   POV Reload. The key turns amber while the feed starts and green once it is
+   **serving**. (Arming onto a stream the other feed already pulls is refused, so a
+   same-URL back-to-back can never double-pull.)
+3. Wait for **NEXT** to turn green: the incoming feed is **serving**, your "ready to
+   cut" signal. Then **cut to Splitscreen** with the **SPLIT** combo (covers the
+   handover window; also sets **Race Control → Driver Swaps** for you).
+4. **Press NEXT once.** The relay hands over to the incoming feed, shows the new
    commentator in the **Stint** scene, switches the audio, cuts the program to
    **Stint** (from the panel with the transition armed in the live column; the
    Companion's **Feeds Next** cuts hard), sets the HUD **Stint** / **Streamer** from the on-air Schedule row,
-   clears Race Control: and **stops the outgoing feed's pull**. You do not pick Feed
-   A or Feed B; correct the HUD from the panel's **HUD** bus if needed.
+   and clears Race Control. The feed it cut away from moves to the stint after next:
+   with auto-arm it starts pulling that stint once its link is in the Schedule, with
+   manual arm it **stops** until you arm it. You do not pick Feed A or Feed B; correct
+   the HUD from the panel's **HUD** bus if needed.
 
-Because you armed the incoming feed in step 2, the cut in step 4 is instant. If you
-press **NEXT** before that feed is **serving**, nothing is cut and nothing is stopped.
-The current program stays on air; arm the feed and press **NEXT** again.
+If you press **NEXT** before the incoming feed is **serving**, nothing is cut and
+nothing is stopped. The current program stays on air; wait for the feed (with manual
+arm, arm it first) and press **NEXT** again.
 
-> **Why arm?** On a cloud/datacenter producer, two commentator streams pulled at once
-> trip a YouTube per-IP rate-limit within a minute or two (both feeds then stutter).
-> Arming just before the cut, plus the auto-stop on NEXT, keeps it to a single pull
-> between handovers. **The workflow is identical whether the producer runs in the cloud
-> or at home**, one muscle memory, and the director stays in control of the cut. (A
-> home/residential line does not hit the per-IP limit, so `RACECAST_MANUAL_FEED_ARM=0`
-> exists as a niche escape: a solo operator who wants the old always-pre-warmed
-> auto-pull: but it is **not** the recommended path; the standard everywhere is to arm.)
+> **Why manual arm?** It saves the producer's bandwidth: arming just before the cut,
+> plus the stop on NEXT, keeps it to one commentator stream between handovers, where
+> auto-arm pulls two. Either way you check yourself that the commentators really send
+> and react if one does not. `RACECAST_MANUAL_FEED_ARM` in the producer's machine `.env` holds the setting
+> (`off` or `0` auto, `on` or `1` manual); a value set in the environment wins over the `.env`.
 
 The relay also handles the audio (it mutes the off-air feed, unmutes the on-air one).
 The Companion's **STINT A / STINT B**, **MUTE A / MUTE B** and **Feed A/B Toggle** are a

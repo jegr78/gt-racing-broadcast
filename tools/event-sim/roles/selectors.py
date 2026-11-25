@@ -22,8 +22,7 @@ DIRECTOR = {
     "handover_row": '#hoUpcoming .hrow:has-text("{stint}")',
     "submission": '#subsBody tr:has(td.rn:text-is("{stint}"))',
     "submission_approve": '#subsBody tr:has(td.rn:text-is("{stint}")) button.approve',
-    "feed_arm": '#feedQuality .armbtn[data-feed="{feed}"][data-on="1"]', "feed_state": "#st{feed}",
-    "arm": "#armBtn", "next": "#nextBtn", "next_ready": "#nextBtn.ready", "next_sub": "#nextSub",
+    "up_next": "#hoNext .hk", "next": "#nextBtn", "next_ready": "#nextBtn.ready", "next_sub": "#nextSub",
     "on_air": "#liveOnAir", "next_step": "#nextStepText",
     "scene": '#pgmBus button.k:has-text("{scene}")',
     "media": '#pgmBus button.k[title="{source}"]',   # the caption is the asset's label, the title its source

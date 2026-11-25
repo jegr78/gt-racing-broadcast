@@ -812,6 +812,12 @@ def t_child_env_drops_inherited_racecast_values():
     assert env == {"PATH": "/bin", "RACECAST_SIMULATION": "1"}, env
 
 
+def t_stack_pins_auto_arm():
+    env = stack.child_env({"RACECAST_MANUAL_FEED_ARM": "1"}, stack.STACK_ENV)
+    assert env["RACECAST_MANUAL_FEED_ARM"] == "0", \
+        f"the scenarios rely on warm feeds, so no inherited value may switch to manual arm: {env}"
+
+
 def t_sheet_tabs_follow_the_event():
     scn = scenario.from_dict({"event": {"stints": 3, "commentators": [
         {"name": "Comms 1", "channel": "comms1", "scheduled": True},

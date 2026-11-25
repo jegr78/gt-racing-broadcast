@@ -3726,6 +3726,21 @@ def gt7_forward_write_data(text, path=None):
     return dict(result, value=value) if result.get("ok") else result
 
 
+FEED_ARM_ENV = "RACECAST_MANUAL_FEED_ARM"
+
+
+def feed_arm_write_data(mode, path=None):
+    """Store the feed arming mode (#1325) in the machine .env as the relay's
+    RACECAST_MANUAL_FEED_ARM flag: `auto` writes off, `manual` writes on (never the
+    old template's 1, which the Control Center flags). A real environment value
+    still wins at relay start. `path` is a test seam."""
+    flags = {"auto": "off", "manual": "on"}
+    if not isinstance(mode, str) or mode not in flags:
+        return {"ok": False, "error": "feed arming is auto or manual"}
+    result = env_upsert_data({FEED_ARM_ENV: flags[mode]}, path=path)
+    return dict(result, mode=mode) if result.get("ok") else result
+
+
 def _parse_gt7_discover_args(rest):
     """Return (save, print_only, timeout, pick). Raises ValueError on bad input."""
     usage = ("usage: racecast gt7-discover [--save] [--print] "
@@ -11204,6 +11219,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "ps_discover": ps_discover_data,
         "ps_write": ps_ip_write_data,
         "gt7_forward_write": gt7_forward_write_data,
+        "feed_arm_write": feed_arm_write_data,
         "profiles": profiles_data,
         "profile_logo": profile_logo,
         "profile_use": profile_use_data,
@@ -12052,7 +12068,7 @@ def _smoke_rundown(say):
     # call is skipped and the byte wait alone decides. See sm.arm_verdict.
     manual_arm = bool(_smoke_relay_get("status").get("manual_feed_arm"))
     if not manual_arm:
-        say("  note: manual feed arm is off. Feeds self-arm, ARM steps skip the call")
+        say("  note: the relay auto-arms. Feeds self-arm, ARM steps skip the call")
     for i, step in enumerate(sm.RUNDOWN, start=1):
         name = f"step{i:02d}_{step.label.lower().replace(' ', '_')}"
         if step.label == "STINT A":

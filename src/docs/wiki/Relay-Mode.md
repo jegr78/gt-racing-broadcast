@@ -144,11 +144,12 @@ is no need to continue the previous producer's A/B order; `/next` works as
 usual from there. Full checklist:
 [Run an event → Producer handover](Run-an-event#producer-handover-12h24h-multi-part-events).
 
-> With manual feed-arm (**the default**), "preloads" means Feed B's index is *positioned*
-> on the next stint: it does **not** pull until you **arm** it before the swap, and
-> `/next` auto-stops the outgoing feed after it cuts (the single-puller flow: see
-> [At a driver change](Director#at-a-driver-change)). Set `RACECAST_MANUAL_FEED_ARM=0`
-> to restore immediate pre-warm pulling (home producers on a residential IP).
+> With auto-arm (**the default**), "preloads" means Feed B pulls the next stint as soon as
+> its link is in the Schedule. With manual arm (Control Center **General Settings →
+> Feeds**, or `RACECAST_MANUAL_FEED_ARM=1` in the machine `.env`) Feed B's index is only
+> *positioned* on the next stint: it does **not** pull until you **arm** it before the
+> swap, and `/next` stops the outgoing feed after it cuts (the single-puller flow: see
+> [At a driver change](Director#at-a-driver-change)).
 
 ## 4. Control it (Companion → relay)
 
@@ -186,16 +187,18 @@ as **one slot = one feed pull**: the stream is pulled once, and the on-screen **
 label** advances on each `/next` with **no re-pull and no program cut**. The off-air feed
 always skips a same-URL run and parks on the next *distinct* slot, so two feeds never pull
 the identical stream: the single-puller rule that keeps a cloud producer under YouTube's
-per-IP limit (see [Why arm?](Director#at-a-driver-change)).
+per-IP limit (see [Why manual arm?](Director#at-a-driver-change)).
 
 So `/next` decides per press:
 
 - **Continuation**, the next row repeats the on-air URL → **label only**: the displayed
   stint advances; nothing is armed, stopped or cut.
-- **Real handover**, the next row is a new URL → the pre-armed off-air feed is cut in,
-  and the outgoing feed is auto-stopped and advanced past the run to the next distinct slot.
+- **Real handover**, the next row is a new URL → the serving off-air feed is cut in,
+  and the outgoing feed advances past the run to the next distinct slot. With manual arm
+  it also stops there until it is armed.
 
-In the tables below, `LIVE` = on air + pulling · `off`/`STOP` = disarmed (no pull) ·
+The tables below show manual arm. With auto-arm there are no ARM steps and a feed never
+shows `STOP`: it pulls its slot as soon as the slot has a link. In the tables, `LIVE` = on air + pulling · `off`/`STOP` = disarmed (no pull) ·
 `idle` = parked past the schedule end · `idxN` = the feed's pull row (0-based).
 
 ### Scenario A: back-to-back in the middle
@@ -344,9 +347,10 @@ seconds after their monitor, instead of about 5.
 
 There is no yt-dlp resolve, no cookies and no quality tiers for a local stint. The
 Director Panel marks the feed `LOCAL` and shows *local capture* where a remote feed shows
-its resolution. **Arming works as for any feed**: with manual feed-arm (the default) a
-local stint does not open the card until its feed is armed, and `/next` stops it when it
-goes off air.
+its resolution. **Arming works as for any feed**: with auto-arm (the default) the off-air
+feed opens the card as soon as the local stint is its next stint; with manual arm a local
+stint does not open the card until its feed is armed, and `/next` stops it when it goes
+off air.
 
 ### Nothing else may open the card
 

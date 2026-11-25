@@ -18,8 +18,7 @@ m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 import _obs_guard  # noqa: E402
 _obs_guard.install(m)
 
-# Manual feed arm defaults on, so a bare Relay starts its feeds paused. These
-# checks exercise the auto-pull path, so pin the opt-out. (#492)
+# These checks exercise the auto-arm path; pin it against a developer's environment.
 os.environ.setdefault("RACECAST_MANUAL_FEED_ARM", "0")
 
 SECRET = "s3cret-league"

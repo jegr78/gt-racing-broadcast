@@ -97,6 +97,61 @@ console.log(JSON.stringify([
         "relay control not responding"], f"a starting relay is its own state: {res.stdout}"
 
 
+def t_feed_arm_save_keeps_the_explanation():
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return
+    script = "async " + _control_center_function("saveFeedArm") + """
+const nodes = {'feed-arm': {value: 'manual', dataset: {}}, 'feed-arm-hint': {textContent: 'EXPLAIN'},
+               'feed-arm-status': {textContent: '', hidden: true}};
+const $ = id => nodes[id];
+const fetch = async () => ({json: async () => ({ok: true, mode: 'manual'})});
+const loadSettings = () => {};
+saveFeedArm().then(() => console.log(JSON.stringify([nodes['feed-arm-hint'].textContent,
+  nodes['feed-arm-status'].textContent, nodes['feed-arm-status'].hidden])));
+"""
+    res = subprocess.run([node, "-"], input=script, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", timeout=30)
+    assert res.returncode == 0, res.stderr
+    assert json.loads(res.stdout) == ["EXPLAIN", "Saved manual arm, restart the relay to apply.", False], \
+        f"the save status shows beside the explanation, which stays: {res.stdout}"
+
+
+def t_control_center_names_the_old_template_value_only():
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return
+    script = _control_center_function("feedArmFromTemplate") + """
+const e = v => [{key: 'RACECAST_MANUAL_FEED_ARM', value: v}];
+console.log(JSON.stringify([feedArmFromTemplate([]), feedArmFromTemplate(e('1')), feedArmFromTemplate(e(' 1 ')),
+  feedArmFromTemplate(e('on')), feedArmFromTemplate(e('0'))]));
+"""
+    res = subprocess.run([node, "-"], input=script, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", timeout=30)
+    assert res.returncode == 0, res.stderr
+    assert json.loads(res.stdout) == [False, True, True, False, False], \
+        f"only the old template's 1 is flagged, the Control Center itself writes on/off: {res.stdout}"
+
+
+def t_control_center_reads_feed_arming_like_the_relay():
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return
+    script = _control_center_function("feedArmMode") + """
+const e = v => [{key: 'RACECAST_OTHER', value: '1'}, {key: 'RACECAST_MANUAL_FEED_ARM', value: v}];
+console.log(JSON.stringify([feedArmMode([]), feedArmMode(e('1')), feedArmMode(e(' On ')),
+  feedArmMode(e('0')), feedArmMode(e('')), feedArmMode(e('maybe'))]));
+"""
+    res = subprocess.run([node, "-"], input=script, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", timeout=30)
+    assert res.returncode == 0, res.stderr
+    assert json.loads(res.stdout) == ["auto", "manual", "manual", "auto", "auto", "auto"], \
+        f"only a truthy flag means manual, as in the relay: {res.stdout}"
+
+
 def t_relay_status_data_older_relay_has_no_keep_awake():
     d = rc.relay_status_data(read_pid=lambda p: 4242, alive=lambda pid: True,
                               probe=lambda: {})

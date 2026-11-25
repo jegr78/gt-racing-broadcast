@@ -26,7 +26,8 @@ Loaded when working under `src/ui/`.
   `POST /api/league-event/timing` (#1256, `{on: bool}`, `league_timing_data`, guarded by
   `expectedProfile`), the section's **Timing page** checkbox.
 - **General Settings**, machine-wide knobs: the `.env` editor (`RACECAST_*` vars),
-  cookie refresh, and the **overlay font library** (`runtime/fonts/`, shared across
+  cookie refresh, **Feeds → Feed arming** (endurance only, `POST /api/feed-arm`
+  `{mode: auto|manual}` writes `RACECAST_MANUAL_FEED_ARM`, #1325; the relay reads it at start), and the **overlay font library** (`runtime/fonts/`, shared across
   leagues). A curated baseline set (`overlay_build.GOOGLE_FONTS`) is downloaded at build
   time into `fonts.zip`, bundled INTO each binary, and extracted into `runtime/fonts/` on
   first start by `ensure_bundled_fonts()` (stamp-gated, only-if-absent, zip-slip-safe, so
