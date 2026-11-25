@@ -189,3 +189,13 @@ Deno.test("a row ranked beyond 999 is left out whole", () => {
   eq(L.leagueWidgets({ league: [{ id: "t", form: "table", title: "", value: { rows } }] })[0].rows.map((r) => r.rank),
      [999], "rank cap");
 });
+
+Deno.test("the race timer counts down by the data age and blanks at zero", () => {
+  eq(L.timerText(null, false, 0), "", "no timer");
+  eq(L.timerText(3723, true, 0), "1:02:03", "hours");
+  eq(L.timerText(600, true, 0.4), "10:00", "rounds the counted-down remainder up");
+  eq(L.timerText(600, true, 1), "9:59", "counts down while it runs");
+  eq(L.timerText(1, true, 1), "", "a run-out clock blanks instead of standing at 0:00");
+  eq(L.timerText(300, false, 50), "5:00", "a paused clock stands");
+  eq(L.timerText(0, false, 0), "0:00", "a clock paused at zero still shows");
+});

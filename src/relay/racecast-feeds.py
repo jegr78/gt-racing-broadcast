@@ -2735,6 +2735,16 @@ def timer_mode(state, now):
     return "prestart"
 
 
+def public_remaining(timer):
+    """(remaining seconds, running) of a TimerStore.data() for the dashboards and the
+    public timing; (None, False) whenever the HUD clock is blank or stands at a preset."""
+    if timer and timer["mode"] == "running" and timer["end"]:
+        return max(0, round(timer["end"] - timer["server_now"])), True
+    if timer and timer["mode"] == "paused":
+        return timer["remaining_s"], False
+    return None, False
+
+
 def merge_timer_states(local, sheet):
     """Newest write wins; tie (or no sheet state) -> local. Makes a producer
     takeover adopt the Sheet anchor without letting a stale Sheet revert a
@@ -17360,15 +17370,10 @@ def main():
         """What the driver dashboard shows beside the race (#1115)."""
         rows = schedule_rows(relay)
         cur = live_schedule_row(rows, relay.on_air_row_idx()) if rows else None
-        timer = timer_store.data() if timer_store else None
-        remaining = None
-        if timer and timer["mode"] == "running" and timer["end"]:
-            remaining = max(0, round(timer["end"] - timer["server_now"]))
-        elif timer and timer["mode"] == "paused":
-            remaining = timer["remaining_s"]
+        remaining, running = public_remaining(timer_store.data() if timer_store else None)
         return {"roster": hud_source.roster_details() if hud_source else {},
                 "stint": cur["stint"] if cur else None, "remaining": remaining,
-                "remaining_running": bool(timer and timer["mode"] == "running" and timer["end"]),
+                "remaining_running": running,
                 "mode": relay.mode, "segment": cur["stint"] if cur and relay.mode == "qualifying" else None,
                 "connections": driver_hub.connections() if relay.mode == "qualifying" else []}
 
