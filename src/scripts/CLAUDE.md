@@ -169,7 +169,11 @@ never the real one.
   (`tests/test_simulation.py` fails on a bare `["yt-dlp"` or `["streamlink"` under `src/`);
   the directory is also put first on `PATH`; `RACECAST_SIM_OBS_WS` (`ws://127.0.0.1:<port>`,
   read in `obs_ws._connect`, no password; unset = OBS off, `wait_until_ready` returns at
-  once); `RACECAST_SIM_SHEET_PUSH_URL` and `RACECAST_SIM_DISCORD_WEBHOOK_URL` replace the
+  once; `RACECAST_SIM_OBS_WS_PASSWORD` is its password when it requires one);
+  `RACECAST_SIM_RTMP` (`rtmp://127.0.0.1:<port>/<app>`, read in
+  `obs_ws.stream_service_payload`) makes a Part's stream target that loopback sink instead
+  of the platform, for a real OBS in a simulation; a value off loopback raises instead of
+  falling back; `RACECAST_SIM_SHEET_PUSH_URL` and `RACECAST_SIM_DISCORD_WEBHOOK_URL` replace the
   league values in `config.resolve_config` (`config_overrides`), which also blanks Discord
   OAuth/voice and the timing host keys; `RACECAST_SIM_LEAGUE_SERVICE_URL` (loopback http)
   and `_KEY` replace `LEAGUE_SERVICE_URL`/`_KEY`, off when unset; `env_overrides` does the same for the env vars

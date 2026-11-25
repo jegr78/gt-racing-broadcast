@@ -1,4 +1,5 @@
 """Fail-closed local Linux containment and finite foreground inspection leases."""
+from collections import namedtuple
 import json
 import math
 import os
@@ -14,6 +15,8 @@ MAX_SECONDS=900
 LONG_MAX_SECONDS=7800
 MAX_TASKS=512
 MAX_MEMORY=2*1024**3
+# A run's unit limits: memory in bytes, tasks, CPU in percent of one core.
+Limits=namedtuple('Limits','memory tasks cpu')
 # Host memory admission: a run started while the host swaps stalls on IO.
 PROC=Path('/proc')
 MEMORY_MARGIN=512*1024**2        # MemAvailable must hold the unit's cap plus this
@@ -31,7 +34,25 @@ def current_group():
     raise RuntimeError('E2E requires cgroup v2 containment on local Linux')
 
 
-def limited(group):
+def default_limits():
+    """The unit limits every E2E run gets, read at call time."""
+    return Limits(MAX_MEMORY,MAX_TASKS,200)
+
+
+def limits_arg(limits):
+    return f'--limits={limits.memory},{limits.tasks},{limits.cpu}'
+
+
+def parse_limits(text):
+    """Limits from limits_arg's text; ValueError for anything else."""
+    if not text.startswith('--limits='):raise ValueError('not a --limits argument')
+    values=[int(v) for v in text[len('--limits='):].split(',')]
+    if len(values)!=3 or not all(v>0 for v in values):raise ValueError('--limits takes memory,tasks,cpu above 0')
+    return Limits(*values)
+
+
+def limited(group,limits=None):
+    limits=limits or default_limits()
     if group.name!=UNIT:return False
     try:
         tasks=int((group/'pids.max').read_text(encoding='utf8',errors='replace'))
@@ -39,7 +60,7 @@ def limited(group):
         quota,period=map(int,(group/'cpu.max').read_text(encoding='utf8',errors='replace').split())
     except (OSError,ValueError) as error:
         raise RuntimeError('E2E resource limits could not be verified') from error
-    if not (0<tasks<=MAX_TASKS and 0<memory<=MAX_MEMORY and 0<quota<=2*period and period>0):
+    if not (0<tasks<=limits.tasks and 0<memory<=limits.memory and period>0 and 0<quota*100<=limits.cpu*period):
         raise RuntimeError('E2E cgroup resource limits are missing or weakened')
     return True
 
@@ -61,11 +82,12 @@ def host_memory(proc=None):
     return state
 
 
-def memory_strain(state):
-    """Why the host cannot take a run now, or ''. A missing value never blocks."""
-    reasons=[]
-    if state['available'] is not None and state['available']<MAX_MEMORY+MEMORY_MARGIN:
-        reasons.append(f"MemAvailable {state['available']//1024**2} MiB < {(MAX_MEMORY+MEMORY_MARGIN)//1024**2} MiB")
+def memory_strain(state,memory=None):
+    """Why the host cannot take a run of `memory` bytes (default MAX_MEMORY) now, or ''.
+    A missing value never blocks."""
+    reasons=[];need=(MAX_MEMORY if memory is None else memory)+MEMORY_MARGIN
+    if state['available'] is not None and state['available']<need:
+        reasons.append(f"MemAvailable {state['available']//1024**2} MiB < {need//1024**2} MiB")
     if state['some'] is not None and state['some']>PSI_SOME_AVG10_MAX:
         reasons.append(f"memory PSI some avg10 {state['some']:g}% > {PSI_SOME_AVG10_MAX:g}%")
     if state['full'] is not None and state['full']>PSI_FULL_AVG10_MAX:
@@ -81,12 +103,12 @@ def unit_busy():
     except OSError:return False  # no systemctl: systemd-run reports it
 
 
-def wait_for_memory(proc=None,clock=time.monotonic,sleep=time.sleep,seconds=PRESSURE_WAIT_SECONDS):
+def wait_for_memory(proc=None,clock=time.monotonic,sleep=time.sleep,seconds=PRESSURE_WAIT_SECONDS,memory=None):
     """Return once the host has memory for a run; after `seconds` of pressure raise
     RuntimeError('host under memory pressure: ...') with the values. Never starts silently."""
     begin=clock();told=False
     while True:
-        reason=memory_strain(host_memory(proc))
+        reason=memory_strain(host_memory(proc),memory)
         if not reason:return
         if clock()-begin>=seconds:
             raise RuntimeError(f'host under memory pressure: {reason} (waited {seconds:g}s)')
@@ -118,7 +140,7 @@ def watch_owner(fd,kill_fd,seconds=None):
         finally:os.close(kill_fd)
 
 
-def owner_watchdog(pid,start,seconds=None):
+def owner_watchdog(pid,start,seconds=None,limits=None):
     if type(pid) is not int or pid<=1:raise RuntimeError('Invalid E2E admission owner')
     path=Path('/proc')/str(pid)
     fd=os.pidfd_open(pid)
@@ -127,7 +149,7 @@ def owner_watchdog(pid,start,seconds=None):
         if path.stat().st_uid!=os.getuid() or path.joinpath('stat').read_text(encoding='utf8',errors='replace').rsplit(')',1)[1].split()[19]!=start:
             raise RuntimeError('E2E admission owner changed')
         group=current_group()
-        if not limited(group):raise RuntimeError('E2E owner watchdog requires verified containment')
+        if not limited(group,limits):raise RuntimeError('E2E owner watchdog requires verified containment')
         kill_fd=os.open(group/'cgroup.kill',os.O_WRONLY)
         subprocess.Popen([sys.executable,str(Path(__file__).resolve()),'--watch-owner',str(fd),str(kill_fd),str(lifetime(MAX_SECONDS if seconds is None else seconds,long=True))],
                          pass_fds=(fd,kill_fd),stdin=subprocess.DEVNULL)
@@ -136,25 +158,29 @@ def owner_watchdog(pid,start,seconds=None):
         if kill_fd is not None:os.close(kill_fd)
 
 
-def enter(script,argv,seconds=None,long=False):
+def enter(script,argv,seconds=None,long=False,limits=None):
     """Return the contained run's exit code, or None inside an admitted worker.
     `seconds` (default MAX_SECONDS, read now) bounds the unit and the owner watcher;
-    more than 900 s only with `long` (the event simulation)."""
+    more than 900 s only with `long` (the event simulation). `limits` (default
+    default_limits()) are the unit's own, for a caller that states larger ones."""
     seconds=lifetime(MAX_SECONDS if seconds is None else seconds,long)
+    own=limits is not None;limits=limits or default_limits()
     if sys.platform!='linux':return None
     if os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('RUNNER_ENVIRONMENT')=='github-hosted':return None
-    if limited(current_group()):return None
+    if limited(current_group(),limits):return None
     # Another run's memory is no pressure to wait out: name the busy unit instead.
     if unit_busy():raise RuntimeError(f'E2E unit {UNIT} is busy with another run; start this one after it')
-    wait_for_memory()
+    if own:wait_for_memory(memory=limits.memory)
+    else:wait_for_memory()
     pid,start=owner_identity()
     command=['systemd-run','--user','--quiet','--wait','--collect','--pipe',
-             '--unit='+UNIT,'--property=CPUQuota=200%',
-             '--property=TasksMax='+str(MAX_TASKS),'--property=MemoryMax='+str(MAX_MEMORY),
+             '--unit='+UNIT,f'--property=CPUQuota={limits.cpu}%',
+             '--property=TasksMax='+str(limits.tasks),'--property=MemoryMax='+str(limits.memory),
              '--property=RuntimeMaxSec='+str(seconds),'--property=TimeoutStopSec=10s',
              '--property=KillMode=control-group','--property=CPUWeight=10',
              '--working-directory='+str(Path(script).resolve().parents[1]),
-             sys.executable,str(Path(__file__).resolve()),'--exec',str(pid),start,str(seconds),str(Path(script).resolve()),*argv]
+             sys.executable,str(Path(__file__).resolve()),'--exec',str(pid),start,str(seconds),
+             *([limits_arg(limits)] if own else []),str(Path(script).resolve()),*argv]
     # Forward the environment through stdin, never argv (which can expose secrets).
     try:
         result=subprocess.run(command,input=json.dumps(dict(os.environ))+'\n',text=True)
@@ -186,8 +212,11 @@ def main(argv):
     environment=json.loads(raw)
     if not isinstance(environment,dict) or not all(isinstance(k,str) and isinstance(v,str) for k,v in environment.items()):
         raise SystemExit('Invalid bounded E2E environment')
-    owner_watchdog(int(argv[2]),argv[3],lifetime(int(argv[4]),long=True))
-    os.execve(sys.executable,[sys.executable,*argv[5:]],environment)
+    rest=argv[5:]
+    if rest and rest[0].startswith('--limits='):
+        owner_watchdog(int(argv[2]),argv[3],lifetime(int(argv[4]),long=True),limits=parse_limits(rest[0]));rest=rest[1:]
+    else:owner_watchdog(int(argv[2]),argv[3],lifetime(int(argv[4]),long=True))
+    os.execve(sys.executable,[sys.executable,*rest],environment)
 
 
 if __name__=='__main__':

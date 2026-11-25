@@ -78,7 +78,9 @@ start.
   |---|---|---|
   | `RACECAST_SIM_SHEET_URL` | `https://docs.google.com/spreadsheets/d/<SHEET_ID>`; tabs are read from `<url>/gviz/tq?tqx=out:csv&sheet=<Tab>` | yes |
   | `RACECAST_SIM_STREAM_BIN` | a directory holding stand-ins for `yt-dlp` and `streamlink` (`.exe` on Windows); racecast starts them by their path there, never a `yt-dlp` found elsewhere | yes |
-  | `RACECAST_SIM_OBS_WS` | the OBS WebSocket, as `ws://127.0.0.1:<port>`, no password | no |
+  | `RACECAST_SIM_OBS_WS` | the OBS WebSocket, as `ws://127.0.0.1:<port>` | no |
+  | `RACECAST_SIM_OBS_WS_PASSWORD` | that WebSocket's password, when the OBS behind it requires one | no |
+  | `RACECAST_SIM_RTMP` | the stream target OBS gets when a Part starts, as `rtmp://127.0.0.1:<port>/<app>`, in place of the Channel tab's platform | no |
   | `RACECAST_SIM_SHEET_PUSH_URL` | the league `SHEET_PUSH_URL` | no |
   | `RACECAST_SIM_DISCORD_WEBHOOK_URL` | the league `DISCORD_WEBHOOK_URL` | no |
   | `RACECAST_SIM_LEAGUE_SERVICE_URL` / `RACECAST_SIM_LEAGUE_SERVICE_KEY` | the league `LEAGUE_SERVICE_URL` and its key (`http://` on loopback is allowed here only) | no |

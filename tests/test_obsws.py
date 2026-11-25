@@ -1736,6 +1736,49 @@ def t_stream_service_payload_twitch_case_insensitive():
     assert d["streamServiceSettings"]["key"] == "sk_1"
 
 
+def t_a_simulation_authenticates_with_its_obs_password():
+    from unittest.mock import patch
+    seen = []
+    orig, m._open_session = m._open_session, lambda host, port, password, timeout: seen.append(password) or object()
+    try:
+        env = {"RACECAST_SIMULATION": "1", "RACECAST_SIM_OBS_WS": "ws://127.0.0.1:4466",
+               "RACECAST_SIM_OBS_WS_PASSWORD": "per-run-secret"}
+        with patch.dict(os.environ, env):
+            m._connect(None, None, None, 1)
+        with patch.dict(os.environ, {"RACECAST_SIMULATION": "1", "RACECAST_SIM_OBS_WS": "ws://127.0.0.1:4466"}):
+            os.environ.pop("RACECAST_SIM_OBS_WS_PASSWORD", None)
+            m._connect(None, None, None, 1)
+    finally:
+        m._open_session = orig
+    assert seen == ["per-run-secret", ""], f"a simulated OBS with a password gets it, one without gets none: {seen}"
+
+
+def t_a_simulation_streams_only_to_its_loopback_rtmp_target():
+    from unittest.mock import patch
+    sim = {"RACECAST_SIMULATION": "1", "RACECAST_SIM_RTMP": "rtmp://127.0.0.1:5555/live"}
+    with patch.dict(os.environ, sim):
+        d = m.stream_service_payload("youtube", "k1")
+    assert d == {"streamServiceType": "rtmp_custom",
+                 "streamServiceSettings": {"server": "rtmp://127.0.0.1:5555/live", "key": "k1",
+                                           "use_auth": False}}, \
+        f"a simulation with a real OBS streams to the run's own sink, never to the platform: {d}"
+    for bad in ("rtmp://a.rtmp.youtube.com/live2", "rtmps://127.0.0.1:5555/live", "nonsense"):
+        with patch.dict(os.environ, dict(sim, RACECAST_SIM_RTMP=bad)):
+            try:
+                m.stream_service_payload("youtube", "k1")
+            except ValueError as exc:
+                assert "RACECAST_SIM_RTMP" in str(exc), exc
+            else:
+                raise AssertionError(f"a simulation RTMP target {bad!r} off loopback must be refused")
+    with patch.dict(os.environ, {"RACECAST_SIMULATION": "0", "RACECAST_SIM_RTMP": sim["RACECAST_SIM_RTMP"]}):
+        assert m.stream_service_payload("youtube", "k")["streamServiceType"] == "rtmp_common", \
+            "outside a simulation the sink variable changes nothing"
+    with patch.dict(os.environ, {"RACECAST_SIMULATION": "1"}):
+        os.environ.pop("RACECAST_SIM_RTMP", None)
+        assert m.stream_service_payload("youtube", "k")["streamServiceType"] == "rtmp_common", \
+            "the simulated OBS keeps the platform service it reports"
+
+
 def t_stream_service_payload_unknown_platform_raises():
     try:
         m.stream_service_payload("kick", "x")

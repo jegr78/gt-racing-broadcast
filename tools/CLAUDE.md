@@ -490,7 +490,8 @@ every other address; they open no connection. `StreamStub(dir).install()` writes
 The picture comes from ffmpeg: `testsrc2` at 640x360 and 25 fps, mpeg2video and mp2 in
 MPEG-TS. It carries stint, commentator and channel as drawtext from `label.txt` in
 fontconfig's default font; if drawtext fails, the pull logs it and goes on without text.
-An 18-cell strip at the bottom holds the channel's `code` and stint, and the audio is a
+An 18-cell strip, a band of a thirtieth of the picture (at least `STRIP_MIN` = 8 px) at
+the bottom edge, holds the channel's `code` and stint, and the audio is a
 sine at `tone_hz(code)`.
 `decode_identity(rgb, w, h)` reads `(code, stint)` back from a grabbed frame. The stand-in
 copies ffmpeg's output itself, so killing it leaves ffmpeg on a broken pipe. A freeze,
@@ -499,6 +500,20 @@ packets only, continues each PID's continuity counter and gives the new run an
 `-output_ts_offset` two frames past the last PTS sent (or the wall clock after a gap), so
 PTS and PCR keep rising across the seam. Both are 33-bit 90 kHz values and would wrap after
 about 26.5 hours of one pull, longer than any simulated event.
+
+The `card` look (`StreamStub(look="card")`, `install --look card`, stored in `stub.json` so
+the stand-in processes read it) is what a record run's feeds show: the demo overlay's
+colours (`profiles/demo/overlay/hud.css`) with a slowly moving `gradients` source, and
+overlaid the images in `DIR/cards/` (`card_paths`): `<channel>.png` with the stint and the
+commentator's name, and a clock whose `hand.png` turns once a minute over `dial.png` from the
+pull's offset, so a restarted ffmpeg does not reset it. A record run renders those images
+with Playwright's Chromium before the relay starts; ffmpeg draws no text, because stock
+builds such as Homebrew's lack `drawtext`. A channel the `stream` role creates during the
+run, or whose stint or commentator it changes, gets its card rendered in the run's browser
+before the stub serves it (written to a temporary file, then renamed). A channel without
+images shows the bare card. A
+frozen card is still and has no clock. The identity strip, the tone and one thread per stage
+stay as in the pattern look.
 
 Control for the scenario engine: each channel is `<dir>/channels/<name>.json`, which every
 running pull reads every 0.2 s; an unreadable file keeps the last state, and a Windows
@@ -929,6 +944,95 @@ times on a maintainer machine, start and teardown included:
   sender sends as the spectator (`[event] probe = true` sets `RACECAST_TELEMETRY_PROBE=1`)
   and runs its `--check` through the invite; the report step asserts six changes inside
   the window with the anchor carried, four blocks and the restart's session starts.
+
+### Record mode (`--record`, `--obs real`, #1310)
+
+Records a scenario for the event walkthrough video (spec
+`docs/superpowers/specs/2026-11-24-event-walkthrough-video-design.md`). The renderer reads
+only DIR.
+
+```bash
+python3 tools/event-sim/event_sim.py --scenario full --out OUT --record DIR              # simulated OBS
+python3 tools/event-sim/event_sim.py --scenario full --out OUT --record DIR --obs real   # program from a real OBS
+python3 tools/event-sim/event_sim.py --restore-obs   # macOS: put back the OBS configuration a killed run left
+```
+
+- Pages: each page role's browser context records its page as a Playwright video into
+  `DIR/pages/<role>/` at the page's own viewport. Only in a record run, two init scripts go
+  into each context: a pointer with a click mark (`pointer-events: none`, top frame only)
+  and a stylesheet, adopted before the first paint, that paints every `selectors.LINKS`
+  match black. The mask changes paint only, so the roles still read the masked text. A
+  click, fill or choice first moves the mouse to the control in `POINTER_STEPS` moves.
+- `DIR/timeline.json`: `steps` (each step that ran: `id`, `role`, `action`, `status`,
+  `start`, `end`, plus `caption`, `chapter` and `focus` when the scenario step has them) and
+  `recordings` (`view`, `kind` page or program, `file` relative to DIR, `size`, `start`). All
+  times are seconds since the engine started; a recording started before has a negative
+  start. It goes through the run's redaction.
+- Feeds and clips: the stream stub runs the `card` look, and before the relay starts the
+  run renders every title in one Chromium session (the cards of the scenario's
+  commentators, and the clip titles) and draws `intro.mp4`, `trailer.mp4` and `outro.mp4`
+  (9 s, the title image over the card colours, silent audio) into the app home's
+  `runtime/demo/media`, where the localized collection reads them.
+- Limits: `record.py` states `RECORD_MEMORY` (6 GiB: on macOS `full` with page videos
+  peaked at 2.75 GB for the whole tree and the second OBS at 0.74 GB, which `--obs real`
+  starts as a descendant of the run), `RECORD_TASKS` and `RECORD_CPU_PERCENT`. Before the unit or the stack
+  starts, the run is refused off Linux and macOS, without Playwright, with an ffmpeg that
+  lacks one of `record.FILTERS` (all in a stock build; `drawtext` is not needed), on a Linux host whose MemAvailable is
+  below the memory plus `e2e_safety.MEMORY_MARGIN`, and on a Mac with less memory. On local
+  Linux the run's unit gets these limits (`e2e_safety.enter(..., limits=)`, carried to the
+  owner watcher). Outside a verified unit (macOS, a hosted runner) a watchdog samples the
+  run's whole process tree every `WATCH_INTERVAL_S`, walking ppid from the run, since
+  Playwright's driver, the browsers and their ffmpeg run in their own process groups. Past
+  the memory limit it sends the run a SIGINT (the report gets a hard finding, the cleanup
+  still quits OBS and restores its configuration) and kills the descendants when the tree is
+  still over the limit `WATCH_GRACE_S` later. Once the run is in its cleanup it is no longer interrupted,
+  only killed past the grace. `--record` with `--repeat` is refused.
+- `--obs real` (needs `--record`; `obs_real.py`): OBS as a second instance (`--multi
+  --minimize-to-tray --disable-missing-files-check`, on macOS also
+  `--disable-shutdown-check`) with the Sim profile (1920x1080, 30 fps, mkv into
+  `DIR/program/`), the demo collection under the profile's `OBS_COLLECTION` name with its
+  tokens pointing into the app home and every capture input turned into an empty media
+  input of the same name, and its WebSocket on a free port with a random per-run password
+  (obs-websocket listens on every interface; the run's client and the relay connect to
+  127.0.0.1 with it, through `RACECAST_SIM_OBS_WS_PASSWORD`, and the report redacts it). OBS
+  gets port and password on its command line (`--websocket_port`, `--websocket_password`,
+  obs-websocket 5 turns authentication on and saves neither), so no file holds the password;
+  OBS logs its command line, so the copied `obs.log` is redacted. Its
+  stream target is the run's RTMP sink (`fakes/rtmp_sink.py`): an ffmpeg that listens on a
+  free loopback port, reads a Part's stream and drops it, and listens again for the next
+  Part. It runs under `e2e_child.py` like the services, starts before OBS and stops after it.
+  The run sets `RACECAST_SIM_RTMP`, so a Part's start points OBS at the sink instead of the
+  Channel tab's platform (`obs_ws.stream_service_payload`); nothing leaves loopback, and
+  `obs.streaming` reads a real stream. On Linux its configuration lives under the work dir (`XDG_CONFIG_HOME`),
+  so a running OBS of the user stays untouched. On macOS OBS ignores that: the run refuses
+  while any OBS runs (`pgrep -x OBS`), copies `~/Library/Application Support/obs-studio` with
+  `ditto` to a temporary copy, verifies it, renames it to `obs-studio.racecast-sim-backup`
+  and only then writes `obs-studio.racecast-sim-backup.complete`; a copy that breaks off is
+  removed. After the run it copies the backup next to the folder, verifies the copy, swaps
+  it in (a folder already gone is just replaced) and compares every file by SHA-256. The
+  backup is removed only when they match. The quit and the restore hold SIGINT, SIGTERM and
+  SIGHUP until they finished; a restore that cannot finish prints the way back. A backup
+  left over (a run killed from outside) refuses the next run and names the recovery:
+  `event_sim.py --restore-obs` refuses while OBS runs and refuses a backup without its
+  completion mark (the run that made it never changed the folder), restores the folder,
+  verifies every file and removes the backup only when they match. Its WebSocket listens
+  before OBS has loaded and answers 207 (not ready) meanwhile; the run asks again until the
+  start timeout (60 s). The run starts the recording once the stack is up and stops it after
+  the pages closed, each time until `GetRecordStatus` reports it; the program's start on
+  the timeline is the moment OBS answered StartRecord. OBS starts only after the relay answers on its port, because a relay page that
+  finds the relay down keeps Chromium's error page; after the start the run reloads every
+  relay page once (`refreshnocache`) and notes it in `obs-state.json` (`refreshed`). The RTMP
+  sink starts earlier. Evidence for a live run, in `OUT/logs`: `obs-state.json` (`when` start, and
+  stint once the first `Stint` scene is on air: `program_scene`, its items with their
+  visibility, each browser source's url, width and height), `hud-source-start.png` and
+  `hud-source.png` (the HUD source alone at those moments) and `obs.log` (the log files this
+  OBS wrote, copied before the restore removes them on macOS), all redacted. After the start the run checks that OBS's first relay page opens the run's
+  URL and refuses an OBS that loaded another collection. Then OBS gets
+  SIGINT on its own PID only (OBS 32.1 and later save and close on SIGINT; obs-websocket has
+  no quit request), SIGTERM 30 s later, and only after that is its process group killed, as
+  a finding. A signal to the whole group kills the browser's GPU process first. The probes
+  and the `obs` role read OBS through `ObsMirror`, an `ObsState` of the same collection
+  that follows OBS's program scene, item visibility and outputs.
 
 ## Driver replay (`tools/driver-replay.py`, #1115)
 

@@ -362,6 +362,44 @@ def t_admission_checks_the_host_before_it_starts_the_unit():
     assert order==['memory','unit'],'no unit was started under pressure'
 
 
+
+def t_stated_limits_reach_the_unit_the_owner_watcher_and_the_admission():
+    big=safety.Limits(8*1024**3,4096,600);calls=[];needs=[]
+    def run(command,**kw):calls.append(command);return SimpleNamespace(returncode=0)
+    with patch.object(safety.sys,'platform','linux'),patch.dict(safety.os.environ,{'GITHUB_ACTIONS':''}), \
+         patch.object(safety,'owner_identity',return_value=(12345,'42')), \
+         patch.object(safety,'current_group',return_value=Path('/outside')),patch.object(safety.subprocess,'run',run), \
+         patch.object(safety,'wait_for_memory',side_effect=lambda **kw:needs.append(kw.get('memory'))):
+        safety.enter(__file__,['--x'],limits=big)
+    command=calls[0]
+    for prop in ('CPUQuota=600%','TasksMax=4096','MemoryMax='+str(8*1024**3)):
+        assert '--property='+prop in command,f'the unit gets the stated {prop}'
+    assert needs==[8*1024**3],'the host is admitted against the stated memory'
+    i=command.index('--exec')
+    assert command[i+4]==safety.limits_arg(big) and command[i+5:]==[str(Path(__file__).resolve()),'--x'],command
+    stdin=SimpleNamespace(buffer=SimpleNamespace(readline=lambda n:json.dumps({'A':'b'}).encode()+b'\n'))
+    with patch.object(safety,'owner_watchdog') as watchdog,patch.object(safety.os,'execve') as execve, \
+         patch.object(safety.sys,'stdin',stdin):
+        safety.main(['e2e_safety.py','--exec','12345','42','900',safety.limits_arg(big),'script.py','--x'])
+    assert watchdog.call_args.kwargs['limits']==big,'the owner watcher verifies the stated limits'
+    assert execve.call_args.args[1][1:]==['script.py','--x'],'the limits are no argument of the run'
+    with tempfile.TemporaryDirectory() as root:
+        group=limits(root,**{'pids.max':'4096','memory.max':str(8*1024**3),'cpu.max':'600000 100000'})
+        assert safety.limited(group,big),'a worker in the larger unit is admitted with its stated limits'
+        try:safety.limited(group)
+        except RuntimeError:pass  # the default caller still refuses the larger unit
+        else:raise AssertionError('a larger unit passed the default limits')
+        limits(root,**{'pids.max':'4096','memory.max':str(8*1024**3+1),'cpu.max':'600000 100000'})
+        try:safety.limited(group,big)
+        except RuntimeError:pass  # past the stated memory fails closed
+        else:raise AssertionError('memory past the stated limit was accepted')
+    assert safety.memory_strain({'available':5*1024**3,'some':None,'full':None},8*1024**3), \
+        'a host with less memory than the stated limit is under strain for that run'
+    for bad in ('--limits=1,2','--limits=0,1,1','--limits=a,b,c','--other=1,2,3'):
+        try:safety.parse_limits(bad)
+        except ValueError:continue
+        raise AssertionError(f'{bad} accepted')
+
 if __name__=='__main__':
     for name,fn in sorted(globals().copy().items()):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)

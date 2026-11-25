@@ -30,11 +30,14 @@ for _p in (FAKES, os.path.join(ROOT, "src", "scripts"), os.path.join(ROOT, "tool
 
 import console_auth  # noqa: E402
 import drive  # noqa: E402
+import obs_real  # noqa: E402
 import e2e_safety  # noqa: E402
 import obs_grab  # noqa: E402
 import obs_sim  # noqa: E402
 import ports  # noqa: E402
 import probes  # noqa: E402
+import record  # noqa: E402
+import rtmp_sink  # noqa: E402
 import simulation  # noqa: E402
 import league_sim  # noqa: E402
 import sheet_sim  # noqa: E402
@@ -45,6 +48,7 @@ PROFILE = "demo"
 RESERVED_PORTS = frozenset({8088, 8089, 53001, 53002, 53003})
 COLLECTION = os.path.join(ROOT, "src", "obs", "GT_Racing_Endurance.json")
 CHILD = os.path.join(ROOT, "tools", "e2e_child.py")
+RTMP_SINK = os.path.join(FAKES, "rtmp_sink.py")
 TEARDOWN_MARGIN_S = 600           # start, teardown and the report around the steps
 READY_TIMEOUT_S = 90
 LOG_TAIL = 4000
@@ -89,6 +93,12 @@ def stamp_relay(home, pid):
     for name, text in stamps + ([("relay.started", marker)] if marker else []):
         with open(os.path.join(runtime, name), "w", encoding="utf-8") as fh:
             fh.write(text)
+
+
+def run_collection(feeds, control, path=COLLECTION):
+    """The demo collection with its feed inputs and relay pages on this run's ports."""
+    with open(path, encoding="utf-8") as fh:
+        return rewrite_feed_urls(json.load(fh), port_map(feeds, control))
 
 
 def free_port(taken=(), pick=_any_port):
@@ -239,6 +249,36 @@ def make_home(home, src=SRC, profile=PROFILE_DIR, track=None):
     return os.path.join(home, "src", "racecast.py")
 
 
+def profile_value(key, profile=PROFILE_DIR):
+    """`key` of the demo profile's profile.env, "" when it has none."""
+    try:
+        with open(os.path.join(profile, "profile.env"), encoding="utf-8") as fh:
+            for line in fh:
+                name, sep, value = line.strip().partition("=")
+                if sep and name.strip() == key:
+                    return value.strip()
+    except OSError:
+        pass  # no profile file: no value
+    return ""
+
+
+def media_dir(home):
+    return os.path.join(home, "runtime", PROFILE, "media")
+
+
+def prepare_record(home, stub_dir, channels, render=record.render_pngs, make=record.make_clips):
+    """A record run's pictures: the card look's images for `channels` in the stub dir and
+    the intro, trailer and outro clips in the app home's media dir, every title rendered
+    in one browser session."""
+    titles = os.path.join(home, "runtime", "record-titles")
+    images, jobs = record.clip_jobs(titles, profile_value("NAME") or PROFILE)
+    try:
+        render(record.card_jobs(stub_dir, channels) + jobs)
+        return make(media_dir(home), images)
+    finally:
+        shutil.rmtree(titles, ignore_errors=True)
+
+
 class Child:
     """One supervised service. `stop()` closes the control pipe; the supervisor then
     stops the whole tree."""
@@ -284,6 +324,14 @@ class Child:
             return ""
 
 
+def relay_answers(base):
+    """True when the relay answers /status."""
+    try:
+        return probes.http_json(base, "/status", timeout=2)[0] == 200
+    except (OSError, http.client.HTTPException):
+        return False
+
+
 def wait_http(base, path, child, timeout, clock=time.monotonic, sleep=time.sleep):
     deadline = clock() + timeout
     while clock() < deadline:
@@ -321,13 +369,19 @@ def log_findings(text, name):
 
 
 class Stack:
-    def __init__(self, scn, work_dir, python=sys.executable, ready_timeout=READY_TIMEOUT_S):
+    def __init__(self, scn, work_dir, python=sys.executable, ready_timeout=READY_TIMEOUT_S, record=False,
+                 obs="sim", record_dir=None, evidence_dir=None):
+        if obs == "real" and not record_dir:
+            raise ValueError("a real OBS records into the record dir: --obs real needs --record")
         self.scn = scn
+        self.record = record             # a record run: the card look and the generated clips
+        self.obs_kind, self.record_dir = obs, record_dir
+        self.evidence_dir = evidence_dir     # where a real OBS leaves its state, HUD picture and log
         self.work = os.path.abspath(work_dir)
         self.python = python
         self.ready_timeout = ready_timeout
         self.secret = secrets.token_hex(24)
-        self.sheet = self.sink = self.stub = self.obs = self.league = None
+        self.sheet = self.sink = self.stub = self.obs = self.league = self.rtmp = None
         self.children = []
         self.urls = {}
         self.racecast = self.env = self.home = None
@@ -348,13 +402,24 @@ class Stack:
         self.sheet = sheet_sim.SheetSim(tabs=sheet_tabs(self.scn), stream_keys=keys).start()
         self.sink = webhook_sink.WebhookSink().start()
         self.league = league_sim.LeagueSim(key=secrets.token_hex(16)).start()
-        self.stub = stream_stub.StreamStub(os.path.join(self.work, "streams")).install()
+        self.stub = stream_stub.StreamStub(os.path.join(self.work, "streams"),
+                                           look="card" if self.record else "pattern").install()
         for c in self.scn.commentators:
             self.stub.channel(c.channel, stint=c.stint, commentator=c.name)
-        with open(COLLECTION, encoding="utf-8") as fh:
-            collection = rewrite_feed_urls(json.load(fh), port_map((feed_a, feed_b, pov), http_port))
+        if self.record:
+            prepare_record(os.path.dirname(os.path.dirname(racecast)), self.stub.directory, self.scn.commentators)
+        collection = run_collection((feed_a, feed_b, pov), http_port)
         grabber = obs_grab.FeedGrabber(ports=(feed_a, feed_b, pov), interval=2.0)
-        self.obs = obs_sim.ObsSim(collection=collection, grabber=grabber).start()
+        if self.obs_kind == "real":
+            home = os.path.dirname(os.path.dirname(racecast))
+            localized = obs_real.localize(collection, home, profile_value("OBS_COLLECTION"), PROFILE_DIR)
+            self.rtmp = self._sink(port())
+            # Started once the relay answers (below): its env goes to the relay now.
+            self.obs = obs_real.RealObs(self.work, self.record_dir, localized, grabber=grabber,
+                                        rtmp=rtmp_sink.url(self.rtmp.port), evidence=self.evidence_dir,
+                                        relay_ready=lambda: relay_answers(f"http://127.0.0.1:{http_port}"))
+        else:
+            self.obs = obs_sim.ObsSim(collection=collection, grabber=grabber).start()
 
         fakes = {}
         for fake in (self.sheet, self.sink, self.stub, self.obs, self.league):
@@ -372,17 +437,28 @@ class Stack:
                                       "--gt7-bind", "127.0.0.1", "--gt7-port", "0",
                                       "--gt7-ps-ip", "127.0.0.1"], env, home)
         self.urls = {"relay": f"http://127.0.0.1:{http_port}", "ui": f"http://127.0.0.1:{ui_port}",
-                     "obs": self.obs.http_url, "sheet": self.sheet.http_url, "sink": self.sink.http_url,
-                     "league": self.league.http_url}
+                     "sheet": self.sheet.http_url, "sink": self.sink.http_url, "league": self.league.http_url,
+                     **({"obs": self.obs.http_url} if hasattr(self.obs, "http_url") else {})}
         wait_http(self.urls["relay"], "/status", relay, self.ready_timeout)
         holders = ports.pids_on_port(http_port)
         if len(holders) != 1:
             raise RuntimeError(f"expected one relay on port {http_port}, found PIDs {holders}")
         stamp_relay(home, holders[0])
+        if self.obs_kind == "real":
+            self.obs.start()
         ui = self._child("ui", [self.python, racecast, "--simulation", "ui", "--no-browser"], env, home)
         wait_http(self.urls["ui"], "/api/ping", ui, self.ready_timeout)
         self.feed_ports = (feed_a, feed_b, pov)
         return self
+
+    def _sink(self, port):
+        """The RTMP sink a real OBS streams to: owned like the services, stopped after OBS."""
+        logs = os.path.join(self.work, "logs")
+        os.makedirs(logs, exist_ok=True)
+        child = Child("rtmp-sink", [self.python, RTMP_SINK, "--port", str(port)], dict(os.environ), self.work,
+                      os.path.join(logs, "rtmp-sink.log"), lifetime(self.scn))
+        child.port = port
+        return child
 
     def _child(self, name, argv, env, cwd):
         logs = os.path.join(self.work, "logs")
@@ -390,6 +466,10 @@ class Stack:
         child = Child(name, argv, env, cwd, os.path.join(logs, name + ".log"), lifetime(self.scn))
         self.children.append(child)
         return child
+
+    def run_secrets(self):
+        """Every credential of the run for the report's redaction."""
+        return [self.secret] + ([self.obs.password] if getattr(self.obs, "password", None) else [])
 
     def token(self, name):
         return console_auth.mint_token(self.secret, console_auth.streamer_key(name), version=1)
@@ -414,7 +494,7 @@ class Stack:
 
     def log_files(self):
         """(name, path) of every service log: the captured output and the relay's own logs."""
-        out = [(c.name, c.log_path) for c in self.children]
+        out = [(c.name, c.log_path) for c in self.children + ([self.rtmp] if self.rtmp else [])]
         logs = os.path.join(self.work, "app", "runtime", PROFILE, "logs")
         if os.path.isdir(logs):
             out += [("relay-" + n[:-4], os.path.join(logs, n)) for n in sorted(os.listdir(logs))
@@ -477,9 +557,13 @@ class Stack:
         for fake in (self.obs, self.sink, self.sheet, self.league):
             if fake is not None:
                 try:
-                    fake.stop()
+                    problems += fake.stop() or []      # the real OBS names what its quit and restore met
                 except Exception as exc:  # stop the others too
                     problems.append(f"{type(fake).__name__} stop: {exc}")
+        if self.rtmp is not None:
+            problem = self.rtmp.stop()
+            if problem:
+                problems.append(problem)
         if logs_to:
             os.makedirs(logs_to, exist_ok=True)
             for name, path in self.log_files():
