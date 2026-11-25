@@ -115,14 +115,19 @@ Three stages, each usable on its own.
   the HTTP registration leaves out (`drivers register` with `skip`). A seat the desk
   corrects is not one that drives afterwards: the page's code stays under the seat the
   form sent.
-- **Program.** `--obs real` starts OBS as a separate instance: its own configuration
-  directory inside the run's work dir, the localized demo scene collection, its
-  WebSocket on a free port, no stream target. The run starts and stops OBS's recording
-  over the WebSocket. The user's own OBS configuration is never read or written. Without
-  `--obs real` the stand-in stays, as today.
+- **Program.** `--obs real` starts OBS as a separate instance with a Sim profile, the
+  localized demo scene collection, its WebSocket on a free port with a per-run password,
+  and a loopback RTMP sink of the run as its stream target. On Linux it reads its own
+  configuration directory inside the run's work dir, and the user's configuration is never
+  read or written. On macOS OBS ignores that, so the run refuses while any OBS runs, backs
+  up the user's configuration folder (verified, then marked complete), writes the Sim files
+  into it, and after the run restores the folder and verifies every file; a backup left by
+  a killed run is restored with `event_sim.py --restore-obs`. The run starts and stops
+  OBS's recording over the WebSocket. Without `--obs real` the stand-in stays, as today.
 - **Feeds.** The stream stub gets a `card` look: dark background in the demo colours,
   the title ("Stint 1"), the commentator's name, a running clock and slow motion in the
-  background, all drawn by ffmpeg as today's test pattern is. `--record` selects it.
+  background. The texts and the clock face are rendered once as PNGs with Playwright's
+  Chromium and ffmpeg only overlays them, so no `drawtext` is needed. `--record` selects it.
 - **Intro, trailer, outro.** Generated the same way as short clips (8 to 10 s) into the
   run's media directory, where the demo collection's media sources expect them. Nothing
   is committed and nothing is downloaded.
@@ -173,8 +178,8 @@ shot names before and after, and the new steps carry no deck shot names.
   before the stack starts, and fails closed like the other runs. An OOM kill is a hard
   failure.
 - The demo profile only. Ports 8088 and 8089 stay untouched, as in every simulation.
-- The recording shows console links and tokens of the demo run. They are masked with the
-  existing redaction before a frame is written.
+- The recording shows console links and tokens of the demo run. A CSS mask over the same
+  selectors the screenshots mask paints them black before a frame is written.
 
 ## Gates before the build
 

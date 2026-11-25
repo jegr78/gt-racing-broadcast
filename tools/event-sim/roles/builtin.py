@@ -7,12 +7,14 @@ import os
 import pathlib
 import re
 import time
+from types import SimpleNamespace
 from urllib.parse import quote, urlencode, urlsplit
 
 import expect
 import probes
 import redaction
 import scenario
+from stream_stub import channel_name
 from roles import Role, ShotUnavailable, StepError, Unavailable, register, selectors
 
 PAGE_TIMEOUT_MS = 15000
@@ -114,10 +116,29 @@ class StreamRole(Role):
 
     def act_channel(self, args):
         try:
+            self._card(args)
             return self._stub().channel(str(args.get("name")), stint=args.get("stint"),
                                         commentator=args.get("commentator"), status=args.get("status"))
         except ValueError as exc:
             raise StepError(str(exc)) from None
+
+    def _card(self, args):
+        """In a record run, render the channel's card before the stub serves the channel,
+        when it is new or its stint or commentator changes."""
+        rec = getattr(self.ctx, "recorder", None)
+        if rec is None:
+            return
+        stub, name = self._stub(), str(args.get("name"))
+        old = stub.get(name) if channel_name(name) else None
+        stint = args.get("stint") if args.get("stint") is not None else (old or {}).get("stint")
+        who = args.get("commentator") if args.get("commentator") is not None else (old or {}).get("commentator")
+        if old is not None and (stint, who) == (old.get("stint"), old.get("commentator")):
+            return
+        browser = self.ctx.browser()
+        if browser is None:
+            self.ctx.finding("soft", f"no card for {name}: {self.ctx.browser_problem()}")
+            return
+        rec.channel_card(stub.directory, SimpleNamespace(channel=name, stint=stint, name=who), browser=browser)
 
     def _window(self, args):
         if "for" not in args:
@@ -297,10 +318,16 @@ class PageRole(Role):
                 if not (isinstance(size, list) and len(size) == 2 and all(type(v) is int and v > 0 for v in size)):
                     raise StepError(f"open: viewport is [width, height], not {size!r}")
                 self.viewport = {"width": size[0], "height": size[1]}
-            self.context = browser.new_context(viewport=dict(self.viewport))
+            rec = getattr(self.ctx, "recorder", None)
+            options = rec.context_options(self.name, self.viewport) if rec else {}
+            self.context = browser.new_context(viewport=dict(self.viewport), **options)
             self.context.add_init_script(LONG_TASK_OBSERVER)
+            for script in rec.init_scripts() if rec else ():
+                self.context.add_init_script(script)
             self._trace_start()
             self.pg = self.context.new_page()
+            if rec:
+                rec.page_opened(self.name, self.pg, self.viewport)
             self.pg.on("console", self._console)
             self.pg.on("pageerror", self._pageerror)
             self.pg.on("requestfailed", self._requestfailed)

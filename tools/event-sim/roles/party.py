@@ -25,6 +25,7 @@ URI_SAFE = "!'()*~"      # what the page's encodeURIComponent leaves as it is
 MEDIA_PLAYING = "OBS_MEDIA_STATE_PLAYING"
 MEDIA_SLACK_S = 10.0     # how long past its length a clip may take to end on air
 ERROR_S = 2.0            # how long a page takes to show the reason of a refused request
+POINTER_STEPS = 12       # mouse moves per pointer travel in a record run: visible motion, not a jump
 
 
 def stint_label(value):
@@ -104,17 +105,25 @@ class Surface(builtin.PageRole):
             self.ctx.finding("soft", f"{what}: the control is outside the {view['width']}x{view['height']} "
                                      "viewport, the page has to be scrolled")
 
+    def point(self, loc):
+        """In a record run, move the visible pointer to the control's centre; returns `loc`."""
+        rec = getattr(self.ctx, "recorder", None)
+        box = loc.bounding_box() if rec else None
+        if box:
+            self.pg.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2, steps=POINTER_STEPS)
+        return loc
+
     def click(self, selector, what):
         with self.timed("click", what):
-            self.control(selector, what).click(timeout=CONTROL_MS)
+            self.point(self.control(selector, what)).click(timeout=CONTROL_MS)
 
     def fill(self, selector, text, what):
         with self.timed("fill", what):
-            self.control(selector, what).fill(str(text), timeout=CONTROL_MS)
+            self.point(self.control(selector, what)).fill(str(text), timeout=CONTROL_MS)
 
     def choose(self, selector, what, label=None, value=None):
         with self.timed("choose", what):
-            loc = self.control(selector, what)
+            loc = self.point(self.control(selector, what))
             try:
                 if label is not None:
                     loc.select_option(label=str(label), timeout=CONTROL_MS)

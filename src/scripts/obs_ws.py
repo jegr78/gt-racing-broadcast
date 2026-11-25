@@ -520,7 +520,7 @@ def _connect(host, port, password, timeout):
         target = simulation.obs_target()
         if target is None:
             return None, SIM_OBS_OFF
-        (host, port), password = target, password or ""
+        (host, port), password = target, password or simulation.obs_password()
     else:
         cfg = read_ws_config(default_config_path())
         host, port = resolve_obs_target(host, port, os.environ, cfg)
@@ -703,10 +703,15 @@ def stream_service_payload(platform, key):
     """Build SetStreamServiceSettings request data for a single-channel event.
     `platform` is the case-insensitive Channel-tab value, 'youtube' or 'twitch'; an
     unknown one raises ValueError, which the caller turns into a producer-facing
-    note rather than a crash. The key is passed through verbatim and never logged."""
+    note rather than a crash. The key is passed through verbatim and never logged. In a
+    simulation with RACECAST_SIM_RTMP (a real OBS) the target is that loopback sink."""
     svc = OBS_STREAM_SERVICES.get((platform or "").strip().lower())
     if not svc:
         raise ValueError(f"unknown stream platform: {platform!r}")
+    sink = simulation.rtmp_target() if simulation.active() else ""
+    if sink:
+        return {"streamServiceType": "rtmp_custom",
+                "streamServiceSettings": {"server": sink, "key": key, "use_auth": False}}
     return {"streamServiceType": "rtmp_common",
             "streamServiceSettings": {"service": svc["service"],
                                       "server": svc["server"], "key": key}}

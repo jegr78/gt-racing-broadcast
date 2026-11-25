@@ -12,6 +12,7 @@ contained run after the other, and writes DIR/summary.html and DIR/summary.json 
 DIR/run-NN/ (tools/CLAUDE.md, hunting a flake). Maintainer tool, not shipped."""
 import argparse
 import contextlib
+import dataclasses
 import json
 import os
 import shutil
@@ -29,6 +30,7 @@ for _p in (HERE, os.path.join(HERE, "fakes"), os.path.join(ROOT, "src", "scripts
 import e2e_safety  # noqa: E402
 import flake  # noqa: E402
 import logsetup  # noqa: E402
+import record  # noqa: E402
 import roles  # noqa: E402
 import scenario  # noqa: E402
 import stack  # noqa: E402
@@ -56,7 +58,7 @@ def _load(text):
 
 def build_parser():
     ap = argparse.ArgumentParser(description="Run an event-simulation scenario and write its report.")
-    ap.add_argument("--scenario", required=True, help="a bundled scenario name or a path to a .toml file")
+    ap.add_argument("--scenario", help="a bundled scenario name or a path to a .toml file (required)")
     ap.add_argument("--out", help="report directory (required unless --check)")
     ap.add_argument("--check", action="store_true", help="only load and validate the scenario")
     ap.add_argument("--keep-work", action="store_true",
@@ -70,6 +72,13 @@ def build_parser():
                     help="run the scenario N times, one contained run after the other, and summarize")
     ap.add_argument("--load", type=_load, metavar="cpu:K",
                     help=f"K busy workers (1-{flake.MAX_LOAD}) inside the run, sharing its CPU quota")
+    ap.add_argument("--record", metavar="DIR",
+                    help="record every page, the program and timeline.json into DIR (the event video)")
+    ap.add_argument("--obs", choices=("sim", "real"), default="sim",
+                    help="sim: the simulated OBS (default); real: a separate OBS instance that records "
+                         "the program into DIR (needs --record)")
+    ap.add_argument("--restore-obs", action="store_true",
+                    help="macOS: restore the OBS configuration from the backup a killed --obs real run left")
     return ap
 
 
@@ -110,22 +119,44 @@ def owned_work(out, keep=False):
                 os.remove(note)
 
 
-def run(scn, out, keep_work=False, headed=False, no_skips=False, trace="off", load=None):
+def run(scn, out, keep_work=False, headed=False, no_skips=False, trace="off", load=None, record_dir=None,
+        obs="sim"):
     with owned_work(out, keep=keep_work) as work:
-        return _run(scn, out, work, no_skips=no_skips, headed=headed, trace=trace, load=load)
+        return _run(scn, out, work, no_skips=no_skips, headed=headed, trace=trace, load=load,
+                    record_dir=record_dir, obs=obs)
 
 
-def _run(scn, out, work, headed=False, no_skips=False, trace="off", load=None):
+def _unchanged(value):
+    return value
+
+
+def write_timeline(rec, eng, scrub):
+    """DIR/timeline.json of a record run whose engine started; its path, or None."""
+    if rec is None or eng is None or eng.start is None:
+        return None
+    steps = [dataclasses.asdict(r) for r in eng.results.values()]
+    return rec.write(scrub(rec.timeline(eng.scenario, steps, eng.start)))
+
+
+def _run(scn, out, work, headed=False, no_skips=False, trace="off", load=None, record_dir=None, obs="sim"):
     import browser
     import engine
     import report
-    st = stack.Stack(scn, work)
+    rec = record.Recorder(record_dir) if record_dir else None
+    dog = record.Watchdog(record.LIMITS.memory).start() if rec and not record.in_unit() else None
+    st = stack.Stack(scn, work, record=rec is not None, obs=obs, record_dir=record_dir,
+                     evidence_dir=os.path.join(out, "logs"))
+    eng = None
     br = browser.Browser(headless=not headed)
     busy = flake.Load(flake.parse_load(load)[1]) if load else None
     data = None
     try:
         try:
             st.start()
+            if obs == "real":
+                at = st.obs.start_record()
+                rec.program_started(None, size=dict(zip(("width", "height"), stack.obs_real.CANVAS, strict=True)),
+                                    at=at)
         except Exception as exc:
             print(f"event-sim: the stack did not start: {exc}", file=sys.stderr)
             return 2
@@ -133,30 +164,58 @@ def _run(scn, out, work, headed=False, no_skips=False, trace="off", load=None):
             busy.start(work, stack.lifetime(scn))
         ctx = engine.RunContext(urls=st.urls, token=st.token, stub=st.stub, obs=st.obs,
                                 browser=br, out_dir=out, event=scn.event, event_link=st.event_link,
-                                secrets=[st.secret], kill_relay=st.kill_relay, trace=trace)
+                                secrets=st.run_secrets(), kill_relay=st.kill_relay, trace=trace, recorder=rec)
         eng = engine.Engine(scn, ctx, st.probes(), registry=roles.default_registry(),
                             shots_dir=os.path.join(out, "shots"), final_checks=[st.log_checks],
                             no_skips=no_skips, traces_dir=os.path.join(out, "traces"))
         try:
             data = eng.run()
+        except KeyboardInterrupt:
+            if dog is None or not dog.reason:
+                raise
+            data = eng.data(list(eng.results.values()))
+            data["ok"] = False
+            data["findings"].insert(0, {"severity": "hard", "role": "", "step": "", "message": dog.reason})
         except Exception:
             data = eng.data([r for r in eng.results.values()])
             data["ok"] = False
             data["findings"].insert(0, {"severity": "hard", "role": "", "step": "",
                                         "message": ctx.scrub("engine error: " + traceback.format_exc(limit=3))})
+    except KeyboardInterrupt:
+        if dog is None or not dog.reason:
+            raise
+        print(f"event-sim: {dog.reason}", file=sys.stderr)
+        return 1
     finally:
-        br.close()
+        if dog is not None:
+            dog.disarm()
+        br.close()          # closing the contexts finishes the page videos
         problems = []
+        if obs == "real" and getattr(st.obs, "recording", False):
+            try:
+                rec.program_file(st.obs.stop_record())
+            except Exception as exc:  # noqa: BLE001  OBS still quits with the stack
+                problems.append(f"OBS recording stop: {type(exc).__name__}: {exc}")
+        try:
+            write_timeline(rec, eng, ctx.scrub if eng is not None else _unchanged)
+        except Exception as exc:  # noqa: BLE001  the stack still stops and the report is still written
+            problems.append(f"timeline: {type(exc).__name__}: {exc}")
         try:
             problems += busy.stop() if busy else []
         except Exception as exc:  # noqa: BLE001  the stack still stops and the report is still written
             problems.append(f"load workers: {type(exc).__name__}: {exc}")
-        problems += st.stop(logs_to=os.path.join(out, "logs"))
+        with record.deferred_signals() if obs == "real" else contextlib.nullcontext():
+            problems += st.stop(logs_to=os.path.join(out, "logs"))
+        for p in problems:
+            if "--restore-obs" in p:
+                print(f"event-sim: {p}", file=sys.stderr)
         if data is not None:
             data["setup"] = {"load": load, "trace": trace}
             for p in problems:
                 data["findings"].append({"severity": "soft", "role": "", "step": "", "message": ctx.scrub(p)})
             report.write(out, data)
+        if dog is not None:
+            dog.stop()
     hard = [f for f in data["findings"] if f["severity"] == "hard"]
     soft = [f for f in data["findings"] if f["severity"] == "soft"]
     for s in data["steps"]:
@@ -174,7 +233,8 @@ def _run_argv(scn, out, args):
     """The argv of one contained run."""
     return (["--scenario", scn.path, "--out", out] + ["--keep-work"] * args.keep_work
             + ["--headed"] * args.headed + ["--no-skips"] * args.no_skips + ["--trace", args.trace]
-            + (["--load", args.load] if args.load else []))
+            + (["--load", args.load] if args.load else [])
+            + (["--record", os.path.abspath(args.record)] if args.record else []) + ["--obs", args.obs])
 
 
 def _sha():
@@ -233,6 +293,14 @@ def repeat(scn, out, args, enter=e2e_safety.enter, wait=flake.wait_for_unit):
 def main(argv=None):
     logsetup.harden_stdio()
     args = build_parser().parse_args(argv)
+    if args.restore_obs:
+        import obs_real
+        code, text = obs_real.restore_obs()
+        print(f"event-sim: {text}", file=sys.stderr if code else sys.stdout)
+        return code
+    if not args.scenario:
+        print("event-sim: --scenario is required", file=sys.stderr)
+        return 2
     try:
         scn = scenario.load(scenario.find(args.scenario, SCENARIOS), roles.default_registry())
     except (scenario.ScenarioError, OSError, ValueError) as exc:
@@ -245,11 +313,23 @@ def main(argv=None):
         print("event-sim: --out DIR is required", file=sys.stderr)
         return 2
     out = os.path.abspath(args.out)
+    if args.obs == "real" and not args.record:
+        print("event-sim: --obs real records the program into the --record DIR", file=sys.stderr)
+        return 2
+    if args.repeat and args.record:
+        print("event-sim: --record makes one recording, not --repeat runs", file=sys.stderr)
+        return 2
     if args.repeat:
         return repeat(scn, out, args)
+    if args.record:
+        problem = record.admission()
+        if problem:
+            print(f"event-sim: not started: {problem}", file=sys.stderr)
+            return 2
     # The contained run starts in tools/, so it gets absolute paths.
     try:
-        contained = e2e_safety.enter(__file__, _run_argv(scn, out, args), seconds=stack.lifetime(scn), long=True)
+        contained = e2e_safety.enter(__file__, _run_argv(scn, out, args), seconds=stack.lifetime(scn), long=True,
+                                     **({"limits": record.LIMITS} if args.record else {}))
     except RuntimeError as exc:          # no containment, or the host under memory pressure
         print(f"event-sim: not started: {exc}", file=sys.stderr)
         return 2
@@ -257,7 +337,8 @@ def main(argv=None):
         return contained
     try:
         return run(scn, out, keep_work=args.keep_work, headed=args.headed, no_skips=args.no_skips,
-                   trace=args.trace, load=args.load)
+                   trace=args.trace, load=args.load,
+                   record_dir=os.path.abspath(args.record) if args.record else None, obs=args.obs)
     except RuntimeError as exc:          # the out dir names an earlier run's work dir
         print(f"event-sim: not started: {exc}", file=sys.stderr)
         return 2

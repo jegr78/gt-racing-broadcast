@@ -371,6 +371,15 @@ def t_identity_strip_round_trips_through_a_frame():
     assert stream_stub.decode_identity(bytes(px), w, h) is None, "a grey cell is not read as a bit"
 
 
+def t_the_identity_strip_is_a_thin_band_at_the_bottom_edge():
+    for w, h in ((640, 360), (426, 240)):
+        boxes = stream_stub.identity_boxes(w, h, 173, 3)
+        tops = {y for _x, y, _w, bh, _white in boxes}
+        heights = {bh for _x, _y, _w, bh, _white in boxes}
+        assert tops == {h - max(heights)} and max(heights) <= max(stream_stub.STRIP_MIN, h // 30), \
+            f"the strip is a band of at most a thirtieth of the picture at its bottom edge: {heights} of {h}"
+
+
 def t_ffmpeg_argv_is_conservative():
     argv = stream_stub.ffmpeg_argv(["ffmpeg"], "play", 360, 7, 2, text=True, offset=3.5)
     joined = " ".join(argv)
@@ -383,6 +392,44 @@ def t_ffmpeg_argv_is_conservative():
     frozen = " ".join(stream_stub.ffmpeg_argv(["ffmpeg"], "freeze", 360, 7, 2, text=False, offset=0))
     assert "smptebars" in frozen and "testsrc2" not in frozen and "drawtext" not in frozen
     assert "size=640x360" in frozen
+
+
+def t_the_card_look_keeps_the_identity_the_tone_and_one_thread():
+    images = stream_stub.CardImages("/c/comms2.png", "/c/dial.png", "/c/hand.png")
+    argv = stream_stub.ffmpeg_argv(["ffmpeg"], "play", 360, 7, 2, text=True, offset=3.5, look="card", card=images)
+    joined = " ".join(argv)
+    plain = " ".join(stream_stub.ffmpeg_argv(["ffmpeg"], "play", 360, 7, 2, text=True, offset=3.5))
+    boxes = [p for p in plain.split(",") if p.startswith("drawbox")]
+    assert boxes and all(b in joined for b in boxes), "the card carries the identity strip obs.program_channels reads"
+    assert "gradients=" in joined and stream_stub.CARD_BG in joined and "testsrc2" not in joined, \
+        "the card is the demo colours with a moving gradient, not the test pattern"
+    assert "drawtext" not in joined, "the card draws no text in ffmpeg: Homebrew's ffmpeg has no drawtext"
+    for path in images:
+        assert path in argv, f"the card overlays the pre-rendered {path}"
+    assert "rotate=a=(t+3.500)*PI/30" in joined, \
+        "the clock's hand turns once a minute from the pull's offset, so an ffmpeg restart does not reset it"
+    assert "sine=frequency=" in joined and "-filter_threads 1" in joined and "-threads 1" in joined, \
+        "the card keeps the channel's tone and one thread per stage"
+    frozen = " ".join(stream_stub.ffmpeg_argv(["ffmpeg"], "freeze", 360, 7, 2, text=True, offset=0, look="card",
+                                              card=images))
+    assert "gradients" not in frozen and "hand.png" not in frozen, "a frozen card stands still, without a clock"
+    bare = " ".join(stream_stub.ffmpeg_argv(["ffmpeg"], "play", 360, 7, 2, text=True, offset=3.5, look="card"))
+    assert ".png" not in bare and all(b in bare for b in boxes), "a channel without images keeps the bare card"
+    with tempfile.TemporaryDirectory() as d:
+        stream_stub.StreamStub(d, look="card").install()
+        pull = stream_stub.Pull(d, "comms2", 360, ["ffmpeg"], lambda b: None, lambda line: None)
+        assert pull.look == "card", "the stand-in processes read the look from stub.json"
+        assert stream_stub.card_images(d, "comms2") is None, "no images rendered: none used"
+        for path in stream_stub.card_paths(d, "comms2"):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            open(path, "wb").close()
+        assert stream_stub.card_images(d, "comms2") == stream_stub.card_paths(d, "comms2")
+    try:
+        stream_stub.StreamStub("x", look="poster")
+    except ValueError:
+        pass  # an unknown look is refused
+    else:
+        raise AssertionError("an unknown look must be refused")
 
 
 def _ts_packet(pid, cc, pts=None, payload=True):
@@ -985,7 +1032,12 @@ def t_real_ffmpeg_pull_carries_the_identity():
     if not ok:
         assert not os.environ.get("OBS_SIM_REQUIRE_FFMPEG"), "this CI job installs ffmpeg"
         raise Skip("no working ffmpeg on PATH")
-    stub = _stub(ffmpeg=["ffmpeg"])
+    for look in stream_stub.LOOKS:
+        _real_pull_identity(look)
+
+
+def _real_pull_identity(look):
+    stub = _stub(ffmpeg=["ffmpeg"], look=look)
     code = stub.channel("comms2", stint=2, commentator="Ben")["code"]
     restore = _on_path(stub)
     try:
@@ -1005,7 +1057,8 @@ def t_real_ffmpeg_pull_carries_the_identity():
                 pull.stdout.close()
                 pull.stderr.close()
             assert len(frame.stdout) == 640 * 360 * 3, (mode, frame.stderr, err)
-            assert stream_stub.decode_identity(frame.stdout, 640, 360) == (code, 2), (mode, err)
+            assert stream_stub.decode_identity(frame.stdout, 640, 360) == (code, 2), \
+                f"the thin strip still decodes after mpeg2 in the {look} look, {mode}: {err}"
             if os.environ.get("OBS_SIM_REQUIRE_FFMPEG"):   # the e2e job's ffmpeg has a default font
                 assert "without text" not in err, "drawtext works with the CI ffmpeg: " + err
     finally:

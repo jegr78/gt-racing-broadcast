@@ -57,6 +57,12 @@ LOCK_WAIT = 10.0
 LOCK_STALE = 10.0          # a lock older than this was left by a crashed controller
 MAX_CUTS = 32
 CELLS = 18
+STRIP_MIN = 8            # px; the decoder reads a 5x5 patch in each cell's middle, mpeg2 blurs its edges
+LOOKS = ("pattern", "card")
+# The card look's colours: the demo profile's overlay (profiles/demo/overlay/hud.css).
+CARD_BG, CARD_PANEL, CARD_TEXT, CARD_MUTED = "0x12161c", "0x243039", "0xeef0f2", "0x9aa6b2"
+CARDS = "cards"         # <dir>/cards/: the images a record run renders for the card look
+CardImages = namedtuple("CardImages", "title dial hand")
 YTDLP_VERSION = "2026.01.01"
 STREAMLINK_VERSION = "streamlink 8.2.0"
 STREAMLINK_HELP = """usage: streamlink [OPTIONS] <URL> [STREAM]
@@ -262,7 +268,10 @@ class StreamStub:
     change runs under `state_lock`, so several controllers may share a directory."""
 
     def __init__(self, directory, ffmpeg=("ffmpeg",), python=None, clock=time.time, windows=None,
-                 stream_timeout=STREAM_TIMEOUT):
+                 stream_timeout=STREAM_TIMEOUT, look="pattern"):
+        if look not in LOOKS:
+            raise ValueError(f"look is one of {', '.join(LOOKS)}, not {look!r}")
+        self.look = look
         self.directory = os.path.abspath(directory)
         self.ffmpeg = list(ffmpeg)
         if self.ffmpeg and os.path.dirname(self.ffmpeg[0]):
@@ -280,7 +289,7 @@ class StreamStub:
         except OSError:
             pass  # best effort, as for runtime dirs
         prune_pulls(self.directory)
-        _write_json(os.path.join(self.directory, "stub.json"), {"ffmpeg": self.ffmpeg,
+        _write_json(os.path.join(self.directory, "stub.json"), {"ffmpeg": self.ffmpeg, "look": self.look,
                                                                     "stream_timeout": self.stream_timeout})
         for old in glob.glob(os.path.join(self.directory, "*.old")):
             with contextlib.suppress(OSError):
@@ -545,7 +554,7 @@ def _bits(code, stint):
 
 def identity_boxes(width, height, code, stint):
     """(x, y, w, h, white) per cell of the identity strip at the bottom of the picture."""
-    cw, bh = width // CELLS, height // 8
+    cw, bh = width // CELLS, max(STRIP_MIN, height // 30)
     return [(i * cw, height - bh, cw, bh, bool(bit)) for i, bit in enumerate(_bits(code, stint or 0))]
 
 
@@ -579,22 +588,66 @@ def label_text(channel):
     return "\n".join(line for line in lines if line)
 
 
-def ffmpeg_argv(ffmpeg, mode, height, code, stint, text, offset):
-    """ffmpeg writing the pattern as MPEG-TS to stdout; `freeze` swaps the moving test
-    source for still colour bars, and `text` reads label.txt from the working directory."""
+def card_paths(directory, name):
+    """Where the card look finds a channel's title image (stint and commentator) and the
+    clock's dial and hand, all transparent PNGs a record run renders before the relay starts."""
+    cards = os.path.join(directory, CARDS)
+    return CardImages(os.path.join(cards, name + ".png"), os.path.join(cards, "dial.png"),
+                      os.path.join(cards, "hand.png"))
+
+
+def card_images(directory, name):
+    """card_paths when every image exists, else None (the bare card)."""
+    paths = card_paths(directory, name)
+    return paths if all(os.path.isfile(p) for p in paths) else None
+
+
+def _card(width, height, mode, card, offset):
+    """(sources, graph) of the card look: the demo colours with a slow moving gradient, the
+    channel's title image and a clock whose hand turns once a minute from `offset`; `freeze`
+    holds a still card without the clock. No drawtext: stock builds may lack it."""
+    if mode == "freeze":
+        sources = [("lavfi", f"color=c={CARD_PANEL}:size={width}x{height}:rate={FPS}")]
+    else:
+        sources = [("lavfi", f"gradients=size={width}x{height}:rate={FPS}:c0={CARD_BG}:c1={CARD_PANEL}:n=2:speed=0.002")]
+    if card is None:
+        return sources, "[0:v]null"
+    side = height // 5 // 2 * 2
+    sources.append(("image", card.title))
+    graph = f"[2:v]scale={width}:{height},format=rgba[title];[0:v][title]overlay=0:0"
+    if mode != "freeze":
+        sources += [("image", card.dial), ("image", card.hand)]
+        graph = (f"[2:v]scale={width}:{height},format=rgba[title];[3:v]scale={side}:{side},format=rgba[dial];"
+                 f"[4:v]scale={side}:{side},format=rgba,rotate=a=(t+{offset:.3f})*PI/30:c=none[hand];"
+                 f"[dial][hand]overlay=0:0[clock];[0:v][title]overlay=0:0[bg];[bg][clock]overlay=W-w-16:16")
+    return sources, graph
+
+
+def ffmpeg_argv(ffmpeg, mode, height, code, stint, text, offset, look="pattern", card=None):
+    """ffmpeg writing the picture as MPEG-TS to stdout. The pattern look: a moving test
+    source (still colour bars for `freeze`), `text` reads label.txt from the working
+    directory. The card look (`_card`) overlays `card` (CardImages) unless `text` is off.
+    Both carry the identity strip."""
     width = width_for(height)
-    filters = []
-    if text:
-        filters.append(f"drawtext=textfile=label.txt:expansion=none:fontcolor=white:fontsize={max(12, height // 12)}"
-                       ":box=1:boxcolor=black@0.6:x=16:y=16:line_spacing=6")
-    for x, y, w, h, white in identity_boxes(width, height, code, stint):
-        filters.append(f"drawbox=x={x}:y={y}:w={w}:h={h}:color={'white' if white else 'black'}:t=fill")
-    source = "smptebars" if mode == "freeze" else "testsrc2"
+    boxes = [f"drawbox=x={x}:y={y}:w={w}:h={h}:color={'white' if white else 'black'}:t=fill"
+             for x, y, w, h, white in identity_boxes(width, height, code, stint)]
+    if look == "card":
+        sources, graph = _card(width, height, mode, card if text else None, offset)
+    else:
+        sources = [("lavfi", f"{'smptebars' if mode == 'freeze' else 'testsrc2'}=size={width}x{height}:rate={FPS}")]
+        graph = "[0:v]" + ("drawtext=textfile=label.txt:expansion=none:fontcolor=white"
+                           f":fontsize={max(12, height // 12)}:box=1:boxcolor=black@0.6:x=16:y=16:line_spacing=6"
+                           if text else "null")
+    inputs = []
+    for n, (kind, src) in enumerate(sources):
+        inputs += (["-re", "-f", "lavfi", "-i", src] if kind == "lavfi"
+                   else ["-re", "-loop", "1", "-framerate", str(FPS), "-i", src])
+        if n == 0:
+            inputs += ["-re", "-f", "lavfi", "-i", f"sine=frequency={tone_hz(code)}:sample_rate=48000"]
     # ffmpeg sizes its pools by core count; a run's task limit has to hold every pull.
     return [*ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error", "-filter_threads", "1",
-            "-re", "-f", "lavfi", "-i", f"{source}=size={width}x{height}:rate={FPS}",
-            "-re", "-f", "lavfi", "-i", f"sine=frequency={tone_hz(code)}:sample_rate=48000",
-            "-map", "0:v", "-map", "1:a", "-vf", ",".join(filters),
+            "-filter_complex_threads", "1", *inputs,
+            "-filter_complex", graph + "," + ",".join(boxes) + "[v]", "-map", "[v]", "-map", "1:a",
             "-c:v", "mpeg2video", "-threads", "1", "-q:v", "5", "-g", str(FPS), "-bf", "0", "-pix_fmt", "yuv420p",
             "-c:a", "mp2", "-b:a", "96k", "-output_ts_offset", f"{offset:.3f}", "-f", "mpegts", "pipe:1"]
 
@@ -690,6 +743,7 @@ class Pull:
         self.stream_timeout = stream_timeout
         self.last, self.unreadable = channel, False    # the state the pull was opened with
         self.splicer = TsSplicer()
+        self.look = _config(directory).get("look", "pattern")
 
     def channel(self):
         try:
@@ -730,11 +784,13 @@ class Pull:
                 continue
             ch = self.last
             os.makedirs(workdir, exist_ok=True)
+            offset = self.splicer.next_offset(max(0.0, self.clock() - self.started))
             with open(os.path.join(workdir, "label.txt"), "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(label_text(ch))
-            offset = self.splicer.next_offset(max(0.0, self.clock() - self.started))
             self.splicer.start(offset)
-            argv = ffmpeg_argv(self.ffmpeg, act, self.height, ch["code"], ch.get("stint"), text, offset)
+            card = card_images(self.directory, ch["name"]) if self.look == "card" else None
+            argv = ffmpeg_argv(self.ffmpeg, act, self.height, ch["code"], ch.get("stint"), text, offset,
+                               look=self.look, card=card)
             self.log(f"[sim][info] {act} from {offset:.3f} s")
             try:
                 rc, wrote, changed, broken = self._ffmpeg(argv, act, workdir)
@@ -1017,6 +1073,8 @@ def main(argv=None):
     inst.add_argument("--ffmpeg", default="ffmpeg", help="ffmpeg binary the stand-ins run (default: on PATH)")
     inst.add_argument("--stream-timeout", type=float, default=STREAM_TIMEOUT,
                       help="seconds a stalled pull waits for a byte before it gives up (default: 60)")
+    inst.add_argument("--look", choices=LOOKS, default="pattern",
+                      help="pattern: the test pattern (default); card: a title card in the demo colours")
     ch = sub.add_parser("set", help="create or update a channel")
     ch.add_argument("name")
     ch.add_argument("--stint", type=int)
@@ -1032,7 +1090,8 @@ def main(argv=None):
     sub.add_parser("show", help="print every channel's state as JSON")
     a = ap.parse_args(argv)
     if a.cmd == "install":
-        stub = StreamStub(a.directory, ffmpeg=[a.ffmpeg], stream_timeout=a.stream_timeout).install()
+        stub = StreamStub(a.directory, ffmpeg=[a.ffmpeg], stream_timeout=a.stream_timeout,
+                          look=a.look).install()
         print(json.dumps(stub.env()))
         return 0
     stub = StreamStub(a.directory)
