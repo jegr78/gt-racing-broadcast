@@ -38,14 +38,17 @@ Requirement = collections.namedtuple("Requirement", ("capability", "step_up"))
 
 # The driver telemetry desk routes (#1114), reached as /console/drivers/* by directors
 # and /console/race-control/drivers/* by Race Control. /drivers/data and the race
-# reset stay on the tailnet.
+# reset stay on the tailnet. Race start (`race/start`) is a race rebuild that Race Control and
+# directors reach under /console; the relay locks it once a race is under way. A counting
+# race that was never armed and has no started timer can still be rebuilt from there; the
+# desk warns before that press, by design.
 _DRIVER_DESK_GET = {("race",), ("readiness",), ("requests",), ("invite",), ("timing-link",), ("snapshot",),
                     ("race", "recording"), ("race", "recording", "at"), ("race", "recording", "csv")}
 _DRIVER_DESK_POST = {("reassign",), ("disconnect",), ("race", "recording"),
                      ("requests", "approve"), ("requests", "correct"), ("requests", "reject"),
                      ("requests", "reject-pending"),
                      ("race", "recording", "event")} | {
-    ("race", a) for a in ("settings", "final-lap", "finish", "red-flag", "restart-mode",
+    ("race", a) for a in ("settings", "start", "unlock-start", "final-lap", "finish", "red-flag", "restart-mode",
                           "release", "rejoin", "correct", "change", "fastest", "quali", "quali-lap", "compound",
                           "estimate", "retire", "driver-name", "class-laps")}
 

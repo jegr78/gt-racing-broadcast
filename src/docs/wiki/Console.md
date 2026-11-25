@@ -71,7 +71,7 @@ desk is safe over the public Funnel.
 The desk is a fixed frame of four columns, like the [Director Panel](Director#the-director-panel),
 so the race controls never scroll away:
 
-- **Areas** (left): **Race** (race order, gaps and disconnect events), **Drivers**
+- **Areas** (left): **Race** (**Race start**, race order, gaps and disconnect events), **Drivers**
   (requests with Approve and Reject, approved drivers, readiness, senders with Move and
   Disconnect), **Corrections** (DNF and Undo DNF, rejoin and driver change, estimates,
   corrections, driver names, fastest lap), **Qualifying** (Set time, Add lap, Delete
@@ -87,6 +87,19 @@ so the race controls never scroll away:
   up), what is on air, and the race controls: the finish mode and lap count, **Final
   lap**, **Finish**, **RED FLAG**, and while the red flag is out the restart mode and
   **Restart released**. The desk's status line and its last change sit below them.
+- **Race start** in the Race area takes two clicks. Pressed once the cars stand on the
+  grid, it clears the lobby laps and arms the race timer, which then starts by itself
+  on the first race lap. It is locked, with the reason, while the race timer has
+  started (**Reset** of the timer or the director's unlock releases it), while a
+  Sheet-synced relay has not read the Timer tab yet (the Sheet answering or the
+  director's unlock with the timer kept releases it, then the timer needs **Start** by
+  hand; **Reset** does not), and once the armed race counts (a new
+  event, the director's one-time unlock or a race reset from the tailnet releases it;
+  a relay restart keeps it). While the race already counts or has finished, the first
+  click warns that Race start drops the counted laps or the result, and the
+  confirming click proceeds. Without a formation lap on a layout whose grid lies past the finish line,
+  GT7 counts lap 1 on the grid, so Race Control presses **Race start** at the green flag.
+  Details: [Race Timer](Race-Timer).
 - **Selected area** (middle) and the **chats** (right): crew chat above the broadcast chat.
 
 ![Race Control desk: area navigation, the live column with program preview, on-air line and race controls, the race order in the Race area, and the crew and broadcast chats](images/console-race-control.png)

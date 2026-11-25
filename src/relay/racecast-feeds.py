@@ -1342,6 +1342,8 @@ def aggregate_health(facts):
     track_mismatch (optional text while track recognition contradicts the event's
         picked GT7 layout, else None: a quiet, display-only yellow excluded from the
         notify level, #1129).
+    timer_start_waiting (optional text while the race timer's automatic start waits for
+        the Sheet longer than TIMER_START_WAIT_S: a quiet, display-only yellow, #1324).
 
     yellow = OBS WebSocket unreachable · cookies stale · Tailscale down · a feed
              stuck connecting · stream_reconnecting · funnel_down ·
@@ -1383,6 +1385,8 @@ def aggregate_health(facts):
         yellow.append(f"Feed {name} inbound stall. A gap exceeded the fan-out reserve (stutter risk)")
     if facts.get("track_mismatch"):
         yellow.append(facts["track_mismatch"])
+    if facts.get("timer_start_waiting"):
+        yellow.append(facts["timer_start_waiting"])
     if facts.get("telemetry_lossy") is not None:
         yellow.append(f"GT7 telemetry losing {facts['telemetry_lossy'] * 100:.0f} % of its packets: "
                       f"check the console's network")
@@ -3299,6 +3303,43 @@ class TimerStore(PushHealth):
             self._spawn_push(self._payload(st))
         return self.data(now)
 
+    def start_lock(self, now=None):
+        """Why Race start is locked by this timer (it runs, stands paused or has
+        finished, until RESET; or the Sheet was never read), else None."""
+        now = time.time() if now is None else now
+        if not self.sheet_known():
+            return "the race timer is not known yet, wait for the Timer tab"
+        with self.lock:
+            end, remaining = self.state["end"], self.state["remaining"]
+        if end is not None:
+            why = "runs" if now < end else "has finished"
+        elif remaining is not None:
+            why = "is paused"
+        else:
+            return None
+        return f"the race timer {why}, reset the timer first for a new race"
+
+    def sheet_known(self):
+        """False while a Sheet-synced timer has not read the Sheet once, so a local write
+        could outrank another machine's running anchor."""
+        return self.csv_url is None or self.last_ok is not None
+
+    def autostart(self, at=None, now=None):
+        """Start a timer that never started, counting from `at`; True iff it did. Unlike
+        start() it never resumes a paused remainder."""
+        now = time.time() if now is None else now
+        at = now if at is None else at
+        with self.lock:
+            if self.state["end"] is not None or self.state["remaining"] is not None:
+                return False
+            self.state["end"] = at + self.state["duration"]
+            self.state["updated"] = now
+            self._save_file()
+            st = dict(self.state)
+        if self.push_url:
+            self._spawn_push(self._payload(st))
+        return True
+
     def stop(self, now=None):
         """Pause: freeze the remainder (the STOP button). Full reset = reset()."""
         now = time.time() if now is None else now
@@ -3371,6 +3412,64 @@ class TimerStore(PushHealth):
                 "remaining_s": (max(0, int(d["end"] - d["server_now"]))
                                 if d["end"] is not None else d["remaining_s"]),
                 "push": d["sync"]["push"]}
+
+
+TIMER_TAB_UNREAD = "the Timer tab is not readable: unlock with the timer kept, then start the timer by hand"
+TIMER_START_WAIT_S = 30.0   # a start waiting longer for the Sheet becomes a health line
+
+
+def race_start_lock(race_svc, timer):
+    """Why Race start is refused now, else None: a race started by an earlier arm, or
+    a started race timer."""
+    if race_svc.race_started():
+        return driver_race.RACE_UNDER_WAY
+    if race_svc.start_unlock() == "keep":
+        return None
+    return timer.start_lock() if timer is not None else None
+
+
+class TimerAutostart:
+    """Starts the race timer on the first counting lap after Race start (#1324), only
+    a timer that never started. While the Sheet state is unknown the start waits,
+    visibly, and then counts from the tick that took it; a new Race start, race reset
+    or new event drops a waiting start."""
+
+    def __init__(self, timer, race):
+        self._timer, self._race = timer, race
+        self._due = None            # (wall time of the take, start generation)
+        self._waiting_logged = False
+
+    def pending(self):
+        return self._due is not None
+
+    def waiting_text(self, now=None):
+        """The health line while a start waits longer than TIMER_START_WAIT_S, else None."""
+        due = self._due
+        now = time.time() if now is None else now
+        if due is None or now - due[0] <= TIMER_START_WAIT_S:
+            return None
+        return (f"Race timer: the race started {int(now - due[0])} s ago, the timer starts "
+                f"once the Sheet's Timer tab is readable")
+
+    def observe(self, now=None):
+        now = time.time() if now is None else now
+        taken = self._race.take_race_start()
+        if taken is not None and taken[0]:
+            self._due = (now, taken[1])
+        if self._due is None:
+            return
+        if self._due[1] != self._race.start_generation():
+            LOG.info("race timer: a new race or event dropped the waiting automatic start")
+            self._due, self._waiting_logged = None, False
+            return
+        if not self._timer.sheet_known():
+            if not self._waiting_logged:
+                LOG.warning("race timer: the race started; the automatic start waits for the Sheet")
+                self._waiting_logged = True
+            return
+        (at, _gen), self._due, self._waiting_logged = self._due, None, False
+        if self._timer.autostart(at=at, now=now):
+            LOG.info("race timer: started by the first race lap after Race start")
 
 
 class ChatStore:
@@ -9817,6 +9916,7 @@ class Relay:
         self._recovery_churn_notified = {}   # feed -> ts of the last churn @here (cooldown)
         self.health_store = None  # assigned by bootstrap (Task 13); always exists
         self.timer_store = None  # assigned by bootstrap; sampled best-effort for timer_push
+        self.timer_autostart = None  # assigned by bootstrap with the driver race
         self._last_prune = 0  # epoch of last health-history prune (daily, in heartbeat)
         self._resource_sampler = resources.ResourceSampler()
         self._net_floor = resources.NetDownFloor()   # #722: started with the heartbeat
@@ -9942,7 +10042,15 @@ class Relay:
                                 if self._schedule_has_local() else None),
                 "mic_fallback": mic_fallback_fact(getattr(self, "feeds", {})),
                 "telemetry_lossy": self._telemetry_lossy_fact(),
-                "track_mismatch": self._track_mismatch_fact()}
+                "track_mismatch": self._track_mismatch_fact(),
+                "timer_start_waiting": self._timer_start_waiting_fact(now)}
+
+    def _timer_start_waiting_fact(self, now):
+        auto = getattr(self, "timer_autostart", None)
+        try:
+            return auto.waiting_text(now) if auto is not None else None
+        except Exception:  # noqa: BLE001  health sampling is best-effort
+            return None
 
     def _track_mismatch_fact(self):
         """The mismatch line while recognition contradicts the picked layout, else None."""
@@ -10039,7 +10147,8 @@ class Relay:
                                          "feeds_av_disturbed": {},
                                          "mic_problem": None,
                                          "telemetry_lossy": None,
-                                         "track_mismatch": None})["level"]
+                                         "track_mismatch": None,
+                                         "timer_start_waiting": None})["level"]
         with self._health_lock:
             if h["level"] != self.health_level:
                 self.health_level = h["level"]
@@ -14801,9 +14910,16 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                            cookie_path="/console")
                 if p == ["drivers", "race"] and driver_race_svc is not None:
                     # Order, distances and gaps from driver telemetry (#1112).
-                    return self._send(driver_race.with_brands(
-                        driver_race_svc.standings(),
-                        hud_source.roster_details() if hud_source else {}), no_store=True)
+                    out = driver_race.with_brands(driver_race_svc.standings(),
+                                                  hud_source.roster_details() if hud_source else {})
+                    out["start_locked"] = race_start_lock(driver_race_svc, timer_store)
+                    out["counting"] = out.get("state") in driver_race.COUNTING
+                    out["finished"] = out.get("state") == "finished"
+                    out["timer_known"] = timer_store.sheet_known() if timer_store else True
+                    out["start_timer"] = timer_store is not None and out.get("start_timer") is not False
+                    auto = getattr(relay, "timer_autostart", None)
+                    out["start_pending"] = bool(auto and auto.pending())
+                    return self._send(out, no_store=True)
                 if len(p) == 3 and p[:2] == ["drivers", "brand"]:
                     return self._send_brand(p[2])
                 if p == ["drivers", "dashboard"] and driver_race_svc is not None:
@@ -15558,6 +15674,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         "red-flag": lambda: svc.red_flag(who, b.get("mode")),
                         "restart-mode": lambda: svc.set_restart_mode(who, b.get("mode")),
                         "release": lambda: svc.release(who),
+                        "start": lambda: svc.race_start(who, timer_store.start_lock if timer_store else None),
                         "rejoin": lambda: svc.rejoin(who, b.get("entry"), b.get("on", True)),
                         "correct": lambda: svc.correct(who, b.get("entry"), b.get("metres", 0.0),
                                                        b.get("pit_stops", 0), b.get("reason", "")),
@@ -15575,11 +15692,29 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                                                    b.get("driver", "")),
                         "class-laps": lambda: svc.set_class_laps(who, b.get("class"), b.get("laps")),
                     }
+                    if action == "unlock-start":
+                        if str(who).startswith("race_control:"):
+                            return self._send({"ok": False, "error": "the director unlocks Race start"}, 403)
+                        if body.get("timer") == "fresh" and timer_store and not timer_store.sheet_known():
+                            # A reset stamped now would outrank another machine's running anchor.
+                            return self._send({"ok": False, "error": TIMER_TAB_UNREAD}, 409)
+                        try:
+                            race = driver_race_svc.unlock_start(who, body.get("timer"))
+                        except ValueError as exc:
+                            return self._send({"ok": False, "error": str(exc)}, 400)
+                        if body.get("timer") == "fresh" and timer_store:
+                            timer_store.reset()
+                        return self._send({"ok": True, "race": race})
+                    lock = race_start_lock(driver_race_svc, timer_store) if action == "start" else None
+                    if lock:
+                        return self._send({"ok": False, "error": lock}, 409)
                     if action == "class-laps" and "laps" not in body:
                         return self._send({"ok": False, "error": "laps is a number or null"}, 400)
                     if action in actions:
                         try:
                             return self._send({"ok": True, "race": actions[action]()})
+                        except driver_race.RaceStartLocked as exc:
+                            return self._send({"ok": False, "error": str(exc)}, 409)
                         except ValueError as exc:
                             return self._send({"ok": False, "error": str(exc)}, 400)
                     return self._send({"error": "not found"}, 404)
@@ -16143,10 +16278,11 @@ def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
     return store
 
 
-def dashboard_ticks(relay, race_svc, stop_evt, every, league=None, live=None):
+def dashboard_ticks(relay, race_svc, stop_evt, every, league=None, live=None, timer_autostart=None):
     """Advance the driver dashboard snapshots, hand the newest one to the league live
-    sender and the race state to the league result export until stop_evt; a failure
-    warns once per distinct error and never touches the broadcast."""
+    sender and the race state to the race timer's autostart and the league result
+    export until stop_evt; a failure warns once per distinct error and never touches
+    the broadcast."""
     while not stop_evt.wait(every):
         try:
             race_svc.tick()
@@ -16159,6 +16295,12 @@ def dashboard_ticks(relay, race_svc, stop_evt, every, league=None, live=None):
                 relay._tick_ok("league live")
             except Exception as e:  # noqa: BLE001
                 relay._warn_tick_error("league live", e)
+        if timer_autostart is not None:
+            try:
+                timer_autostart.observe()
+                relay._tick_ok("race timer autostart")
+            except Exception as e:  # noqa: BLE001
+                relay._warn_tick_error("race timer autostart", e)
         if league is None:
             continue
         try:
@@ -17238,9 +17380,10 @@ def main():
         lambda: league_service.relay_settings(os.environ.get("RACECAST_PROFILE_ENV_FILE", "")),
         race_svc.live, league_service.path_in(runtime), overlay_dir=args.overlay_dir,
         env_path=os.environ.get("RACECAST_PROFILE_ENV_FILE", ""))
+    relay.timer_autostart = TimerAutostart(timer_store, race_svc) if timer_store else None
     threading.Thread(target=dashboard_ticks, daemon=True,
                      args=(relay, race_svc, stop_evt, driver_race.SNAPSHOT_EVERY_S, league_exporter,
-                           league_live)).start()
+                           league_live, relay.timer_autostart)).start()
     threading.Thread(target=stint_switch_watch, daemon=True, args=(
         relay, race_svc, stop_evt,
         lambda: driver_race.read_settings(driver_race.path_in(runtime))["lap_count"]),

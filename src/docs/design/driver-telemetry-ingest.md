@@ -147,7 +147,7 @@ single decisions with the new values and `before`.
 (`race_distance.Race`), dated on the relay's clock by its packet id. Tailnet only:
 `GET /drivers/race` returns `{state, track, settings, line_length_m, entries}`;
 `POST /drivers/race/settings` takes `formation`, `finish_mode` (`laps`/`time`) and
-`lap_count`; `POST /drivers/race/final-lap`, `/finish` and `/reset` act on the race.
+`lap_count`; `POST /drivers/race/start`, `/final-lap`, `/finish` and `/reset` act on the race.
 Race Control actions (#1113), each answering `{ok, race}` or 400 with `error`:
 `/red-flag {mode?}` (default: the profile's `restart`), `/restart-mode {mode}`,
 `/release`, `/rejoin {entry, on}`, `/correct {entry, metres, pit_stops, reason}` and

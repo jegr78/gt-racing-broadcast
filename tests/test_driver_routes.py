@@ -2786,6 +2786,223 @@ def t_the_snapshot_page_shows_the_first_sample_a_later_span_brings():
     assert "shown = true" in show, "only a rendered sample counts as shown"
 
 
+def t_race_control_and_the_director_arm_the_race_start():
+    import json as _json
+    srv, port, _path, _hub = _serve()
+    hdr = {"Content-Type": "application/json"}
+    try:
+        rc, director = g._tok("dave"), g._tok("bob")
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/start?t={rc}", b"{}", hdr)
+        assert st == 200 and "race" in _json.loads(text), f"Race Control arms the race start: {st} {text}"
+        race = _json.loads(text)["race"]
+        assert race["start_armed"] and not race["start_rearmed"], (st, text)
+        assert race["last_action"] == dict(race["last_action"], who="race_control:dave", action="race_start_arm"), \
+            race["last_action"]
+        st, text, _h = _req(port, f"/console/drivers/race/start?t={director}", b"{}", hdr)
+        assert st == 200 and _json.loads(text)["race"]["start_rearmed"], "pressed again it says it re-arms"
+        code, text, _h = _req(port, "/drivers/race/start", b"{}", hdr)
+        assert code == 200 and _json.loads(text)["race"]["last_action"]["who"] == "tailnet", text
+    finally:
+        srv.shutdown()
+
+
+def _drive_race(srv, sim, armed):
+    """Lobby laps, then (with `armed`) Race start on the grid and the first race lap."""
+    import test_driver_race as tdr
+    cars = [tdr._GridCar(ENTRIES[0], -20.0)]
+    tdr._run(srv.race_svc, sim, cars, 50.0, tdr.L / 50 * 2)
+    if armed:
+        cars[0].along = -20.0
+        srv.race_svc.race_start("tailnet")
+        tdr._run(srv.race_svc, sim, cars, 50.0, tdr.L / 50 + 4)      # the formation lap, then lap 2
+        assert srv.race_svc.race_started(), "the armed race counts"
+
+
+def _lock(port, rc):
+    import json as _json
+    return _json.loads(_req(port, f"/console/race-control/drivers/race?t={rc}")[1])["start_locked"]
+
+
+def t_race_start_lock_names_why():
+    import json as _json
+    sim = [100.0]
+    timer = g.m.TimerStore(None, None, os.path.join(tempfile.mkdtemp(), "timer.json"))
+    srv, port, _path, _hub = _serve(timer_store=timer, clock=lambda: sim[0])
+    hdr = {"Content-Type": "application/json"}
+    try:
+        rc = g._tok("dave")
+        start = f"/console/race-control/drivers/race/start?t={rc}"
+        assert _json.loads(_req(port, f"/console/race-control/drivers/race?t={rc}")[1])["counting"] is False
+        _drive_race(srv, sim, armed=False)
+        assert srv.race_svc.race_state() == "racing" and _lock(port, rc) is None, \
+            "lobby laps before the first Race start leave it open"
+        assert _json.loads(_req(port, f"/console/race-control/drivers/race?t={rc}")[1])["counting"] is True, \
+            "the desk learns that the race counts, so it warns before Race start"
+        for setup, why in ((timer.start, "runs"), (timer.stop, "paused"),
+                           (lambda: (timer.reset(), timer.start(now=0.0)), "finished")):
+            setup()
+            st, text, _h = _req(port, start, b"{}", hdr)
+            assert st == 409 and why in text and "reset the timer" in text, f"locked, {why}: {st} {text}"
+            assert why in _lock(port, rc), f"the desk learns why: {_lock(port, rc)}"
+        timer.reset()
+        assert _req(port, start, b"{}", hdr)[0] == 200, "a reset timer unlocks Race start"
+        _drive_race(srv, sim, armed=False)       # the press above armed it: these laps count
+        assert srv.race_svc.race_started(), "the armed race counts"
+        timer.start()
+        timer.reset()
+        st, text, _h = _req(port, start, b"{}", hdr)
+        assert st == 409 and "a race is under way" in text, \
+            f"a TIMER RESET mid-race does not unlock a race under way: {st} {text}"
+        srv.race_svc.new_event()
+        assert _req(port, start, b"{}", hdr)[0] == 200, "a new event unlocks it"
+        assert _json.loads(_req(port, f"/console/race-control/drivers/race?t={rc}")[1])["start_timer"] is True
+    finally:
+        srv.shutdown()
+
+
+def t_without_a_timer_a_race_under_way_still_locks_race_start():
+    import json as _json
+    sim = [100.0]
+    srv, port, _path, _hub = _serve(clock=lambda: sim[0])
+    hdr = {"Content-Type": "application/json"}
+    try:
+        rc = g._tok("dave")
+        race = _json.loads(_req(port, f"/console/race-control/drivers/race?t={rc}")[1])
+        assert race["start_timer"] is False and race["start_locked"] is None, race
+        _drive_race(srv, sim, armed=True)
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/start?t={rc}", b"{}", hdr)
+        assert st == 409 and "a race is under way" in text, f"--no-timer still locks: {st} {text}"
+    finally:
+        srv.shutdown()
+
+
+def t_race_start_rechecks_its_lock_after_the_route_check():
+    srv, port, _path, _hub = _serve()
+    hdr = {"Content-Type": "application/json"}
+    real = g.m.race_start_lock
+
+    def first_lap_lands_after_the_check(svc, timer):
+        out = real(svc, timer)
+        svc._race_started = True          # the first race lap counts between check and press
+        return out
+    g.m.race_start_lock = first_lap_lands_after_the_check
+    try:
+        rc = g._tok("dave")
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/start?t={rc}", b"{}", hdr)
+        assert st == 409 and "a race is under way" in text, f"a late first lap still locks the press: {st} {text}"
+    finally:
+        g.m.race_start_lock = real
+        srv.shutdown()
+
+
+def t_only_the_director_unlocks_race_start():
+    import json as _json
+    sim = [100.0]
+    timer = g.m.TimerStore(None, None, os.path.join(tempfile.mkdtemp(), "timer.json"))
+    srv, port, _path, _hub = _serve(timer_store=timer, clock=lambda: sim[0])
+    hdr = {"Content-Type": "application/json"}
+    try:
+        rc, director = g._tok("dave"), g._tok("bob")
+        _drive_race(srv, sim, armed=True)
+        timer.start()
+        fresh = _json.dumps({"timer": "fresh"}).encode()
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/unlock-start?t={rc}", fresh, hdr)
+        assert st == 403 and srv.race_svc.race_started(), f"Race Control cannot unlock: {st} {text}"
+        st, text, _h = _req(port, f"/console/drivers/race/unlock-start?t={director}",
+                            _json.dumps({"timer": "sometimes"}).encode(), hdr)
+        assert st == 400, f"the timer choice is fresh or keep: {st} {text}"
+        st, text, _h = _req(port, f"/console/drivers/race/unlock-start?t={director}", fresh, hdr)
+        race = _json.loads(text)["race"]
+        assert st == 200 and race["last_action"]["who"] == "director:bob", (st, text)
+        assert timer.state["end"] is None, "fresh resets the race timer"
+        assert _lock(port, rc) is None, "the unlock opens Race start"
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/start?t={rc}", b"{}", hdr)
+        assert st == 200, f"Race Control presses Race start as usual: {st} {text}"
+        timer.start()
+        st, text, _h = _req(port, f"/console/drivers/race/unlock-start?t={director}",
+                            _json.dumps({"timer": "keep"}).encode(), hdr)
+        end = timer.state["end"]
+        assert st == 200 and end is not None, "keep leaves the running timer alone"
+        assert _lock(port, rc) is None, "keep opens Race start past the running timer"
+        start = f"/console/race-control/drivers/race/start?t={rc}"
+        assert _req(port, start, b"{}", hdr)[0] == 200
+        race = _json.loads(_req(port, f"/console/race-control/drivers/race?t={rc}")[1])
+        assert race["start_locked"] is None and race["start_armed"] and race["start_timer"] is False, \
+            f"after keep the desk shows Armed, not a timer start: {race['start_locked']} {race['start_timer']}"
+        assert _req(port, start, b"{}", hdr)[0] == 200, "a false start before the first lap needs no second unlock"
+        assert timer.state["end"] == end
+        assert _req(port, "/drivers/race/unlock-start", _json.dumps({"timer": "keep"}).encode(), hdr)[0] == 200, \
+            "the tailnet route is the producer's"
+    finally:
+        srv.shutdown()
+
+
+def t_the_timer_half_of_the_lock_is_checked_again_under_the_race_lock():
+    timer = g.m.TimerStore(None, None, os.path.join(tempfile.mkdtemp(), "timer.json"))
+    srv, port, _path, _hub = _serve(timer_store=timer)
+    hdr = {"Content-Type": "application/json"}
+    real = g.m.race_start_lock
+    g.m.race_start_lock = lambda _svc, _timer: None      # the route's check missed it
+    try:
+        timer.start()
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/start?t={g._tok('dave')}", b"{}", hdr)
+        assert st == 409 and "timer runs" in text, f"the race lock checks the timer again: {st} {text}"
+    finally:
+        g.m.race_start_lock = real
+        srv.shutdown()
+
+
+def t_the_desk_learns_that_a_finished_race_would_be_dropped():
+    import json as _json
+    sim = [100.0]
+    srv, port, _path, _hub = _serve(clock=lambda: sim[0])
+    try:
+        rc = g._tok("dave")
+        _drive_race(srv, sim, armed=False)
+        assert _req(port, "/drivers/race/finish", b"{}", {"Content-Type": "application/json"})[0] == 200
+        race = _json.loads(_req(port, f"/console/race-control/drivers/race?t={rc}")[1])
+        assert race["finished"] is True and race["start_locked"] is None, \
+            f"an unarmed finished race warns but does not lock: {race['finished']} {race['start_locked']}"
+    finally:
+        srv.shutdown()
+
+
+def t_an_unread_sheet_refuses_a_fresh_unlock_and_keeps_the_timer():
+    import json as _json
+    timer = g.m.TimerStore("http://sheet", None, os.path.join(tempfile.mkdtemp(), "timer.json"))
+    srv, port, _path, _hub = _serve(timer_store=timer)
+    hdr = {"Content-Type": "application/json"}
+    try:
+        director = g._tok("bob")
+        race = _json.loads(_req(port, f"/console/drivers/race?t={director}")[1])
+        assert race["timer_known"] is False, "the desk learns that the Timer tab was never read"
+        unlock = f"/console/drivers/race/unlock-start?t={director}"
+        st, text, _h = _req(port, unlock, _json.dumps({"timer": "fresh"}).encode(), hdr)
+        assert st == 409 and "unlock with the timer kept" in text, f"no fresh unlock on an unread Sheet: {st} {text}"
+        assert timer.state["updated"] == 0.0 and srv.race_svc.start_unlock() is None, \
+            "a refused fresh unlock neither resets the timer nor unlocks"
+        st, text, _h = _req(port, unlock, _json.dumps({"timer": "keep"}).encode(), hdr)
+        assert st == 200 and timer.state["updated"] == 0.0, "keep unlocks and leaves the timer alone"
+    finally:
+        srv.shutdown()
+
+
+def t_a_start_waiting_for_the_sheet_shows_on_the_desk():
+    import json as _json
+    timer = g.m.TimerStore("http://sheet", None, os.path.join(tempfile.mkdtemp(), "timer.json"))
+    srv, port, _path, _hub = _serve(timer_store=timer)
+    auto = g.m.TimerAutostart(timer, srv.race_svc)
+    srv.relay.timer_autostart = auto
+    try:
+        rc = g._tok("dave")
+        assert _json.loads(_req(port, f"/console/race-control/drivers/race?t={rc}")[1])["start_pending"] is False
+        auto._due = (time.time(), srv.race_svc.start_generation())
+        assert _json.loads(_req(port, f"/console/race-control/drivers/race?t={rc}")[1])["start_pending"] is True, \
+            "a start waiting for the Sheet is visible on the desk"
+    finally:
+        srv.shutdown()
+
+
 def _audit_of(srv):
     import json as _json
     with open(driver_race.audit_path_for(srv.race_svc._path), encoding="utf-8") as fh:

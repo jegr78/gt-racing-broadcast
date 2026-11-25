@@ -107,6 +107,8 @@
                 est: ["EST", "amb"], waiting: ["Waiting", ""], red_flag: ["Red flag", "bad"],
                 no_sender: ["No sender", ""], retired: ["DNF", "bad"]};
   var ACTIONS = {correct: "correction", final_lap: "Final lap", finish: "Finish", reset: "reset",
+                 race_start_arm: "Race start armed", race_start: "Race started (first race lap)",
+                 race_start_unlock: "Race start unlocked",
                  red_flag: "RED FLAG", restart_mode: "restart mode", release: "restart released",
                  rejoin: "rejoin", change: "change override", settings: "settings",
                  reassign: "reassign", disconnect: "disconnect", red_flag_cover_down: "cover down",
@@ -374,6 +376,7 @@
     var base = (opts && opts.base) || "";
     var fullRedFlag = !!(opts && opts.fullRedFlag);
     var dashboardToggle = !!(opts && opts.dashboardToggle);
+    var unlockStart = !!(opts && opts.unlockStart);   // the director's desk
     var onState = (opts && opts.onState) || null;
     if (!document.getElementById("dd-style")) {
       document.head.appendChild(el("style", {id: "dd-style", text: CSS}));
@@ -512,6 +515,40 @@
       "Pos", "", "Entry", "Best", "Gap", "Int.", "Last"].map(function (h) { return el("th", {text: h}); }))]),
       qualiBody])]);
     var raceNote = el("div", {cls: "muted"});
+    // Pressed with the cars on the grid: clears the lobby laps and arms the race timer's start.
+    var startNote = el("span", {cls: "muted grow", style: "min-width: 0"});
+    // Race start and its unlock answer in the Race part's status line, each replacing the last.
+    var raceStart = button("Race start", "", "start", async function () {
+      var d = await call("/drivers/race/start", {}, false, "race");
+      if (!d) return;
+      say(d.race && d.race.start_rearmed ? "Race start armed again: the lobby laps are cleared"
+        : "Race start armed: the lobby laps are cleared", false, "race");
+      refresh();
+    });
+    raceStart.style.flex = "none";
+    raceStart.style.whiteSpace = "nowrap";
+    // The first click on a counting or finished race warns; the confirming click proceeds.
+    var startCounting = false, startFinished = false;
+    raceStart.addEventListener("click", function () {
+      if (!raceStart.classList.contains("armed")) return;
+      if (startFinished)
+        say("The race is finished: Race start drops the race result, the counted laps, corrections, " +
+            "retirements and the fastest lap. Only press it with the cars on the grid.", true, "race");
+      else if (startCounting)
+        say("The race is counting: Race start drops all counted laps, corrections, retirements and the " +
+            "fastest lap. Only press it with the cars on the grid.", true, "race");
+    });
+    var unlockTimer = el("select", {"aria-label": "The race timer after the unlock"},
+                         [opt("fresh", "Timer starts fresh"), opt("keep", "Timer keeps running")]);
+    var unlockBtn = button("Unlock Race start", "warn", "unlock", async function () {
+      var fresh = unlockTimer.value === "fresh";
+      var d = await call("/drivers/race/unlock-start", {timer: unlockTimer.value}, false, "race");
+      if (!d) return;
+      say(fresh ? "Race start unlocked once, the race timer is reset"
+        : "Race start unlocked once, the race timer keeps running", false, "race");
+      refresh();
+    });
+    var unlockRow = el("div", {cls: "row", hidden: ""}, [unlockTimer, unlockBtn]);
     var lapLine = el("div", {cls: "lapline"});
 
     // -- race recording and its disconnect events -------------------------------------
@@ -930,7 +967,7 @@
         classLapRow,
         el("div", {cls: "row red"}, [redFlag, restart, release]),
         redBanner, msgs.live, lastChange],
-      race: [raceNote, raceTable, evTitle,
+      race: [el("div", {cls: "row", style: "flex-wrap: nowrap"}, [raceStart, startNote]), unlockRow, raceNote, raceTable, evTitle,
         el("div", {cls: "row"}, [el("label", {cls: "check"}, [soundBox, el("span", {cls: "muted", text: "Sound on suspicion"})])]),
         evTable],
       drivers: [reqTitle, reqBar, reqList, okBox, el("h3", {text: "Readiness"}), readyTable,
@@ -1016,8 +1053,30 @@
       redBanner.textContent = red ? "Red flag: each car continues from its anchor when it leaves the box of the restart lobby (" +
         (red.mode === "neutralise" ? "neutralised" : "gaps kept") + ")." : "";
       var la = r.last_action;
-      lastChange.textContent = la ? "Last change: " + (ACTIONS[la.action] || la.action) + " by " + la.who +
-        " at " + new Date(la.ts * 1000).toLocaleTimeString() : "";
+      lastChange.textContent = la ? "Last change: " + (ACTIONS[la.action] || la.action) +
+        (la.who === "race" ? "" : " by " + la.who) + " at " + new Date(la.ts * 1000).toLocaleTimeString() : "";
+      var lock = r.start_locked ? r.start_locked.charAt(0).toUpperCase() + r.start_locked.slice(1) + "." : "";
+      raceStart.disabled = !!lock;
+      startCounting = !!r.counting;
+      startFinished = !!r.finished;
+      unlockRow.hidden = !(unlockStart && lock);
+      // An unread Timer tab allows only keep: a reset here could outrank another machine's timer.
+      var freshOpt = unlockTimer.options[0];
+      freshOpt.disabled = r.timer_known === false;
+      freshOpt.title = freshOpt.disabled ? "The Timer tab is not readable: keep the timer, then START it by hand." : "";
+      if (freshOpt.disabled) unlockTimer.value = "keep";
+      raceStart.title = lock;
+      var timed = r.start_timer !== false;
+      startNote.textContent = r.start_pending ? "Race started: the timer starts once the Timer tab is readable."
+        : lock ? "Locked: " + lock + (unlockStart && r.timer_known === false
+          ? " Unlock with the timer kept, then START the timer by hand." : "")
+        : r.start_armed ? (timed ? "Armed: the race timer starts on the first race lap."
+          : "Armed: the race counts from the grid. Race start does not touch the race timer.")
+        : r.start_unlock ? (r.start_unlock === "keep"
+          ? "Unlocked once by the director. The race timer keeps running, Race start rebuilds the race only."
+          : "Unlocked once by the director. The race timer starts fresh on the first race lap.")
+        : timed ? "Press with the cars on the grid: clears the lobby laps, the race timer starts on the first race lap."
+        : "Press with the cars on the grid: clears the lobby laps. Race start does not touch the race timer.";
       raceNote.textContent = {no_line: "No distance: pick a track layout with a downloaded racing line.",
         waiting: "Waiting for the start.", final_lap: "Final lap.", finishing: "Finishing.",
         finished: "Finished."}[r.state] || "";

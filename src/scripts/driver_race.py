@@ -49,6 +49,7 @@ DEFAULTS = {"formation": True, "finish_mode": "laps", "lap_count": None, "delay_
             "visible": False, "show_compound": True, "show_fuel": True}
 COMPOUNDS = ("RS", "RM", "RH", "I", "W")   # Racing Soft/Medium/Hard, Intermediate, Wet
 MAX_DELAY_S = 120
+COUNTING = ("racing", "final_lap", "finishing")
 FASTEST = "driver-race-fastest.json"
 SNAPSHOT_EVERY_S = 0.5
 MAX_LAP_MS = 3_600_000
@@ -635,6 +636,14 @@ _STORE_ERRORS = (OSError, sqlite3.Error)
 _RESULT_ROW = ("laps", "gap_s", "interval_s", "lapped", "status", "pit_stops", "last_lap_ms", "finished")
 
 
+RACE_UNDER_WAY = "a race is under way, a new event or the director's unlock opens Race start again"
+UNLOCK_TIMER = ("fresh", "keep")
+
+
+class RaceStartLocked(Exception):
+    """Race start refused; the message says why."""
+
+
 class NotRaceMode(Exception):
     """A manual recording start while the relay is not in race mode."""
 
@@ -680,6 +689,14 @@ class Service:
         self._final_on_air = False  # endurance: the last schedule row is on air
         self._quali_seen = {}      # (pick, segment) -> {entry: (best ms, driver, last ms, changed at)}
         self._requests = lambda: ()
+        self._start_armed = False   # Race start pressed, the first counting snapshot not yet seen
+        self._start_due = False
+        self._start_gen = 0         # changes with every arm, reset and new event
+        saved = _read_json(_actions_path_for(settings_path))
+        self._race_started = saved.get("race_started") is True
+        unlock = saved.get("start_unlock")
+        self._unlock = unlock if unlock in UNLOCK_TIMER else None   # the director's, until a race counts
+        self._start_timer = self._unlock != "keep"   # the armed race starts the race timer
 
     def use_requests(self, requests):
         """`requests()` lists the driver requests (`driver_requests.Store.all`); in
@@ -960,6 +977,10 @@ class Service:
         with self._lock:
             snap = self._viewer(ctx)
             self._snapshots.append((self._clock(), snap))
+            if self._start_armed and snap.get("state") in COUNTING:
+                self._start_armed, self._start_due, self._race_started = False, True, True
+                self._unlock = None
+                self._save_start_state()
             recording = self._recording_dir and self._enabled()
             standings = self._current().standings(self._clock()) if recording else None
             rec = self._rec
@@ -1180,7 +1201,9 @@ class Service:
                    quali_overrides=_saved_quali(_actions_path_for(self._path), ctx.get("segment")),
                    quali_laps=_saved_quali_laps(_actions_path_for(self._path), ctx.get("segment")),
                    class_laps=class_laps,
-                   league=read_league(self._league), last_action=self._last_action)
+                   league=read_league(self._league), last_action=self._last_action,
+                   start_armed=self._start_armed, race_started=self._race_started,
+                   start_unlock=self._unlock, start_timer=self._start_timer)
         return out
 
     def newest(self):
@@ -1238,6 +1261,53 @@ class Service:
                 "fastest": shown, "started_at": rec["started_at"],
                 "disconnects": [e for e in rec["events"] if e.get("state") == "confirmed"],
                 "audit_path": audit_path_for(self._path)}
+
+    def start_unlock(self):
+        """The director's pending unlock ("fresh" or "keep"), else None."""
+        with self._lock:
+            return self._unlock
+
+    def unlock_start(self, who, timer):
+        """The director opens Race start once, also while a race is under way. `timer`:
+        "fresh" (the caller resets the race timer, the next race starts it again) or
+        "keep" (the next Race start passes a started timer and leaves it alone)."""
+        if timer not in UNLOCK_TIMER:
+            raise ValueError("timer is fresh or keep")
+        with self._lock:
+            self._log(who, "race_start_unlock", timer=timer)
+            self._race_started, self._unlock, self._start_timer = False, timer, timer != "keep"
+            self._start_gen += 1
+            self._save_start_state()
+        return self.standings()
+
+    def _save_start_state(self):
+        """Keep the race lock and a pending unlock with the race actions (under the lock)."""
+        def update(doc):
+            doc.pop("race_started", None)
+            doc.pop("start_unlock", None)
+            if self._race_started:
+                doc["race_started"] = True
+            if self._unlock:
+                doc["start_unlock"] = self._unlock
+        self._save_actions(update)
+
+    def race_started(self):
+        """True once the race armed by Race start counts, until a reset or new event."""
+        with self._lock:
+            return self._race_started
+
+    def start_generation(self):
+        """Changes with every Race start, race reset and new event: a start taken
+        under an older generation is void."""
+        with self._lock:
+            return self._start_gen
+
+    def take_race_start(self):
+        """(starts the timer, start generation) once when the race counts for the first
+        time after Race start, else None; read under one lock."""
+        with self._lock:
+            due, self._start_due = self._start_due, False
+            return (self._start_timer, self._start_gen) if due else None
 
     def mark_race_start(self):
         """Note in the audit log that a race starts counting; a league result's steward
@@ -1579,6 +1649,9 @@ class Service:
                     race_recording.rotate(self._recording_dir)
             self._event_epoch += 1
             self._snapshots.clear()
+            self._start_armed, self._start_due, self._race_started = False, False, False
+            self._start_gen += 1
+            self._unlock, self._start_timer = None, True
             clear_actions(os.path.dirname(_actions_path_for(self._path)))
             self._final_lobby_laps, self._final_on_air = None, False
             self._race = self._build(self._pick()["id"] if self._pick() else None)
@@ -1591,14 +1664,36 @@ class Service:
         """Start the race over: its corrections, rejoin marks, retirements, fastest lap
         and open disconnects go with it; tyre compounds, driver names, qualifying
         corrections, the recording and, in endurance, the final lobby on air with its
-        lap count stay."""
+        lap count stay. A pending Race start stays armed."""
+        self._restart(who, "reset")
+
+    def race_start(self, who, locked=None):
+        """Race start, pressed with the cars on the grid: a race reset that drops what
+        lobby laps counted, line stations included, and arms the race timer's start for
+        the first counting lap. Pressed again it arms again. Raises RaceStartLocked
+        while an armed race counts or `locked()` (the race timer's lock) names a reason,
+        both checked under the race lock."""
+        rearmed = self._restart(who, "race_start_arm", arm=True, locked=locked)
+        return dict(self.standings(), start_rearmed=rearmed)
+
+    def _restart(self, who, action, arm=False, locked=None):
         def drop_race(doc):
             for key in ("corrections", "rejoin", "retired"):
                 doc.pop(key, None)
         if self._recording_dir and self._rec is None and self._rec_allowed and self._enabled():
             self._guarded(self._recorder)
         with self._lock:
-            self._log(who, "reset")
+            if arm:
+                keep = self._unlock == "keep"
+                why = RACE_UNDER_WAY if self._race_started else (
+                    None if keep or locked is None else locked())
+                if why:
+                    raise RaceStartLocked(why)
+                self._start_timer = not keep
+            else:
+                # A reset keeps a pending arm, so it keeps that arm's timer choice too.
+                self._unlock, self._start_timer = None, self._start_timer or not self._start_armed
+            self._log(who, action)
             self._save_actions(drop_race)
             try:
                 atomic_replace.retry_windows_file_operation(lambda: os.remove(self._fastest_path()))
@@ -1609,3 +1704,9 @@ class Service:
             rec = self._rec
             if rec is not None:
                 self._guarded(lambda: rec.new_race(self._wall()))
+            rearmed = self._start_armed
+            self._race_started, self._start_due, self._start_gen = False, False, self._start_gen + 1
+            self._save_start_state()
+            if arm:
+                self._start_armed = True
+        return rearmed

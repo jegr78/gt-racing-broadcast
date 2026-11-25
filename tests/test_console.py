@@ -537,6 +537,24 @@ def t_the_desk_keeps_tyre_rows_in_place_so_a_focused_select_keeps_its_focus():
     assert got[3:] == [0, ["a", "b"]], f"a row whose neighbour goes keeps its node, so its focus stays: {got}"
 
 
+def t_only_the_director_panel_mounts_the_unlock_and_the_desk_warns_a_counting_race():
+    def read(*parts):
+        with open(os.path.join(ROOT, "src", *parts), encoding="utf-8") as fh:
+            return fh.read()
+    rc, panel, desk = read("racecontrol", "race-control.html"), read("director", "director-panel.html"), \
+        read("console", "driver-desk.js")
+    rc_mount = rc[rc.index("DriverDesk.mount("):][:200]
+    panel_mount = panel[panel.index("DriverDesk.mount("):][:200]
+    assert "unlockStart" not in rc_mount and "unlockStart: true" in panel_mount, \
+        "only the director's desk shows Unlock Race start"
+    assert "unlockRow.hidden = !(unlockStart && lock)" in desk, "the unlock row shows only on a locked director desk"
+    assert "r.timer_known === false" in desk and 'unlockTimer.value = "keep"' in desk, \
+        "on an unread Sheet the unlock offers only keep"
+    warn = desk[desk.index("var startCounting"):][:700]
+    assert 'raceStart.classList.contains("armed")' in warn and "The race is counting" in warn \
+        and "The race is finished" in warn, "the first Race start click warns a counting or finished race"
+
+
 def t_the_desk_arms_one_button_at_a_time():
     with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
         desk = fh.read()
