@@ -2282,6 +2282,286 @@ def t_a_race_start_is_noted_in_the_audit_log():
     assert (last["action"], last["who"]) == ("race_start", "race"), last
 
 
+class _GridCar:
+    """A car whose lap counter reads 1 on a grid behind the line and steps at the end of
+    lap 1, not when the start crosses the line."""
+
+    def __init__(self, entry, along):
+        self.reg = {"entry": entry, "conn": entry.lower(), "name": entry}
+        self.along = along
+
+    def lap(self):
+        return max(1, int(self.along // L) + 1)
+
+
+def _run(svc, clock, cars, speed, seconds):
+    """Drive every car at `speed` m/s (0 stands) for `seconds`, ticking twice a second;
+    returns how many race starts the service handed out."""
+    starts = 0
+    for _ in range(int(seconds * 10)):
+        clock[0] += 0.1
+        for car in cars:
+            car.along += speed / 10
+            svc.update(car.reg, _sample(clock[0], car.along, car.lap(), speed))
+        if round(clock[0] * 10) % 5 == 0:
+            svc.tick()
+            starts += svc.take_race_start() is not None
+    return starts
+
+
+def _practice_then_grid(formation=False, multi=False):
+    svc, clock = _service([{"id": "good"}], multi=multi)
+    svc.set_settings({"formation": formation})
+    cars = [_GridCar("A", -20.0), _GridCar("B", -40.0)]
+    starts = _run(svc, clock, cars, 50.0, L / 50 * 3)
+    assert svc.race_state() == "racing" and starts == 0, \
+        f"lobby laps count for the race model but start nothing without Race start: {starts}"
+    assert svc.standings()["race_started"] is False, "lobby laps before Race start are no race under way"
+    return svc, clock, cars
+
+
+def t_race_start_clears_the_lobby_laps_and_starts_from_the_grid():
+    svc, clock, cars = _practice_then_grid()
+    for car, grid in zip(cars, (-20.0, -40.0), strict=True):
+        car.along = grid
+    out = svc.race_start("race_control:dave")
+    assert out["start_armed"] is True and out["start_rearmed"] is False, out
+    assert out["last_action"]["action"] == "race_start_arm" and out["last_action"]["who"] == "race_control:dave"
+    assert _run(svc, clock, cars, 0.0, 3) == 0 and svc.race_state() == "waiting", \
+        f"a car standing on the grid on lap 1 does not count yet: {svc.race_state()}"
+    assert svc.standings()["race_started"] is False, "before the first race lap no race is under way"
+    assert _run(svc, clock, cars, 50.0, 3) == 1, "the first race lap hands out the start once"
+    assert svc.standings()["race_started"] is True, "the armed race is under way"
+    assert _run(svc, clock, cars, 50.0, L / 50) == 0 and svc.standings()["start_armed"] is False, \
+        "the arm is one-shot"
+
+
+def t_race_start_pressed_again_says_it_re_arms():
+    svc, _clock = _service([{"id": "good"}])
+    assert svc.standings()["start_armed"] is False
+    assert svc.race_start("tailnet")["start_rearmed"] is False, "the first press arms"
+    assert svc.race_start("tailnet")["start_rearmed"] is True, "a second press says it arms again"
+
+
+def t_after_race_start_the_formation_lap_starts_nothing_until_lap_two():
+    svc, clock, cars = _practice_then_grid(formation=True)
+    for car, grid in zip(cars, (-20.0, -40.0), strict=True):
+        car.along = grid
+    svc.race_start("tailnet")
+    assert _run(svc, clock, cars, 40.0, L / 40) == 0, "the formation lap is no race lap"
+    assert cars[0].lap() == 1
+    assert _run(svc, clock, cars, 40.0, 3) == 1 and cars[0].lap() == 2, "lap 2 is the first race lap"
+
+
+def t_race_start_works_in_an_endurance_race():
+    svc, clock, cars = _practice_then_grid(multi=True)
+    for car, grid in zip(cars, (-20.0, -40.0), strict=True):
+        car.along = grid
+    assert _run(svc, clock, cars, 0.0, 2) == 0 and all(e.held for e in svc._race._entries.values()), \
+        "the counter drop holds each entry and keeps its distance"
+    svc.race_start("tailnet")
+    assert _run(svc, clock, cars, 0.0, 2) == 0 and svc.race_state() == "waiting", \
+        f"Race start drops the held distances: {svc.race_state()}"
+    assert _run(svc, clock, cars, 50.0, 3) == 1, "the first race lap hands out the start"
+
+
+def t_a_race_reset_keeps_the_arm_and_a_new_event_drops_it():
+    svc, clock = _service([{"id": "good"}])
+    gen = svc.start_generation()
+    svc.race_start("tailnet")
+    assert svc.start_generation() != gen, "an arm starts a new start generation"
+    svc._race_started = svc._start_due = True
+    gen = svc.start_generation()
+    svc.reset("tailnet")
+    assert svc.take_race_start() is None, "a race reset drops a start not yet taken"
+    assert svc.standings()["race_started"] is False and svc.start_generation() != gen, \
+        "a race reset ends the race under way and any waiting start"
+    svc.reset("tailnet")
+    assert svc.standings()["start_armed"] is True, "a race reset keeps a pending Race start"
+    svc._race_started = True
+    svc.unlock_start("tailnet", "keep")
+    svc._race_started = True
+    gen = svc.start_generation()
+    svc.new_event()
+    assert svc.start_unlock() is None, "a new event drops a pending unlock"
+    assert svc.standings()["start_armed"] is False, "a new event drops the arm"
+    assert svc.standings()["race_started"] is False and svc.start_generation() != gen, \
+        "a new event ends the race under way and any waiting start"
+
+
+def t_race_start_checks_its_lock_inside_the_race_lock():
+    svc, clock, cars = _practice_then_grid()
+    race = svc._race
+    svc._race_started = True              # the first race lap counted after the route's check
+    try:
+        svc.race_start("tailnet")
+    except dr.RaceStartLocked as exc:
+        assert "a race is under way" in str(exc), exc
+    else:
+        raise AssertionError("a race that just started is never wiped by a late press")
+    assert svc._race is race and svc.standings()["last_action"]["action"] != "race_start_arm", \
+        "a refused press changes nothing"
+    svc._race_started = False
+    try:
+        svc.race_start("tailnet", locked=lambda: "the race timer runs: reset the timer first")
+    except dr.RaceStartLocked as exc:
+        assert "timer runs" in str(exc), exc
+    else:
+        raise AssertionError("the timer's lock is checked under the race lock too")
+    assert svc.race_start("tailnet", locked=lambda: None)["start_armed"] is True
+
+
+def t_a_taken_start_carries_its_generation():
+    svc, clock, cars = _practice_then_grid()
+    for car, grid in zip(cars, (-20.0, -40.0), strict=True):
+        car.along = grid
+    svc.race_start("tailnet")
+    gen = svc.start_generation()
+    taken = []
+    for _ in range(80):
+        clock[0] += 0.1
+        for car in cars:
+            car.along += 5.0
+            svc.update(car.reg, _sample(clock[0], car.along, car.lap(), 50.0))
+        svc.tick()
+        got = svc.take_race_start()
+        if got is not None:
+            taken.append(got)
+    assert len(taken) == 1 and taken[0][1] == gen and taken[0][0] is True, \
+        f"one start, with the generation it was taken under: {taken}"
+
+
+def _armed_race_under_way(formation=False):
+    svc, clock, cars = _practice_then_grid(formation)
+    for car, grid in zip(cars, (-20.0, -40.0), strict=True):
+        car.along = grid
+    svc.race_start("tailnet")
+    assert _run(svc, clock, cars, 50.0, 3) == 1 and svc.race_started()
+    for car, grid in zip(cars, (-20.0, -40.0), strict=True):
+        car.along = grid
+    return svc, clock, cars
+
+
+def _takes(svc, clock, cars, steps=30):
+    taken = []
+    for _ in range(steps):
+        clock[0] += 0.1
+        for car in cars:
+            car.along += 5.0
+            svc.update(car.reg, _sample(clock[0], car.along, car.lap(), 50.0))
+        svc.tick()
+        got = svc.take_race_start()
+        if got is not None:
+            taken.append(got)
+    return taken
+
+
+def _locked_by(svc, **kw):
+    try:
+        svc.race_start("race_control:dave", **kw)
+    except dr.RaceStartLocked as exc:
+        return str(exc)
+    return None
+
+
+def t_the_director_unlocks_race_start_once_and_keeps_the_timer():
+    svc, clock, cars = _armed_race_under_way()
+    timer_runs = lambda: "the race timer runs, reset the timer first for a new race"  # noqa: E731
+    out = svc.unlock_start("director:bob", "keep")
+    assert out["race_started"] is False and out["start_unlock"] == "keep", out
+    assert out["last_action"]["action"] == "race_start_unlock" and out["last_action"]["who"] == "director:bob"
+    assert _locked_by(svc, locked=timer_runs) is None, "keep lets Race start past the running timer"
+    st = svc.standings()
+    assert st["start_unlock"] == "keep" and st["start_timer"] is False, \
+        f"keep holds until the new race counts, and that race starts no timer: {st['start_unlock']}"
+    assert _locked_by(svc, locked=timer_runs) is None, "a false start before the first lap needs no second unlock"
+    taken = _takes(svc, clock, cars)
+    assert len(taken) == 1 and taken[0][0] is False, f"keep: the next race starts no timer: {taken}"
+    assert svc.race_started(), "the restarted race is under way again"
+    assert svc.start_unlock() is None, "the counting race uses the unlock up"
+    assert "under way" in (_locked_by(svc, locked=timer_runs) or ""), "one unlock, one race"
+
+
+def t_a_fresh_unlock_still_checks_the_timer_and_starts_it():
+    svc, clock, cars = _armed_race_under_way()
+    svc.unlock_start("tailnet", "fresh")
+    assert "timer runs" in (_locked_by(svc, locked=lambda: "the race timer runs, reset") or ""), \
+        "fresh relies on the timer reset, it does not skip the timer lock"
+    assert _locked_by(svc, locked=lambda: None) is None
+    assert svc.start_unlock() == "fresh" and svc.standings()["start_timer"] is True, \
+        "fresh holds until the new race counts and that race starts the timer"
+    assert _locked_by(svc, locked=lambda: None) is None, "a false start before the first lap is allowed"
+    taken = _takes(svc, clock, cars)
+    assert len(taken) == 1 and taken[0][0] is True, f"fresh: the first race lap hands out a timer start: {taken}"
+
+
+def t_the_race_lock_and_a_pending_unlock_survive_a_relay_restart():
+    svc, clock, cars = _armed_race_under_way()
+    again = dr.Service(svc._path, pick=lambda: {"id": "good"}, trace_for=lambda i: TRACE,
+                       multi_lobby=lambda: False, clock=lambda: clock[0])
+    assert again.race_started(), "a relay restart keeps the race under way"
+    svc.unlock_start("tailnet", "keep")
+    again = dr.Service(svc._path, pick=lambda: {"id": "good"}, trace_for=lambda i: TRACE,
+                       multi_lobby=lambda: False, clock=lambda: clock[0])
+    assert not again.race_started() and again.start_unlock() == "keep" \
+        and again.standings()["start_timer"] is False, "a pending unlock survives a restart"
+    svc.reset("tailnet")
+    again = dr.Service(svc._path, pick=lambda: {"id": "good"}, trace_for=lambda i: TRACE,
+                       multi_lobby=lambda: False, clock=lambda: clock[0])
+    assert again.start_unlock() is None, "a race reset clears the saved unlock"
+    svc._race_started = True
+    svc._save_start_state()
+    svc.reset("tailnet")
+    again = dr.Service(svc._path, pick=lambda: {"id": "good"}, trace_for=lambda i: TRACE,
+                       multi_lobby=lambda: False, clock=lambda: clock[0])
+    assert not again.race_started(), "a race reset clears the saved race lock"
+    svc._race_started = True
+    svc._save_start_state()
+    svc.new_event()
+    again = dr.Service(svc._path, pick=lambda: {"id": "good"}, trace_for=lambda i: TRACE,
+                       multi_lobby=lambda: False, clock=lambda: clock[0])
+    assert not again.race_started(), "a new event clears the saved race lock"
+
+
+def t_the_first_counting_lap_shows_as_the_last_change():
+    svc, _clock = _service([{"id": "good"}])
+    svc.mark_race_start()
+    la = svc.standings()["last_action"]
+    assert la["action"] == "race_start" and la["who"] == "race", f"the desks show when the race started: {la}"
+
+
+def t_a_race_reset_keeps_a_keep_arm_from_starting_the_timer():
+    svc, clock, cars = _armed_race_under_way()
+    svc.unlock_start("director:bob", "keep")
+    svc.race_start("race_control:dave")
+    svc.reset("tailnet")
+    taken = _takes(svc, clock, cars)
+    assert len(taken) == 1 and taken[0][0] is False, f"a reset keeps the keep arm's no-timer start: {taken}"
+
+
+def t_the_unlock_takes_only_fresh_or_keep():
+    svc, _clock = _service([{"id": "good"}])
+    try:
+        svc.unlock_start("tailnet", "maybe")
+    except ValueError:
+        pass  # expected
+    else:
+        raise AssertionError("the unlock names what the timer does")
+
+
+def t_qualifying_has_no_race_state_and_never_starts_the_race():
+    path = os.path.join(tempfile.mkdtemp(), "driver-race.json")
+    dr.write_settings(path, {"formation": False})
+    clock = [0.0]
+    svc = dr.Service(path, pick=lambda: {"id": "good"}, trace_for=lambda i: TRACE,
+                     multi_lobby=lambda: False, clock=lambda: clock[0], enabled=lambda: False,
+                     context=lambda: {"mode": "qualifying", "segment": 1})
+    svc.race_start("tailnet")
+    cars = [_GridCar("A", -20.0)]
+    assert _run(svc, clock, cars, 50.0, L / 50 * 2) == 0
+    assert svc.race_state() is None, "qualifying snapshots carry no race state"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

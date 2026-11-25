@@ -217,6 +217,22 @@ and says so. Changing the layout mid-event starts the race over.
   crossing. The crossing times form the starting gaps. Laps driven before the race in
   the same lobby are dropped when GT7 resets the lap counter, and nothing counts while
   the relay is in qualifying mode.
+- **Race start** (Race area of both desks, two clicks) is pressed once the cars stand on
+  the grid. It starts the race over like a race reset: what lobby laps counted goes,
+  including the finish line each car learned, and so do corrections, rejoin marks,
+  retirements, the fastest lap and open disconnects; the recording starts a new race.
+  A car standing on a grid behind the line does not count until it passes it. It also
+  arms the [race timer](Race-Timer), which then starts by itself on the first race lap,
+  after the formation lap when the event has one. The desk shows **Armed** until that
+  lap. Pressed again, it clears the lobby laps once more and arms again, and the desk
+  says so. The button is locked, with the reason, while the race timer has started
+  (**Reset** of the timer or the director's unlock releases it) and once the armed
+  race counts (a new event, the director's one-time **Unlock Race start** or a race
+  reset from the tailnet releases it, see [Race Timer](Race-Timer)). The relay saves
+  the race lock with the race actions, so a relay restart keeps it. While the race
+  already counts or has finished without a lock, the first click warns that the
+  counted laps or the result go. When Race start does not touch the timer (no race
+  timer on the relay, or the director's unlock kept it running) the desk says so.
 - **Gap and interval** are the time the car ahead needed from the same point. A car a
   full lap or more down shows `+N L`. Senders post a moment apart, so the order and the
   intervals compare the cars where they were at the older of their last samples (up to

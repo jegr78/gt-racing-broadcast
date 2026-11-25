@@ -234,9 +234,17 @@ Security boundaries that apply everywhere:
   for all viewers that stretches their poll interval instead of turning anyone away, plus
   the roster's brand logos
   (`/console/timing/brand/<key>`, PNG only).
-- The `race_control` role reaches exactly one program change: the full `RED FLAG`
+- The `race_control` role reaches two program changes. The full `RED FLAG`
   (`POST /console/race-control/red-flag`, #1114) raises the Standby Cover, sets the HUD
-  banner and holds the driver race. No step-up; it is logged with the person's identity.
+  banner and holds the driver race. **Race start** (`POST
+  /console/race-control/drivers/race/start`, #1324) rebuilds the driver race and arms
+  the on-air race timer to start on the first race lap; it is refused once a race it
+  armed counts (released by a new event, the tailnet-only race reset or the director's
+  one-shot `unlock-start`, which is refused for `race_control`) or the timer has
+  started (released by a timer RESET or the director's unlock) or is not yet read from
+  the Sheet (released by the Sheet answering or the director's keep unlock, then START
+  by hand; a fresh unlock is refused there and a timer RESET does not release it). No
+  step-up; all of them are logged with the person's identity.
   Every other program control stays director-gated, including putting the driver
   dashboard on air. Race data the desks maintain (corrections, tyre compound, the
   dashboard's compound and fuel columns) is not a program change.

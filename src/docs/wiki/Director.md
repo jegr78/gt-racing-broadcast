@@ -86,7 +86,7 @@ Where each bus lives:
 | **GFX** (Graphics area) | graphics toggles (HUD, standings, schedule, results, weather, covers) |
 | **FLAG GFX** | mutually exclusive flag-status graphic overlays, exactly one active at a time (or none); distinct from the flag-text chip in the HUD |
 | **CREW GRAPHIC TAKES** (bottom of the Graphics area) | the live take mode per crew role, **Commentator** and **Race Control**: `OFF` (no takes), `REQUEST` (the crew asks, you take or decline) or `DIRECT` (the crew takes graphics itself). Each key explains its mode on hover. It starts from the league's `GRAPHICS_TAKE` and returns to it when the relay restarts. Changing a mode drops the open requests |
-| **TIMER** (HUD area) | the race timer ([Race Timer](Race-Timer)) |
+| **TIMER** (HUD area) | the race timer ([Race Timer](Race-Timer)). After **Race start** on the driver desk the relay starts it by itself on the first race lap; **START** stays the manual way. Race start is locked while the timer has started (**RESET** releases it), while the Timer tab was never read (the Sheet answering or your unlock with the timer kept releases it, then START by hand; RESET does not) and once the armed race counts (a new event or a race reset from the tailnet releases it). **Unlock Race start** on your driver desk releases both once at any time, with the timer starting fresh or kept running, until the new race counts ([Race Timer](Race-Timer)) |
 | **AUDIO** (Audio area) | per-source dB sliders, 0 dB reset and mutes; includes an **Intermission Music** fader for the music track in the Intermission scene |
 | **URLs** (Schedule area) | the editor for the schedule and POV URLs, next to the commentators' link submissions |
 

@@ -1336,6 +1336,24 @@ def t_a_lossy_telemetry_network_is_a_quiet_yellow():
         assert h["notify_level"] == without, "a lossy telemetry network never pages Discord on its own"
 
 
+def t_a_race_timer_start_waiting_for_the_sheet_is_a_quiet_yellow():
+    import types
+    h = m.aggregate_health({"timer_start_waiting": "Race timer: waits"})
+    assert h["level"] == "yellow" and "Race timer: waits" in h["reasons"], f"a waiting start is a yellow: {h}"
+    with tempfile.TemporaryDirectory() as td:
+        r = _mk_relay(td, ["https://www.twitch.tv/a"])
+        assert r._health_facts(time.time())["timer_start_waiting"] is None, "no autostart, no fact"
+        r.timer_autostart = types.SimpleNamespace(waiting_text=lambda now=None: "Race timer: waits")
+        now = time.time()
+        assert r._health_facts(now)["timer_start_waiting"] == "Race timer: waits", "the relay reads the wait"
+        h = r._refresh_health(now)
+        assert "Race timer: waits" in h["reasons"], h
+        quiet = {"feeds_jittery": [], "feeds_backlogged": {}, "feeds_av_disturbed": {}, "mic_problem": None,
+                 "telemetry_lossy": None, "track_mismatch": None}
+        without = m.aggregate_health({**r._health_facts(now), **quiet, "timer_start_waiting": None})["level"]
+        assert h["notify_level"] == without, "a waiting timer start never pages Discord on its own"
+
+
 def t_aggregate_health_backlog_is_a_yellow_reason_with_the_next_step():
     # Named after the measurement, not a guessed cause, and the line carries the
     # operator's next step: the RESET that drops the backlog, with its cost. Not

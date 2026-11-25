@@ -292,6 +292,240 @@ def t_timerstore_summary():
                             "remaining_s": 30, "push": "disabled"}
 
 
+def t_autostart_starts_only_a_timer_that_never_started():
+    ts, _ = _store()
+    ts.set_duration(3600, now=10.0)
+    ts.hide(now=11.0)
+    assert ts.autostart(at=90.0, now=100.0) is True
+    assert ts.state["end"] == 3690.0 and ts.state["remaining"] is None, \
+        f"the countdown runs from the first race lap: {ts.state}"
+    assert ts.state["updated"] == 100.0 and ts.state["visible"] is False, ts.state
+    assert ts.autostart(now=200.0) is False and ts.state["end"] == 3690.0, \
+        "a running timer is never restarted"
+    ts.stop(now=300.0)
+    assert ts.autostart(now=400.0) is False and ts.state["end"] is None \
+        and ts.state["remaining"] == 3390, f"a paused timer stays paused: {ts.state}"
+    ts.reset(now=500.0)
+    ts.start(now=500.0)
+    assert ts.autostart(now=10_000.0) is False and ts.state["end"] == 4100.0, \
+        f"a finished timer stays finished: {ts.state}"
+
+
+def t_autostart_pushes_like_start():
+    ts, _ = _store(push_url="http://push")
+    pushed = []
+    ts._spawn_push = pushed.append
+    ts.autostart(now=100.0)
+    ts.autostart(now=200.0)
+    assert len(pushed) == 1 and pushed[0]["end"] == m.iso_utc(100.0 + m.TIMER_DEFAULT_DURATION), pushed
+
+
+def t_the_sheet_state_is_known_only_after_a_read():
+    ts, _ = _store()
+    assert ts.sheet_known() is False, "a Sheet-synced timer is unknown before its first read"
+    ts._fetch = lambda url, timeout=10: ""
+    ts.refresh()
+    assert ts.sheet_known() is True
+    local, _ = _store(csv_url=None)
+    assert local.sheet_known() is True, "a local-only timer has no Sheet to wait for"
+
+
+class _Race:
+    def __init__(self, starts=()):
+        self.starts = list(starts)
+        self.gen = 1
+
+    def take_race_start(self):
+        return (True, self.gen) if self.starts and self.starts.pop(0) else None
+
+    def start_generation(self):
+        return self.gen
+
+
+def t_timer_autostart_starts_only_on_an_armed_race_start():
+    ts, _ = _store(csv_url=None)
+    auto = m.TimerAutostart(ts, _Race([False, False]))
+    for now in (1.0, 2.0, 3.0):
+        auto.observe(now=now)
+    assert ts.state["end"] is None, "without Race start nothing starts the timer"
+    auto = m.TimerAutostart(ts, _Race([False, True, False]))
+    for now in (10.0, 11.0, 12.0):
+        auto.observe(now=now)
+    assert ts.state["end"] == 11.0 + m.TIMER_DEFAULT_DURATION, ts.state
+
+
+def t_timer_autostart_waits_for_the_sheet_and_keeps_its_running_anchor():
+    ts, _ = _store()
+    auto = m.TimerAutostart(ts, _Race([True]))
+    auto.observe(now=1000.0)
+    auto.observe(now=1001.0)
+    assert ts.state["end"] is None, f"no start while the Sheet state is unknown: {ts.state}"
+    ts._fetch = lambda url, timeout=10: TIMER_CSV            # director A started the race
+    ts.refresh()
+    auto.observe(now=1002.0)
+    assert ts.state["end"] == 1781380800.0, f"the Sheet's running anchor wins: {ts.state}"
+    fresh, _ = _store()
+    auto = m.TimerAutostart(fresh, _Race([True]))
+    auto.observe(now=1000.0)
+    fresh._fetch = lambda url, timeout=10: ""
+    fresh.refresh()
+    auto.observe(now=1030.0)
+    assert fresh.state["end"] == 1000.0 + m.TIMER_DEFAULT_DURATION, \
+        f"a late start still counts from the first race lap: {fresh.state}"
+
+
+def t_a_waiting_start_is_visible_and_named_after_a_while():
+    ts, _ = _store()
+    auto = m.TimerAutostart(ts, _Race([True]))
+    assert auto.pending() is False and auto.waiting_text(now=0.0) is None
+    auto.observe(now=1000.0)
+    assert auto.pending() is True, "a start waiting for the Sheet is visible"
+    assert auto.waiting_text(now=1000.0 + m.TIMER_START_WAIT_S - 1) is None, "a short wait stays quiet"
+    text = auto.waiting_text(now=1000.0 + m.TIMER_START_WAIT_S + 1)
+    assert text and "Timer tab" in text, f"a long wait becomes a health line: {text}"
+    auto.observe(now=5000.0)
+    assert auto.pending() is True and ts.state["end"] is None, "it keeps waiting, never gives up"
+
+
+def t_a_waiting_start_goes_with_a_new_event_or_a_new_race():
+    ts, _ = _store()
+    race = _Race([True])
+    auto = m.TimerAutostart(ts, race)
+    auto.observe(now=1000.0)
+    race.gen = 2
+    auto.observe(now=1001.0)
+    assert auto.pending() is False, "a new event or race reset drops the waiting start"
+    ts._fetch = lambda url, timeout=10: ""
+    ts.refresh()
+    auto.observe(now=1002.0)
+    assert ts.state["end"] is None, f"the dropped start never fires: {ts.state}"
+
+
+def t_a_reset_right_after_the_take_drops_the_start():
+    import test_driver_race as tdr
+    svc, clock, cars = tdr._practice_then_grid()
+    for car, grid in zip(cars, (-20.0, -40.0), strict=True):
+        car.along = grid
+    svc.race_start("tailnet")
+    take = svc.take_race_start
+
+    def take_then_reset():
+        got = take()
+        if got is not None:
+            svc.reset("tailnet")          # a race reset lands between the take and the next read
+        return got
+    svc.take_race_start = take_then_reset
+    ts, _ = _store(csv_url=None)
+    auto = m.TimerAutostart(ts, svc)
+    for _ in range(80):
+        clock[0] += 0.1
+        for car in cars:
+            car.along += 5.0
+            svc.update(car.reg, tdr._sample(clock[0], car.along, car.lap(), 50.0))
+        svc.tick()
+        auto.observe(now=clock[0])
+    assert ts.state["end"] is None, f"a start taken before a race reset never fires: {ts.state}"
+
+
+def t_after_a_keep_unlock_the_next_race_start_leaves_the_timer_alone():
+    import test_driver_race as tdr
+    svc, clock, cars = tdr._armed_race_under_way()
+    svc.unlock_start("director:bob", "keep")
+    svc.race_start("race_control:dave")
+    ts, _ = _store(csv_url=None)
+    auto = m.TimerAutostart(ts, svc)
+    for _ in range(30):
+        clock[0] += 0.1
+        for car in cars:
+            car.along += 5.0
+            svc.update(car.reg, tdr._sample(clock[0], car.along, car.lap(), 50.0))
+        svc.tick()
+        auto.observe(now=clock[0])
+    assert svc.race_started() and ts.state["end"] is None, \
+        f"keep: the restarted race does not start a timer: {ts.state}"
+
+
+def t_a_fresh_unlock_drops_a_start_waiting_for_the_sheet():
+    import test_driver_race as tdr
+    svc, clock, cars = tdr._practice_then_grid()
+    for car, grid in zip(cars, (-20.0, -40.0), strict=True):
+        car.along = grid
+    svc.race_start("tailnet")
+    ts, _ = _store()
+    auto = m.TimerAutostart(ts, svc)
+
+    def drive(steps):
+        for _ in range(steps):
+            clock[0] += 0.1
+            for car in cars:
+                car.along += 5.0
+                svc.update(car.reg, tdr._sample(clock[0], car.along, car.lap(), 50.0))
+            svc.tick()
+            auto.observe(now=clock[0])
+    drive(30)
+    assert auto.pending(), "the first lap's start waits for the Sheet"
+    svc.unlock_start("director:bob", "fresh")
+    ts.reset(now=clock[0])
+    ts._fetch = lambda url, timeout=10: ""
+    ts.refresh()
+    auto.observe(now=clock[0])
+    assert ts.state["end"] is None and not auto.pending(), \
+        f"a fresh unlock drops the old race's waiting start: {ts.state}"
+
+
+def t_the_lock_names_the_timer_state():
+    unknown, _ = _store()
+    assert "not known yet" in (unknown.start_lock(now=0.0) or ""), \
+        "a Sheet-synced timer that never read the Sheet locks Race start"
+    ts, _ = _store(csv_url=None)
+    assert ts.start_lock(now=0.0) is None
+    ts.start(now=100.0)
+    assert "runs" in ts.start_lock(now=200.0), ts.start_lock(now=200.0)
+    assert "finished" in ts.start_lock(now=100.0 + m.TIMER_DEFAULT_DURATION + 1), \
+        "a stale timer from the last event reads as finished"
+    ts.stop(now=300.0)
+    assert "paused" in (ts.start_lock(now=400.0) or ""), f"a paused timer locks: {ts.start_lock(now=400.0)}"
+    ts.reset(now=500.0)
+    assert ts.start_lock(now=600.0) is None, "RESET unlocks"
+
+
+def t_dashboard_ticks_hands_the_tick_to_the_autostart():
+    class _Relay:
+        def _tick_ok(self, _name):
+            pass
+
+        def _warn_tick_error(self, name, e):
+            warned.append((name, str(e)))
+
+    class _Svc:
+        def tick(self):
+            pass
+
+        def race_state(self):
+            return None
+
+    class _Stop:
+        n = 3
+
+        def wait(self, _s):
+            self.n -= 1
+            return self.n < 0
+
+    class _Seen:
+        def observe(self):
+            seen.append(1)
+
+    class _Boom:
+        def observe(self):
+            raise ValueError("boom")
+    warned, seen = [], []
+    m.dashboard_ticks(_Relay(), _Svc(), _Stop(), 0, None, None, _Seen())
+    assert len(seen) == 3, seen
+    _Stop.n = 1
+    m.dashboard_ticks(_Relay(), _Svc(), _Stop(), 0, None, None, _Boom())
+    assert warned == [("race timer autostart", "boom")], f"a failing autostart is warned: {warned}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
