@@ -3,6 +3,7 @@
 (spec docs/superpowers/specs/2026-10-17-feed-signal-hold-design.md).
 Run: python3 tests/test_signal_hold.py"""
 import importlib.util, logging, os
+from types import SimpleNamespace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -320,6 +321,7 @@ class FakeObs:
 
     def __init__(self, missing=False, feed_shown=True, program="Stint"):
         self.calls, self.missing, self.feed_shown = [], missing, feed_shown
+        self.files = []
         self.director_muted = False
         self.program = program
         self.cursor = {"Feed A": None, "Feed B": None}
@@ -360,6 +362,7 @@ class FakeObs:
 
     def set_input_file(self, name, path):
         self.calls.append(("file", name))
+        self.files.append((name, path))
         return True, ""
 
     def get_input_mute(self, name):
@@ -387,9 +390,10 @@ def _relay_for_covers(obs, serving=True, stills=True):
         def __init__(self, name):
             self.name, self.paused = name, False
             self.phase = "serving" if serving else "idle"
-            self.fanout_server, self.cover_tap = None, None
+            self.fanout_server, self.still_epoch = None, 0
+            self.cover_tap = SimpleNamespace(still_epoch=0 if stills else None)
     r.feeds = {"A": F("A"), "B": F("B")}
-    if stills:                              # the taps have written a still already
+    if stills:                              # the taps have written a still of this serve
         for k in r.feeds:
             with open(r._cover_latest_path(k), "wb") as fh:
                 fh.write(b"\xff\xd8" + k.encode() + b"\xff\xd9")
@@ -509,11 +513,237 @@ def t_obs_file_changes_only_on_refresh():
         assert fh.read() == b"\xff\xd8one\xff\xd9"               # frozen while on program
 
 
-def t_refresh_without_a_still_yet_is_quiet():
+def _neutral_pixels(path):
+    import struct, zlib
+    with open(path, "rb") as fh:
+        data = fh.read()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n", "the neutral still is a PNG"
+    pos, idat, ihdr = 8, b"", None
+    while pos < len(data):
+        n, typ = struct.unpack(">I4s", data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + n]
+        if typ == b"IHDR":
+            ihdr = struct.unpack(">IIBBBBB", body)
+        elif typ == b"IDAT":
+            idat += body
+        pos += 12 + n
+    return ihdr, zlib.decompress(idat)
+
+
+def t_a_cover_without_a_current_still_is_opaque():
+    obs = FakeObs(program="Stint")
+    r = _relay_for_covers(obs, stills=False)
+    r._cover_tick(100.0)                                       # raised, no tap output yet
+    path = dict(obs.files).get("Feed A Cover")
+    assert path and os.path.exists(path), f"the raised cover points at no file: {obs.files}"
+    (w, h, depth, color, _c, _f, _i), raw = _neutral_pixels(path)
+    assert (w, h) == (m.COVER_WIDTH, m.COVER_WIDTH * 9 // 16), "the neutral still covers the feed"
+    assert depth == 8 and color in (0, 2), "a neutral still without alpha is opaque"
+    assert raw and max(raw) < 64, "the neutral still is dark"
+
+
+def t_a_still_from_before_the_current_serve_is_never_shown():
+    obs = FakeObs(program="Standby")
+    r = _relay_for_covers(obs)
+    r._cover_tick(100.0)                                       # stint 1's still, off program
+    r.feeds["A"].still_epoch += 1                              # stopped or advanced since
+    r._pre_show_cover("A", "Splitscreen")
+    with open(dict(obs.files)["Feed A Cover"], "rb") as fh:
+        assert fh.read() != b"\xff\xd8A\xff\xd9", "a still of another serve reached the cover"
+
+
+def t_a_shown_cover_drops_a_still_of_another_serve():
+    obs = FakeObs(program="Stint")
+    r = _relay_for_covers(obs)
+    r._cover_tick(100.0)                                       # raised with stint N's still
+    obs.files = []
+    r.feeds["A"].still_epoch += 1                              # the feed moved on under it
+    r._cover_tick(101.0)
+    path = dict(obs.files).get("Feed A Cover")
+    assert path and path != r._cover_path("A"), f"the old still stayed up: {obs.files}"
+
+
+def t_a_shown_cover_picks_up_the_first_still_of_the_current_serve():
+    obs = FakeObs(program="Stint")
+    r = _relay_for_covers(obs, stills=False)
+    r._cover_tick(100.0)                                       # raised neutral
+    with open(r._cover_latest_path("A"), "wb") as fh:
+        fh.write(b"\xff\xd8one\xff\xd9")
+    r.feeds["A"].cover_tap.still_epoch = 0                     # the tap's first still
+    obs.files = []
+    r._cover_tick(101.0)
+    assert dict(obs.files).get("Feed A Cover") == r._cover_path("A"), \
+        f"the shown cover kept the neutral still: {obs.files}"
+    with open(r._cover_latest_path("A"), "wb") as fh:
+        fh.write(b"\xff\xd8two\xff\xd9")
+    obs.files = []
+    for t in range(2, 20):
+        r._cover_tick(100.0 + t)
+    assert "Feed A Cover" not in dict(obs.files), "a shown still changed twice"
+
+
+def t_a_cut_pre_show_picks_up_the_first_still_of_the_current_serve():
     obs = FakeObs(program="Standby")
     r = _relay_for_covers(obs, stills=False)
-    r._cover_tick(100.0)                                       # no tap output yet
-    assert not os.path.exists(r._cover_path("A"))
+    r._cover_tick(100.0)
+    r._pre_show_cover("A", "Stint")                            # raised neutral
+    with open(r._cover_latest_path("A"), "wb") as fh:
+        fh.write(b"\xff\xd8one\xff\xd9")
+    r.feeds["A"].cover_tap.still_epoch = 0
+    obs.files = []
+    r._pre_show_cover("A", "Stint")
+    assert dict(obs.files).get("Feed A Cover") == r._cover_path("A"), \
+        f"the cut kept the neutral still: {obs.files}"
+
+
+def t_stopping_or_advancing_a_feed_invalidates_its_still():
+    import tempfile
+    f = m.Feed("A", 53001, 0, lambda: ["u1", "u2", "u3"], tempfile.mkdtemp())
+    e = f.still_epoch
+    f.reload()
+    assert f.still_epoch == e, "a reload of the same stint keeps its still"
+    f.set_index(0)
+    assert f.still_epoch == e, "no move, no invalidation"
+    f.set_index(2)
+    assert f.still_epoch > e, "advancing to another stint invalidates the still"
+    e = f.still_epoch
+    f.paused = True
+    f.reload()
+    assert f.still_epoch > e, "stopping the feed invalidates the still"
+
+
+def t_relay_start_wires_each_cover_tap_to_its_own_feed_epoch():
+    import tempfile
+    r = m.Relay.__new__(m.Relay)
+    r._cover_dir = tempfile.mkdtemp()
+    d = tempfile.mkdtemp()
+    r.feeds = {k: m.Feed(k, 53001 + i, i, lambda: ["u1", "u2", "u3"], d)
+               for i, k in enumerate(("A", "B"))}
+    real = m.FeedCoverTap.start
+    m.FeedCoverTap.start = lambda tap: tap               # no ffmpeg thread
+    try:
+        r._start_cover_taps()
+    finally:
+        m.FeedCoverTap.start = real
+    a, b = r.feeds["A"], r.feeds["B"]
+    before_b = b.cover_tap._epoch()
+    a.set_index(2)
+    assert a.cover_tap._epoch() == a.still_epoch, "Feed A's tap does not read Feed A's epoch"
+    assert b.cover_tap._epoch() == before_b == b.still_epoch, "Feed B's tap followed Feed A"
+
+
+def t_a_new_url_at_the_same_stint_invalidates_the_still():
+    import tempfile
+    sched = ["u1", "u2"]
+    f = m.Feed("A", 53001, 0, lambda: sched, tempfile.mkdtemp())
+    f.reload()
+    e = f.still_epoch
+    f.reload()
+    assert f.still_epoch == e, "a reload of the same URL keeps the still"
+    sched[0] = "u9"                                            # on-air substitution
+    f.reload()
+    assert f.still_epoch > e, "a reload onto another URL at the same stint kept the still"
+    e = f.still_epoch
+    sched[0] = "u8"                                            # Sheet edit, then a reconnect
+    f._note_serve_url("u8")
+    assert f.still_epoch > e, "a reconnect onto another URL kept the still"
+
+
+def t_cover_tap_never_reads_bytes_of_an_earlier_serve():
+    import threading, time
+    ring = m.FeedRing(1 << 20)
+    ring.reset_head(0)
+    epoch = [1]                                                # the feed moved on
+    tap = m.FeedCoverTap(ring, "unused.jpg", LOG, epoch=lambda: epoch[0])
+    got = bytearray()
+
+    class In:
+        def write(self, b):
+            got.extend(b)
+
+        def flush(self):
+            pass
+
+        def close(self):
+            pass
+    proc = SimpleNamespace(poll=lambda: None)
+    gen = threading.Event()
+    pump = threading.Thread(target=tap._feed_stdin, args=(In(), proc, gen, 1), daemon=True)
+    pump.start()
+    time.sleep(0.1)
+    ring.write(b"OLD-SERVE")                                   # an in-flight chunk lands late
+    time.sleep(0.1)
+    ring.reset_head(1)                                         # the new serve starts
+    ring.write(b"NEW-SERVE")
+    for _ in range(100):
+        if got:
+            break
+        time.sleep(0.02)
+    gen.set()
+    tap.stop()
+    pump.join(2)
+    assert bytes(got) == b"NEW-SERVE", f"the tap read bytes of an earlier serve: {bytes(got)!r}"
+
+
+def t_snapshots_of_one_feed_never_interleave():
+    import threading
+    obs = FakeObs(program="Standby")
+    r = _relay_for_covers(obs)
+    r._cover_tick(100.0)
+    inner = []
+    real = obs.set_input_file
+
+    def set_file(name, path):
+        if not inner:
+            t = threading.Thread(target=r._snapshot_cover, args=("A",), daemon=True)
+            inner.append(t)
+            t.start()
+            t.join(0.3)
+            inner.append(t.is_alive())
+        return real(name, path)
+    obs.set_input_file = set_file
+    r._snapshot_cover("A")
+    inner[0].join(2)
+    assert inner[1] is True, "a second snapshot of the same feed ran inside the first"
+
+
+def t_cover_tap_pump_ends_when_the_feed_moves_on():
+    import threading, time
+    epoch = [0]
+    tap = m.FeedCoverTap(_IdleRing(), "unused.jpg", LOG, epoch=lambda: epoch[0])
+    proc, stdin, _out = _fake_ffmpeg([])(tap)
+    pump = threading.Thread(target=tap._feed_stdin, args=(stdin, proc, threading.Event(), 0),
+                            daemon=True)
+    pump.start()
+    time.sleep(0.05)
+    epoch[0] += 1
+    pump.join(2)
+    alive = pump.is_alive()
+    tap.stop()
+    assert not alive, "the pump kept feeding the old serve's ffmpeg after the feed moved on"
+
+
+def t_cover_tap_drops_a_frame_from_before_the_feed_moved_on():
+    import tempfile, time
+    path = os.path.join(tempfile.mkdtemp(), "covers", "feed-a.latest.jpg")
+    epoch, spawns = [0], []
+
+    def spawn(tap):
+        spawns.append(1)
+        if len(spawns) == 1:
+            epoch[0] += 1                                     # the feed advanced meanwhile
+            return _fake_ffmpeg([b"\xff\xd8old\xff\xd9"])(tap)
+        return _fake_ffmpeg([b"\xff\xd8new\xff\xd9"] if len(spawns) == 2 else [])(tap)
+    tap = m.FeedCoverTap(_IdleRing(), path, LOG, spawn=spawn, respawn_s=0.05,
+                         epoch=lambda: epoch[0]).start()
+    for _ in range(200):
+        if tap.still_epoch is not None:
+            break
+        time.sleep(0.02)
+    tap.stop()
+    assert tap.still_epoch == 1, "a still carries the epoch it was taken in"
+    with open(path, "rb") as fh:
+        assert fh.read() == b"\xff\xd8new\xff\xd9", "a frame of the old serve was written"
 
 
 def t_forced_pre_show_raises_even_a_playing_feed_but_only_where_it_is_visible():
