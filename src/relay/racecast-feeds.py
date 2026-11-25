@@ -6040,6 +6040,20 @@ class _PreviewRingTap:
 COVER_WIDTH = 1920   # full-frame cover still (spec 2026-10-17 Part C)
 
 
+def neutral_cover_png(width=COVER_WIDTH, height=COVER_WIDTH * 9 // 16, level=16):
+    """An opaque dark grayscale PNG the size of a cover still: the cover of a feed that
+    has no still of its current serve yet."""
+    import struct, zlib
+
+    def chunk(typ, body):
+        return (struct.pack(">I", len(body)) + typ + body
+                + struct.pack(">I", zlib.crc32(typ + body) & 0xFFFFFFFF))
+    raw = (b"\x00" + bytes([level]) * width) * height
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+
+
 def cover_ffmpeg_cmd(width=COVER_WIDTH):
     """Argv: ring bytes on stdin -> one full-width JPEG per KEYFRAME on stdout. Decoding
     keyframes only keeps an always-on tap cheap (about one frame every 2 s on YouTube)."""
@@ -6054,15 +6068,19 @@ class FeedCoverTap:
     bytes -> ffmpeg (keyframes only) -> each JPEG written atomically (temp file +
     os.replace), so OBS never loads a half-written file. Best effort: a spawn or read
     failure only stops the writing, the feed is never touched. `spawn(tap) -> (proc,
-    stdin, stdout)` is injectable for tests."""
+    stdin, stdout)` is injectable for tests. `epoch()` is the feed's still epoch: a
+    change ends the ffmpeg generation, and each still records the epoch it was taken in
+    (`still_epoch`), so a still of an earlier serve is never taken for a current one."""
 
-    def __init__(self, ring, path, log, spawn=None, respawn_s=2.0):
+    def __init__(self, ring, path, log, spawn=None, respawn_s=2.0, epoch=None):
         self.ring, self.path, self.log = ring, path, log
         self._spawn = spawn or self._spawn_real
         self._respawn_s = respawn_s
+        self._epoch = epoch or (lambda: 0)
         self._proc = None
         self._stop = threading.Event()
         self.last_write_ts = None        # monotonic time of the last written still
+        self.still_epoch = None          # the feed's still epoch of the last written still
 
     def start(self):
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
@@ -6081,6 +6099,7 @@ class FeedCoverTap:
         commentator at every later cover (review 2026-10-18)."""
         warned = False
         while not self._stop.is_set() and not getattr(self.ring, "closed", False):
+            epoch = self._epoch()
             try:
                 self._proc, stdin, video = self._spawn(self)
             except Exception as e:                   # noqa: BLE001 best-effort
@@ -6092,7 +6111,7 @@ class FeedCoverTap:
             proc = self._proc
             generation = threading.Event()
             pump = threading.Thread(target=self._feed_stdin,
-                                    args=(stdin, proc, generation), daemon=True)
+                                    args=(stdin, proc, generation, epoch), daemon=True)
             started = False
             try:
                 pump.start()
@@ -6104,7 +6123,9 @@ class FeedCoverTap:
                         break
                     frames, buf = split_mjpeg_frames(buf + chunk)
                     if frames:
-                        self._write(frames[-1])
+                        if self._epoch() != epoch:
+                            break                # ffmpeg may still hold the old serve's frames
+                        self._write(frames[-1], epoch)
             finally:
                 generation.set()
                 retired = self._kill(proc)
@@ -6120,29 +6141,43 @@ class FeedCoverTap:
                 return
             self._stop.wait(self._respawn_s)
 
-    def _write(self, jpeg):
+    def _write(self, jpeg, epoch=None):
         tmp = self.path + ".tmp"
         try:
             with open(tmp, "wb") as fh:
                 fh.write(jpeg)
             os.replace(tmp, self.path)
             self.last_write_ts = time.monotonic()
+            self.still_epoch = epoch
         except OSError as e:
             self.log.debug("cover write %s failed: %s", os.path.basename(self.path), e)
 
-    def _feed_stdin(self, stdin, proc=None, generation=None):
+    def _feed_stdin(self, stdin, proc=None, generation=None, epoch=None):
         """Pump ring bytes into ffmpeg from the live edge, fMP4 init segment first (#577);
-        the same pump as _PreviewRingTap."""
+        the same pump as _PreviewRingTap. Ends when the feed's still `epoch` changes."""
         proc = self._proc if proc is None else proc
         generation = threading.Event() if generation is None else generation
-        cursor = self.ring.live_offset() if hasattr(self.ring, "live_offset") else 0
-        join = ring_join(self.ring)
         try:
+            # Join only once the ring carries a serve of this epoch, at that serve's
+            # start: bytes of an earlier serve all precede its reset_head.
+            waited = False
+            while epoch is not None and getattr(self.ring, "serve_epoch", epoch) != epoch:
+                if (self._stop.is_set() or generation.is_set() or self.ring.closed
+                        or self._epoch() != epoch):
+                    return
+                waited = True
+                generation.wait(0.2)
+            if waited:
+                cursor = self.ring.serve_offset
+            else:
+                cursor = self.ring.live_offset() if hasattr(self.ring, "live_offset") else 0
+            join = ring_join(self.ring)
             if join.init:
                 stdin.write(join.init)
                 stdin.flush()
             while (not self._stop.is_set() and not generation.is_set()
-                   and not self.ring.closed and proc is not None and proc.poll() is None):
+                   and not self.ring.closed and proc is not None and proc.poll() is None
+                   and (epoch is None or self._epoch() == epoch)):
                 data, cursor = self.ring.read(cursor, 1.0)
                 if generation.is_set() or proc.poll() is not None:
                     break
@@ -6232,6 +6267,8 @@ class FeedRing:
         self._marks = collections.deque()   # #533: (live_offset, monotonic_ts) samples, throttled+pruned
         self._cond = threading.Condition()
         self.closed = False
+        self.serve_epoch = None   # the feed's still epoch of the serve writing now
+        self.serve_offset = 0     # where that serve's bytes start
 
     def write(self, data, now=None):
         if not data:
@@ -6265,14 +6302,16 @@ class FeedRing:
         with self._cond:
             return bytes(self._head)
 
-    def reset_head(self):
+    def reset_head(self, epoch=None):
         """Drop the retained head: the writer is starting a NEW upstream process
         (stint advance, reconnect), whose initialization segment differs. The ring
         is created once in `Relay.start()` and outlives every streamlink process,
         so without this a later consumer is handed the previous stream's codec
-        parameters."""
+        parameters. `epoch` is the feed's still epoch of that serve."""
         with self._cond:
             self._head = bytearray()
+            self.serve_epoch = epoch
+            self.serve_offset = self._base + len(self._buf)
 
     def live_offset(self):
         with self._cond:
@@ -8848,6 +8887,8 @@ class Feed:
         self.ring = None              # set by the relay when fan-out is enabled (#358); None → direct-serve
         self.fanout_server = None     # its FeedFanoutServer (fan-out on); the freeze detector reads its snap count (#488)
         self.cover_tap = None         # FeedCoverTap writing this feed's cover still (spec 2026-10-17)
+        self.still_epoch = 0          # bumped on a stint change, a stop or a new URL: older cover stills are void
+        self._served_url = None
         self.before_obs_reconnect = None   # relay-set: raise the cover before a rebuild reopens OBS
         self.defer_rejoin = None           # relay-set: True while a signal hold owns OBS's rejoin
         self.serve_generation = 0     # #614: bumped per fan-out serve, so a scheduled rejoin can tell it was superseded
@@ -8934,6 +8975,7 @@ class Feed:
             if new_idx == self.idx:
                 return False
             self.idx = new_idx
+            self.still_epoch += 1
             self._set_phase("connecting")  # The old stream cannot prove the new source ready.
         self._clear_drop_health()         # director repositioned -> alarm acknowledged, new source not yet served
         self.dead_serves = 0              # new source -> fresh dead-serve count
@@ -8944,12 +8986,28 @@ class Feed:
         return True
 
     def reload(self):
-        """Reconnect to the (possibly changed) channel at the CURRENT index."""
+        """Reconnect to the (possibly changed) channel at the CURRENT index. A reload of
+        a paused feed is a stop: its cover still no longer shows what it serves."""
+        if self.paused:
+            with self.lock:
+                self.still_epoch += 1
+        else:
+            self._note_serve_url(self.current_channel()[0])
         self._clear_drop_health()         # director intervened -> alarm acknowledged, reconnecting source
         self.dead_serves = 0              # operator reload -> fresh dead-serve count
         self.mic_failed = False
         self.advance.set(); self._kill_proc()
         return True
+
+    def _note_serve_url(self, url):
+        """Another URL at the same stint is another commentator: void the cover still."""
+        if not url:
+            return
+        with self.lock:
+            if url != self._served_url:
+                if self._served_url is not None:
+                    self.still_epoch += 1
+                self._served_url = url
 
     def set_quality(self, tier, pinned):
         """Set the quality tier and pin state, then trigger a re-resolve so the change
@@ -9181,7 +9239,7 @@ class Feed:
         self.serve_generation += 1    # #614: this serve owns OBS from here on
         self.last_byte_ts = None
         if self.ring is not None:
-            self.ring.reset_head()     # #576: a new upstream = a new init segment
+            self.ring.reset_head(self.still_epoch)   # #576: a new upstream = a new init segment
         serve_started = time.monotonic()
         stdout = self.proc.stdout
         stall_s = feed_stall_s(os.environ)
@@ -9231,6 +9289,7 @@ class Feed:
             if not ch:
                 self._set_phase("idle")
                 time.sleep(3); continue
+            self._note_serve_url(ch)
             self._set_phase("connecting")
             url = feed_url(ch)
             plat = feed_platform(url)
@@ -9788,6 +9847,14 @@ class Relay:
         and the /schedule + handover paths all follow the current mode."""
         return self.active_source()
 
+    def _start_cover_taps(self):
+        """One cover tap per fan-out feed, reading that feed's still epoch."""
+        for k, f in self.feeds.items():
+            f.cover_tap = FeedCoverTap(f.ring, self._cover_latest_path(k),
+                                       logging.getLogger("racecast.cover." + k),
+                                       epoch=lambda f=f: f.still_epoch).start()
+            f.before_obs_reconnect = (lambda key=k: self._pre_show_cover(key, None, True))
+
     def start(self):
         if self.fanout:
             live = list(self.feeds.items()) + ([("POV", self.pov)] if self.pov else [])
@@ -9800,10 +9867,7 @@ class Relay:
                 f.fanout_server = srv          # #488: the freeze detector reads its consumer snap count
                 self._fanout_servers.append(srv)
             if self._covers:
-                for k, f in self.feeds.items():
-                    f.cover_tap = FeedCoverTap(f.ring, self._cover_latest_path(k),
-                                               logging.getLogger("racecast.cover." + k)).start()
-                    f.before_obs_reconnect = (lambda key=k: self._pre_show_cover(key, None, True))
+                self._start_cover_taps()
             if self._signal_hold:
                 for k, f in self.feeds.items():
                     f.defer_rejoin = (lambda key=k: self._hold.get(key, {}).get("state") == "hold")
@@ -10629,30 +10693,76 @@ class Relay:
 
     # --- Feed covers (spec 2026-10-17 Part C) -------------------------------------------
     def _cover_path(self, feed):
-        """The file OBS shows. Only _snapshot_cover writes it: OBS reloads an image
-        source by itself whenever its file changes (live test 2026-10-18)."""
+        """The still file OBS shows (else neutral.png). Only _snapshot_cover writes it:
+        OBS reloads an image source by itself whenever its file changes (live test
+        2026-10-18)."""
         return os.path.join(self._cover_dir, f"feed-{feed.lower()}.jpg")
 
     def _cover_latest_path(self, feed):
         """The tap's always-current still, never shown directly."""
         return os.path.join(self._cover_dir, f"feed-{feed.lower()}.latest.jpg")
 
+    def _neutral_cover_path(self):
+        """The opaque still of a cover whose feed has no still of its current serve;
+        written on first use. None when it cannot be written."""
+        path = os.path.join(self._cover_dir, "neutral.png")
+        if not os.path.exists(path):
+            tmp = f"{path}.{threading.get_ident()}.tmp"
+            try:
+                os.makedirs(self._cover_dir, exist_ok=True)
+                with open(tmp, "wb") as fh:
+                    fh.write(neutral_cover_png())
+                os.replace(tmp, path)
+            except OSError:
+                return None
+        return path
+
+    def _current_still_epoch(self, feed):
+        """The feed's still epoch when its tap's latest still belongs to the current
+        serve, else None."""
+        f = self.feeds.get(feed)
+        epoch = getattr(f, "still_epoch", 0)
+        return epoch if getattr(getattr(f, "cover_tap", None), "still_epoch", None) == epoch else None
+
+    def _cover_outdated(self, feed, st):
+        """True when the cover shows a still of another serve, or the neutral still
+        although the current serve has one by now."""
+        return "shown_epoch" not in st or st["shown_epoch"] != self._current_still_epoch(feed)
+
+    def _snapshot_lock(self, feed):
+        with self._lock_state():
+            return self.__dict__.setdefault("_snapshot_locks", {}).setdefault(
+                feed, threading.Lock())
+
     def _snapshot_cover(self, feed):
-        """Copy the latest still over the shown file (atomically) and point OBS at it.
-        No still yet: nothing to show, the cover keeps its previous picture."""
-        latest, shown = self._cover_latest_path(feed), self._cover_path(feed)
-        try:
-            with open(latest, "rb") as fh:
-                data = fh.read()
-            if not data:
+        """Point OBS at a still of the feed's current serve, copied over the shown file
+        atomically, or at the neutral still while that serve has none. The cover tick
+        and a rebuild's pre-show both call it, so one feed's snapshots run one at a time."""
+        with self._snapshot_lock(feed):
+            self._snapshot_cover_locked(feed)
+
+    def _snapshot_cover_locked(self, feed):
+        epoch, target = self._current_still_epoch(feed), None
+        if epoch is not None:
+            shown = self._cover_path(feed)
+            try:
+                with open(self._cover_latest_path(feed), "rb") as fh:
+                    data = fh.read()
+                if data:
+                    os.makedirs(os.path.dirname(shown), exist_ok=True)
+                    with open(shown + ".tmp", "wb") as fh:
+                        fh.write(data)
+                    os.replace(shown + ".tmp", shown)
+                    target = shown
+            except OSError:
+                pass  # unreadable: the neutral still covers instead
+        if target is None:
+            epoch, target = None, self._neutral_cover_path()
+            if target is None:
                 return
-            os.makedirs(os.path.dirname(shown), exist_ok=True)
-            with open(shown + ".tmp", "wb") as fh:
-                fh.write(data)
-            os.replace(shown + ".tmp", shown)
-        except OSError:
-            return
-        self._obs.set_input_file(_obs_ws.COVER_SOURCES[feed], shown)
+        ok, _note = self._obs.set_input_file(_obs_ws.COVER_SOURCES[feed], target)
+        if ok:
+            self._cover.setdefault(feed, {})["shown_epoch"] = epoch
 
     def _hold_active(self, feed):
         """True while a signal hold covers this feed (spec 2026-10-17 Part B), including
@@ -10958,13 +11068,13 @@ class Relay:
 
     def _refresh_cover(self, feed, st, want, program, now):
         """Reload the still: once when the cover is raised on the program scene, and
-        every COVER_REFRESH_S while it is not visible on the program. Never while viewers
-        see it: a still that changes every few seconds reads as stutter (live test
-        2026-10-18)."""
+        every COVER_REFRESH_S while it is not visible on the program. While viewers see
+        it only an outdated still changes (see _cover_outdated): a still that changes
+        every few seconds reads as stutter (live test 2026-10-18)."""
         on_program = program in want and st.get("last_" + program) is True
         raising = program in want and want[program] and not on_program
         stale = st.get("refreshed") is None or now - st["refreshed"] >= COVER_REFRESH_S
-        if raising or (not on_program and stale):
+        if raising or (not on_program and stale) or self._cover_outdated(feed, st):
             self._snapshot_cover(feed)
             st["refreshed"] = now
 
@@ -11008,9 +11118,9 @@ class Relay:
         if not scenes:
             return
         st = self._cover.setdefault(feed, {})
-        if not all(st.get("last_" + sc) is True for sc in scenes):
-            # Only a cover being raised gets a fresh still; one viewers already see keeps
-            # its picture (live test 2026-10-18: a release rejoin swapped the hold's still).
+        if not all(st.get("last_" + sc) is True for sc in scenes) or self._cover_outdated(feed, st):
+            # A cover viewers already see keeps its picture unless it is outdated (live
+            # test 2026-10-18: a release rejoin swapped the hold's still).
             self._snapshot_cover(feed)
             st["refreshed"] = time.monotonic()
         for sc in scenes:
