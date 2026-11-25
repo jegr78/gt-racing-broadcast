@@ -4,6 +4,8 @@ timing). Each acts in its own browser context on the controls a person would use
 control that is missing, hidden or disabled is a hard failure, and an action returns
 only after the page showed its result. Without a browser every action is skipped.
 
+A driver (the invite page on a phone) is a party with a page too.
+
 An action is a mechanism (click this, submit that); the scenario decides the order."""
 from urllib.parse import quote, urlsplit
 
@@ -20,6 +22,9 @@ STALE_S = 1.0
 DETACHED = "not attached"   # Playwright's text for an element the page replaced
 HUD_FIELDS = ("stint", "streamer", "session", "flag", "racecontrol")
 URI_SAFE = "!'()*~"      # what the page's encodeURIComponent leaves as it is
+MEDIA_PLAYING = "OBS_MEDIA_STATE_PLAYING"
+MEDIA_SLACK_S = 10.0     # how long past its length a clip may take to end on air
+ERROR_S = 2.0            # how long a page takes to show the reason of a refused request
 
 
 def stint_label(value):
@@ -446,7 +451,8 @@ class DirectorRole(LiveColumn, CrewChat, Surface):
     `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby,
     Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode`
     (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text,
-    target, level), `chat` (text, name), `view` (area), `fit`."""
+    target, level), `chat` (text, name), `play` (media: intro, trailer or outro), `view`
+    (area), `fit`."""
     kind = "director"
     path, ready = "/panel", selectors.READY["DIRECTOR"]
     sources = selectors.SOURCES["DIRECTOR"]
@@ -510,6 +516,40 @@ class DirectorRole(LiveColumn, CrewChat, Surface):
         self.answered(lambda: self.click(key, f"scene {scene}"), "/obs/scene", f"scene {scene}")
         self.until(lambda: "air" in self._classes(key), f"scene {scene} on air")
         return {"scene": scene}
+
+    def _clip(self, source):
+        """OBS's (mediaState, mediaDuration, mediaCursor) of a clip in ms: the panel shows none."""
+        try:
+            status = self.ctx.obs.state.request("GetMediaInputStatus", {"inputName": source}, origin="http") or {}
+        except Exception as exc:  # noqa: BLE001  OBS's own words say why
+            raise StepError(f"{source}: OBS gives no media status ({builtin.redact(exc)})") from None
+        return status.get("mediaState"), status.get("mediaDuration"), status.get("mediaCursor")
+
+    def _playing(self, source):
+        """(length, seconds left of the current loop) of a playing clip, else None. The
+        clips loop, so OBS never reports their end: a cursor counts within its loop."""
+        state, length, cursor = self._clip(source)
+        if state != MEDIA_PLAYING or not isinstance(length, (int, float)) or length <= 0:
+            return None
+        at = cursor % length if isinstance(cursor, (int, float)) and cursor >= 0 else 0
+        return length / 1000, (length - at) / 1000
+
+    def act_play(self, args):
+        """Take the Intro, Trailer or Outro key and return once the clip reached the end of
+        the loop it plays. The panel shows no media state: OBS's cursor tells the end."""
+        name = str(args.get("media", "")).strip().lower()
+        source = selectors.MEDIA.get(name)
+        if source is None:
+            raise StepError(f"play: media is intro, trailer or outro, not {name!r}")
+        if self.ctx.obs is None:
+            raise StepError(f"play {name}: this run has no OBS to tell when the clip ends")
+        key = self._one(self.sel("media", source=source), f"{name} key")
+        self.answered(lambda: self.click(key, source), "/obs/scene", source)
+        self.until(lambda: "air" in self._classes(key), f"{source} on air")
+        length, left = self.until(lambda: self._playing(source), f"{source} playing", slow=None)
+        begin = self.clock()
+        self.until(lambda: self.clock() - begin >= left, f"{source}: its end", timeout=left + MEDIA_SLACK_S, slow=None)
+        return {"media": name, "source": source, "length_s": round(length, 1), "left_s": round(left, 1)}
 
     def act_red_flag(self, args):
         """Press RED FLAG, a toggle from the cover state the key shows."""
@@ -623,6 +663,7 @@ class DirectorRole(LiveColumn, CrewChat, Surface):
 @register
 class RaceControlRole(LiveColumn, Surface):
     """Race Control on its desk: `approve_driver` (name, entry), `approve_drivers`,
+    `reject_driver` (name), `correct_driver` (name, entry, stint), `compound` (entry, code),
     `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry),
     `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason),
     `set_time` and `add_lap` (entry, time; qualifying), `note` (text, target), `confirm_dc`
@@ -667,20 +708,74 @@ class RaceControlRole(LiveColumn, Surface):
         self.answered(lambda: self.click(button, label), self.base + route, label)
         return {"status": self._status(label, done, before)}
 
-    def act_approve_driver(self, args):
-        name = str(args.get("name", ""))
+    def _waiting(self, name):
+        """The waiting request of `name` and how many of that name wait."""
         self.area("drivers")
         row = self.sel("request", name=name)
         try:
-            before = self.until(lambda: self.count(row), "the request")
+            return row, self.until(lambda: self.count(row), "the request")
         except StepError:
             raise StepError(f"no waiting request of {name!r}") from None
-        if args.get("entry"):
-            self.choose(self.sel("request_entry", name=name), f"Entry of {name}", value=args["entry"])
+
+    def _approve(self, name, row, before):
         self.answered(lambda: self.click(self.sel("request_approve", name=name), f"Approve {name}"),
                       self.base + "/drivers/requests/approve", f"Approve {name}")
         self.until(lambda: self.count(row) < before, f"{name} approved")
+
+    def act_approve_driver(self, args):
+        name = str(args.get("name", ""))
+        row, before = self._waiting(name)
+        if args.get("entry"):
+            self.choose(self.sel("request_entry", name=name), f"Entry of {name}", value=args["entry"])
+        self._approve(name, row, before)
         return {"name": name}
+
+    def act_correct_driver(self, args):
+        """Change a waiting request's entry or stint (a multi-lobby event), then approve it."""
+        name, entry = str(args.get("name", "")), str(args.get("entry") or "")
+        stint = stint_label(args["stint"]) if args.get("stint") else ""
+        if not entry and not stint:
+            raise StepError("correct_driver needs args.entry or args.stint")
+        row, before = self._waiting(name)
+        if entry:
+            self.choose(self.sel("request_entry", name=name), f"Entry of {name}", value=entry)
+        if stint:
+            self.choose(self.sel("request_stint", name=name), f"Stint of {name}", value=stint)
+        approved = self.sel("approved", name=name)
+
+        def matching():
+            rows = [t.split(" \u00b7 ") for t in self.texts(approved)]
+            return sum(1 for r in rows if (not entry or r[0] == entry) and (not stint or r[-1] == stint))
+        had, line = matching(), self._line()
+        self._approve(name, row, before)
+        status = self._status(f"Approve {name}", "Driver approved", line)
+        self.until(lambda: matching() > had, f"{name} approved as {' '.join(filter(None, [entry, stint]))}")
+        return {"name": name, "entry": entry, "stint": stint, "status": status}
+
+    def act_reject_driver(self, args):
+        """Reject a waiting request: Reject is armed, a second click confirms it."""
+        name = str(args.get("name", ""))
+        row, before = self._waiting(name)
+        button, what = self.sel("request_reject", name=name), f"Reject {name}"
+        line = self._line()
+        self.click(button, what)
+        self.until(lambda: self.text(button) == DESK["confirm_prefix"] + DESK["reject"], f"{what}: the confirm state")
+        self.answered(lambda: self.click(button, what), self.base + "/drivers/requests/reject", what)
+        self.until(lambda: self.count(row) < before, f"{name} rejected")
+        return {"name": name, "status": self._status(what, "Driver rejected", line)}
+
+    def act_compound(self, args):
+        """Set an entry's tyre compound (`code` such as RM, "" clears it) in the tyre table."""
+        entry, code = str(args.get("entry", "")), str(args.get("code") or "")
+        self.area("dashboard")
+        box, what = self.sel("compound", entry=entry), f"compound of {entry}"
+        line = self._line()
+
+        def pick():
+            self.control(box, what).focus(timeout=CONTROL_MS)   # the desk answers in the part with the focus
+            self.choose(box, what, value=code)
+        self.answered(pick, self.base + "/drivers/race/compound", what)
+        return {"entry": entry, "code": code, "status": self._status(what, "Compound set", line)}
 
     def act_approve_drivers(self, args):
         """Approve every waiting request, top to bottom; none waiting is a failure."""
@@ -857,3 +952,82 @@ class ViewerRole(Surface):
         cars = int(args.get("cars", 1))
         self.until(lambda: self.count(self.sel("rows")) >= cars, f"{cars} cars in the timing")
         return self.facts()
+
+
+@register
+class DriverRole(Surface):
+    """A driver on the event's invite page in a phone viewport: `register` (entry, name,
+    stint when the event registers per stint). The page takes no console identity. The
+    code the page shows goes to `ctx.driver_codes` for the drivers' field, never a result."""
+    kind = "driver"
+    ready = selectors.READY["DRIVER"]
+    sources = selectors.SOURCES["DRIVER"]
+    selectors = selectors.DRIVER
+    masked = ("commands",)
+    viewport = {"width": 390, "height": 844}
+
+    def open(self):
+        super().open()
+        if self.instance:
+            raise StepError("a driver is `driver`: the invite page has no console identity to open it as")
+
+    def target(self):
+        return "/console/drive?i=" + quote(self.ctx.event_link("invite"), safe="")
+
+    def act_register(self, args):
+        entry, name = str(args.get("entry", "")), str(args.get("name", ""))
+        if not entry or not name:
+            raise StepError("register needs args.entry and args.name")
+        try:
+            self.until(lambda: self.count(self.sel("entry_option", entry=entry)), f"entry {entry} in the list")
+        except StepError:
+            why = self.shown(self.sel("error"))
+            raise StepError(f"the invite page offers no entry {entry!r}" + (f": {why}" if why else "")) from None
+        self.choose(self.sel("entry"), "Entry", value=entry)
+        stint = ""
+        if self.pg.locator(self.sel("segment")).first.is_visible():
+            if not args.get("stint"):
+                raise StepError("the event registers per stint: register needs args.stint")
+            stint = self._segment(args["stint"])
+            self.choose(self.sel("segment"), "Stint or qualifying segment", value=stint)
+        elif args.get("stint"):
+            raise StepError("the invite page asks for no stint")
+        self.fill(self.sel("name"), name, "Your name")
+        try:
+            resp = self.answered(lambda: self.click(self.sel("register"), "Get my sender command"),
+                                 "/console/drive/register", "Get my sender command")
+        except StepError as exc:
+            try:
+                why = self.until(lambda: self.shown(self.sel("error")), "the page's reason", timeout=ERROR_S, slow=None)
+            except StepError:
+                raise exc from None
+            raise StepError(f"{exc}: {why}") from None
+        try:
+            code = (resp.json() or {}).get("code")
+        except Exception:  # noqa: BLE001  an answer without a body is checked below
+            code = None
+        if not isinstance(code, str) or not code:
+            raise StepError("register: the relay issued no sender code")
+        self.ctx.secrets.add(code)
+        # The commands of an earlier registration stay on screen: wait for this code.
+        self.until(lambda: self.shown(self.sel("error")) or code in self.text(self.sel("command")),
+                   "the sender command")
+        if self.shown(self.sel("error")):
+            raise StepError(f"register: {self.shown(self.sel('error'))}")
+        self.ctx.driver_codes[(entry, stint)] = code
+        return {"entry": entry, "name": name, "stint": stint}
+
+    def _segment(self, stint):
+        """The invite's label of `stint` (counted from 1, or a label), as the drivers role keys it."""
+        labels = self.texts(self.sel("segments"))
+        if type(stint) is int or str(stint).isdigit():
+            n = int(stint)
+            if not 1 <= n <= len(labels):
+                raise StepError(f"the invite page has no stint {n} (it offers {', '.join(labels)})")
+            return labels[n - 1]
+        if stint not in labels:
+            raise StepError(f"the invite page has no stint {stint!r} (it offers {', '.join(labels)})")
+        return stint
+
+    def facts(self):
+        return {"registered": bool(self.shown(self.sel("command"))), "error": self.shown(self.sel("error"))}

@@ -24,6 +24,7 @@ DIRECTOR = {
     "arm": "#armBtn", "next": "#nextBtn", "next_ready": "#nextBtn.ready", "next_sub": "#nextSub",
     "on_air": "#liveOnAir", "next_step": "#nextStepText",
     "scene": '#pgmBus button.k:has-text("{scene}")',
+    "media": '#pgmBus button.k[title="{source}"]',   # the caption is the asset's label, the title its source
     "red_flag": "#pgmBus button.redflag", "live": "#liveCol",
     "desk_tab": '#deskTabs button[data-sub="{sub}"]', "links": "#driverBox .mono.grow",
     "dashboard": '#driverBox button[data-label="Show dashboard"]',   # data-label keeps the first text
@@ -45,7 +46,11 @@ RACE_CONTROL = {
     "waiting_name": ".dd .req.waiting strong",
     "request": '.dd .req.waiting:has(strong[title="{name}"])',
     "request_entry": '.dd .req.waiting select[aria-label="Entry of {name}"]',
+    "request_stint": '.dd .req.waiting select[aria-label="Stint of {name}"]',
     "request_approve": '.dd .req.waiting:has(strong[title="{name}"]) button[data-label="Approve"]',
+    "request_reject": '.dd .req.waiting:has(strong[title="{name}"]) button[data-label="Reject"]',
+    "approved": '.dd .reqs-ok .req:has(strong[title="{name}"]) span.grow',   # "entry · stint"
+    "compound": '.dd select[aria-label="Tyre compound of {entry}"]',
     "dc_confirm": '.dd tr:has(div:text-is("{entry}")) button[data-label="Confirm DC"]:not([hidden])',
     "button": '.dd button[data-label="{label}"]',
     "select": '.dd select[aria-label="{label}"]',
@@ -64,6 +69,14 @@ COMMENTATOR = {
 
 VIEWER = {"rows": "#timing tbody tr", "session": "#session", "state": "#state",
              "fastest": "#fastest"}
+
+DRIVER = {"entry": "#entry", "entry_option": '#entry option[value="{entry}"]', "segment": "#segment",
+          "segments": '#segment option:not([value=""])',
+          "name": "#name", "register": "#register", "error": "#err", "command": "#cmdPy",
+          "commands": "#runSec code"}
+
+# The OBS media source each Intro, Trailer and Outro key plays (the panel's MEDIA_SCENE_ASSETS).
+MEDIA = {"intro": "Intro Video", "trailer": "Trailer Video", "outro": "Outro Video"}
 
 # The driver desk's button and field labels (src/console/driver-desk.js), by what they do.
 DESK = {
@@ -91,6 +104,7 @@ DESK = {
     "set_time": "Set time",
     "add_lap": "Add lap",
     "approve": "Approve",
+    "reject": "Reject",
     "dashboard_show": "Show dashboard",
     "dashboard_hide": "Hide dashboard",
     "confirm_prefix": "Confirm ",
@@ -103,12 +117,12 @@ LIVE_REQUIRED = {"DIRECTOR": ("NEXT", "CUT", "FADE", "STINGER"),
                  "RACE_CONTROL": (DESK["red_flag"], DESK["final_lap"], DESK["finish"]),
                  "COMMENTATOR": ("Hide", "Ready", "Wrap me up?", "Send")}
 
-# The link texts a screenshot of any page blacks out: the driver invite and the timing link.
-LINKS = ("#evt-invite-text", "#evt-timing-text", ".dd .mono.grow")
+# What a screenshot of any page blacks out: the invite and timing links, a driver's sender commands.
+LINKS = ("#evt-invite-text", "#evt-timing-text", ".dd .mono.grow", "#runSec code")
 
 # Visible once the page works.
 READY = {"PRODUCER": "#evt-track", "DIRECTOR": "#nextBtn", "RACE_CONTROL": "#liveCol",
-         "COMMENTATOR": "#tally", "VIEWER": "#timing"}
+         "COMMENTATOR": "#tally", "VIEWER": "#timing", "DRIVER": "#register"}
 
 SOURCES = {
     "PRODUCER": ("src/ui/control-center.html",),
@@ -116,4 +130,5 @@ SOURCES = {
     "RACE_CONTROL": ("src/racecontrol/race-control.html", "src/console/driver-desk.js"),
     "COMMENTATOR": ("src/cockpit/cockpit.html",),
     "VIEWER": ("src/console/timing.html",),
+    "DRIVER": ("src/console/drive.html",),
 }
