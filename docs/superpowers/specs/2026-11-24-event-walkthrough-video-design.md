@@ -40,16 +40,19 @@ in the normal CI, real league data or real race footage.
 | Program | the real OBS instance's own recording | 16:9 |
 | Director Panel | `director` page | 16:10 |
 | Race Control desk | `race_control` page | 16:10 |
-| Commentator Cockpit | the cockpit of the commentator on air or up next | 16:10 |
+| Commentator Cockpits | the cockpit of the commentator on air and, at a handover, the one up next | 16:10 |
 | Public live timing | `viewer` page | 16:10 |
 | Control Center | `producer` page, at the start and the end | 16:10 |
-| Driver | the invite page in a phone viewport, at registration and at the sender failure | 9:19 |
+| Driver | the invite page in a phone viewport, at registration, before each driver swap and at the sender failure | 9:19 |
 
 ### Stage
 
 - The canvas is 2560x1440 at 30 fps.
 - At most two views are large. The others sit in a rail as live previews with the role
   name and a highlight ring while something happens there.
+- The one exception is the switch at a driver swap: Director, Program and both
+  commentator cockpits share the canvas as four equal quarters, so the change of the
+  On Air banner in both cockpits is readable at the moment the program switches.
 - The stage follows the scenario: the role of the running step takes the large slot. A
   step can name its own focus, for example Director and Program together at a driver
   swap.
@@ -88,9 +91,9 @@ The order is the order of `full`. New steps are marked **new**.
 | 5 | Race start | Director switches to race mode. Formation lap, start | Program, Timing |
 | 6 | Stint 1 at the desk | Pit stop and **new:** tyre compound confirmed. A disconnect: suspected, confirmed, marked for rejoin. A sender stops: estimate behind another car. A retirement | Race Control, Timing |
 | 7 | Next commentator | Comms 2 submits late, the director approves and arms | Cockpit, Director |
-| 8 | Driver swap 1 | Cars box, splitscreen, new lobby, release, switch to stint 2 | Director, Program |
+| 8 | Driver swap 1 | **new:** the next driver requests telemetry for stint 2 on the invite page and Race Control approves it. Cars box, splitscreen, new lobby, release, switch to stint 2 | Driver, Race Control; at the switch the four quarters: Director, Program, Cockpit Comms 1, Cockpit Comms 2 |
 | 9 | Stint 2 at the desk | The disconnected car rejoins a lap down. Red flag, cars to the box, restart with kept gaps. **new:** pit stop with a compound change | Race Control, Program |
-| 10 | Driver swap 2 | As chapter 8, to stint 3 | Director, Program |
+| 10 | Driver swap 2 | As chapter 8, to stint 3, with Comms 2 handing over to Comms 3 | as chapter 8 |
 | 11 | The finish | Final lap called, chequered flag, result, fastest lap | Race Control, Timing |
 | 12 | Off air | **new:** outro, end of the part, the producer stops the event | Director, Program, Control Center |
 
@@ -108,7 +111,10 @@ Three stages, each usable on its own.
   not injected in any other mode, so tests and deck screenshots stay as they are.
 - **Driver page.** A new `driver` page role opens `/console/drive` with the invite link in
   a phone viewport and registers through the form. The other drivers keep registering
-  over HTTP.
+  over HTTP. Before each driver swap the page registers one seat of the next stint, which
+  the HTTP registration leaves out (`drivers register` with `skip`). A seat the desk
+  corrects is not one that drives afterwards: the page's code stays under the seat the
+  form sent.
 - **Program.** `--obs real` starts OBS as a separate instance: its own configuration
   directory inside the run's work dir, the localized demo scene collection, its
   WebSocket on a free port, no stream target. The run starts and stops OBS's recording
@@ -129,7 +135,8 @@ New step keys, all optional and ignored outside record mode:
 
 - `caption`: the line shown while the step runs. A step without one is waiting time.
 - `chapter`: starts a chapter with this title.
-- `focus`: the views to enlarge, when it is not the step's own role.
+- `focus`: the views to enlarge, when it is not the step's own role. Four views lay out
+  as quarters (the swap switch only).
 
 New actions:
 
@@ -209,7 +216,7 @@ user before anything else is built.
   stays valid. The deck shot names are unchanged.
 - **Timeline:** unit tests for the pace rules (a captioned step is never sped up, waiting
   is, no source time is skipped) and for the focus rules (own role, override, at most two
-  large views).
+  large views, four quarters only for a step that names four).
 - **Stage:** a rendering test lays out a fixed timeline and checks that no view overlaps
   a caption and that every view is inside the canvas.
 - **End to end:** a short scenario (`smoke`) records and renders a few seconds in the
