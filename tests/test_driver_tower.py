@@ -252,7 +252,10 @@ def t_the_builder_sample_rows_have_the_live_columns():
                                                   "dd-tyre", "dd-fuel", "dd-val", "dd-pit")]
         assert -1 not in order and order == sorted(order), \
             f"each sample row the builder draws has the live columns in order: {r}"
-        assert '<img src="/drivers/brand/' in r, f"the builder canvas shows a logo: {r}"
+        assert re.search(r'<img data-sample-brand="[a-z0-9-]+"', r), f"the builder canvas shows a logo: {r}"
+    static = html[html.index("<body"):html.index("<script")]
+    assert "/drivers/brand/" not in static and " src=" not in static.split('id="dd-rows"')[1], \
+        "the live tower requests no sample logo before its script clears the rows"
 
 def t_the_logo_sits_between_position_and_number_and_hides_when_missing():
     got = _tower(f"""

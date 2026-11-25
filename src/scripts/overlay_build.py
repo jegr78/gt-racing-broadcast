@@ -447,9 +447,10 @@ def base_body(html):
 
 def canvas_logo(body, logo_url):
     """*body* with the league logo loaded from *logo_url* instead of the relay-only
-    /hud/logo, and the timing tower's sample brand logos from the Control Center. Without a URL the src is empty, which hides the slot through its
-    onerror like the live HUD does, without a request."""
-    body = body.replace('src="/drivers/brand/', 'src="/api/overlay/asset/brands/')
+    /hud/logo, and the timing tower's sample brand logos (``data-sample-brand``, no src
+    on the live page) from the Control Center. Without a URL the src is empty, which hides
+    the slot through its onerror like the live HUD does, without a request."""
+    body = re.sub(r'data-sample-brand="([a-z0-9-]+)"', r'src="/api/overlay/asset/brands/\1"', body)
     return body.replace('src="/hud/logo"', f'src="{escape(logo_url or "", quote=True)}"')
 
 

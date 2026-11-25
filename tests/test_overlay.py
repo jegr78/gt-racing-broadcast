@@ -1577,8 +1577,9 @@ def t_the_timing_tower_has_a_brand_logos_switch_that_reflows_the_rows():
     assert re.search(r"\.dd-id\s*\{[^}]*display:\s*flex", style), \
         "logo and number share one auto grid track, which shrinks when the logos are off"
     canvas = ob.canvas_logo(ob.base_body(html), None)
-    assert 'src="/api/overlay/asset/brands/bmw"' in canvas and "/drivers/brand/" not in canvas, \
-        "the canvas loads the sample logos from the Control Center, not the relay"
+    assert all(f'src="/api/overlay/asset/brands/{k}"' in canvas for k in ("bmw", "porsche", "ferrari")) \
+        and "/drivers/brand/" not in canvas and "data-sample-brand" not in canvas, \
+        "the canvas loads the three sample logos from the Control Center, not the relay"
     with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
         cc = fh.read()
     assert "'showBrands'" in cc and "--dd-brands" in cc and "Brand logos" in cc, \

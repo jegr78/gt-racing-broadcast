@@ -143,8 +143,9 @@ Loaded when working under `src/ui/`.
   `data-edit-props="showBrands"`; the builder shows it as the **Brand logos** checkbox
   (on unless `false`), the compiler emits `--dd-brands: none|flex` on `#drivers-tower` and
   the canvas sets the same property inline. The page's `.dd-brand` reads it, so the
-  switch is pure CSS and the canvas follows it. `canvas_logo` points the sample rows'
-  `/drivers/brand/` logos at `/api/overlay/asset/brands/`. Test:
+  switch is pure CSS and the canvas follows it. The sample rows' logos carry only
+  `data-sample-brand="<key>"`, so the live tower requests none; `canvas_logo` turns them
+  into `src="/api/overlay/asset/brands/<key>"`. Test:
   `t_the_timing_tower_has_a_brand_logos_switch_that_reflows_the_rows`.
 - **Variable colours stay references (#1178).** Save writes each slot's full snapshot,
   but an unedited `color`, `background` or `borderColor` whose page value is a whole
