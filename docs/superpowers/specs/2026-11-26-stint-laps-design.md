@@ -29,14 +29,15 @@ the race ends on the race timer with Final lap pressed by hand.
 - **Source.** Each Schedule row's `Laps` cell is the lap count of that stint's lobby.
   The Sheet is the starting point and the backup, as with the other Schedule fields.
 - **Desk edit, cache first.** Race Control sets a stint's laps on the desk. The relay
-  applies the value to its Schedule cache at once (`PendingSaves`, target
-  `schedule_laps`, one entry per row, re-applied after every refresh until the Sheet
+  applies the value to its Schedule cache at once (`PendingSaves`, its own target
+  `schedule_laps` apart from the row's URL, streamer and stint, one entry per row, re-applied after every refresh until the Sheet
   shows it). One `sheet-save` push then writes the cell through the Sheet webhook. A
   failed push stays local and is retried like every Schedule save. Nothing on the desk
   or in the race waits for the Sheet.
-- **Webhook.** The Apps Script gains a write of the Schedule `Laps` cell. An older
-  script ignores the field, so the value stays in the relay cache and the desk says
-  the Sheet was not updated.
+- **Webhook.** The Apps Script (v8) writes the Schedule `Laps` cell and refuses a tab
+  without a `Laps` column. With an older script or no column the count stays in the
+  relay cache, the desk says the Sheet was not updated, and the row's other saves still
+  reach the Sheet.
 - **Route.** `POST /drivers/race/stint-laps {row, laps}`, 1 to 999, or empty to clear.
   Race data, not a program change: open to `race_control`, audited with the identity.
 - **The final lobby.** Every stint has its lap count and the final one needs no
@@ -66,7 +67,11 @@ The average lap time is the mean of the leader's counted laps in the lobby befor
 red flag, without lap 1 and without laps that the race left out. The leader sets the
 event's pace and triggers the driver change and the final lap, so the plan follows it.
 
-## The simulation
+## The simulation (#1352)
+
+The relay change (#1351) brings only the scenario's `event.stint_laps`, which fills the
+Schedule's `Laps` column. The rest follows in #1352:
+
 
 - The full scenario's Schedule tab gets a `Laps` cell for each stint.
 - Race Control sets the stint laps on the desk before the race (a new `stint_laps`

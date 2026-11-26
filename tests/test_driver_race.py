@@ -96,7 +96,9 @@ def t_a_lap_count_entered_after_the_final_switch_reaches_the_final_lobby():
     assert team._race.lap_count is None and team._race._final_at == 100.0
     clock[0] = 160.0
     team.set_settings({"lap_count": 12})
-    assert team._race.lap_count == 12, "the count entered now applies to the final lobby on air"
+    assert team._race.lap_count is None, "the event setting reaches the final lobby only through the stint watch"
+    team.final_lobby_laps(12)
+    assert team._race.lap_count == 12, "the count the watch passes applies to the final lobby on air"
     assert team._race._final_at == 100.0, "the cars that took over since the switch stay final cars"
     team.set_settings({"delay_s": 5})
     assert team._race.lap_count == 12, "another setting leaves the count alone"
@@ -129,8 +131,8 @@ def t_a_race_reset_on_the_last_row_keeps_the_final_lobbys_lap_count():
     team.reset()
     assert team._current().lap_count == 4, "the last row is still on air: its lobby still runs 4 laps"
     assert team._current()._final_at == 200.0, "every car of the restarted race is a final car"
-    team.set_settings({"lap_count": 6})
-    assert team._current().lap_count == 6, "a count entered after the reset reaches the final lobby"
+    team.final_lobby_laps(6)
+    assert team._current().lap_count == 6, "a count changed after the reset reaches the final lobby"
     team.new_event()
     assert team._current().lap_count is None, "a new event waits for its own final lobby"
 
@@ -234,13 +236,14 @@ def t_a_red_flag_over_a_held_race_keeps_its_restart_mode():
         f"a second flag over a held race keeps Race Control's restart mode, not the league default: {again}"
     assert again["at"] == 0.0 and again["held_s"] == 30.0, f"the race counts as held since the first flag: {again}"
     laps = {"n": 14}
-    team, _c = _service([{"id": "good"}], multi=True, stint_laps=lambda: laps["n"])
+    team, _c = _service([{"id": "good"}], multi=True, stint_plan=lambda: (3, laps["n"]))
     team.red_flag("rc:Anna")
     laps["n"] = 3
-    assert team.standings()["red_flag"]["planned_laps"] == 14, "the plan keeps the count the stint had at the flag"
+    red = team.standings()["red_flag"]
+    assert (red["planned_laps"], red["planned_row"]) == (14, 3), f"the plan keeps the stint and its count at the flag: {red}"
     def unreadable():
         raise IndexError("no row on air")
-    broken, _c = _service([{"id": "good"}], multi=True, stint_laps=unreadable)
+    broken, _c = _service([{"id": "good"}], multi=True, stint_plan=unreadable)
     assert broken.red_flag("rc:Anna")["red_flag"]["planned_laps"] is None, "a schedule error never stops the flag"
     assert svc._current()._red_flags == 2 and [r["action"] for r in _audit(path)][-1] == "red_flag"
     chosen = svc.red_flag("director:Bo", mode="neutralise")["red_flag"]

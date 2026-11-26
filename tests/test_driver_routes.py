@@ -1589,7 +1589,7 @@ def t_race_control_sets_a_stint_lap_count_that_the_race_shows_at_once():
         assert race["stints"] == [{"row": 2, "stint": "Stint 1", "laps": 14, "sync": None},
                                   {"row": 3, "stint": "Stint 2", "laps": 11, "sync": "saving"}], race["stints"]
         assert race["stint_row"] == 2, "the row on air"
-        assert ctl.saves.next_job() == ("schedule", 3, {"laps": "11"}, 1), "the sheet gets the count after"
+        assert ctl.saves.next_job() == (g.m.LAPS_TARGET, 3, {"laps": "11"}, 1), "the sheet gets the count after"
         st, text, _h = _post(port, f"/console/race-control/drivers/race/stint-laps?t={rc}", {"row": 3, "laps": 0})
         assert st == 400 and "1 to 999" in json.loads(text)["error"], (st, text)
         st, text, _h = _post(port, f"/console/race-control/drivers/race/stint-laps?t={rc}", {"row": 3})

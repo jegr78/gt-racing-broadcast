@@ -2767,7 +2767,11 @@ WEBHOOK_OUTDATED_ERROR = ("webhook script outdated (no action echo). Redeploy "
                           "the v2 script (wiki: Sheet-Webhook)")
 WEBHOOK_LAPS_OUTDATED_ERROR = ("webhook script outdated: writing the Schedule Laps cell needs "
                                "the v8 script (wiki: Sheet-Webhook)")
+WEBHOOK_LAPS_NO_COLUMN_ERROR = ("the Schedule tab has no Laps column: add a Laps header to write "
+                                "stint lap counts (wiki: Sheet-Template)")
 WEBHOOK_LAPS_VERSION = 8
+# A stint lap count is its own pending save, so a Sheet that cannot take it holds no other field of the row.
+LAPS_TARGET = "schedule_laps"
 
 
 def check_webhook_response(body, expected_action=None):
@@ -2823,7 +2827,7 @@ def _webhook_version(body):
 def webhook_error_permanent(err):
     """True iff *err* is the permanent 'script outdated' config error (never retry).
     Any other non-ok error (a transient 'did not confirm') is retryable. Pure."""
-    return err in (WEBHOOK_OUTDATED_ERROR, WEBHOOK_LAPS_OUTDATED_ERROR)
+    return err == WEBHOOK_OUTDATED_ERROR
 
 
 def _mask_webhook(text, url):
@@ -7659,6 +7663,7 @@ class ScheduleSource:
         # value not yet in the sheet is what the feeds, RELOAD and NEXT see.
         self._pending = None
         self._pending_target = None
+        self._laps_target = None
 
     @staticmethod
     def _parse_rows(text, allow_local=True):
@@ -7772,7 +7777,7 @@ class ScheduleSource:
         with self.lock:
             rows = list(self.rows)
             laps = dict(self.laps)
-        states = self.sync_states()
+        states = self._pending.states(self._laps_target) if self._pending and self._laps_target else {}
         return [{"row": line, "stint": stint, "laps": laps.get(line),
                  "sync": states.get(line, (None, None))[0]} for _u, _n, stint, line in rows]
 
@@ -7812,9 +7817,10 @@ class ScheduleSource:
                 self.last_ok = time.time()
                 self.last_error = None
                 if self._pending is not None:
-                    laps = self.laps
-                    self._pending.reconcile(self._pending_target,
-                                            {l: (u, n, s, str(laps.get(l, ""))) for u, n, s, l in rows})
+                    shown = {l: (u, n, s, str(self.laps.get(l, ""))) for u, n, s, l in rows}
+                    self._pending.reconcile(self._pending_target, shown)
+                    if self._laps_target:
+                        self._pending.reconcile(self._laps_target, shown)
                     self._apply_pending_locked()
             try:
                 with open(self.cache_path, "w", encoding="utf-8") as fh:
@@ -7826,6 +7832,8 @@ class ScheduleSource:
             # Nothing came back (sheet down, or an emptied tab): no row to compare,
             # but a confirmed save's grace still runs out.
             self._pending.expire(self._pending_target)
+            if self._laps_target:
+                self._pending.expire(self._laps_target)
         return False
 
     def load_initial(self, template=None):
@@ -7897,19 +7905,19 @@ class ScheduleSource:
 
     def attach_pending(self, store, target):
         self._pending, self._pending_target = store, target
+        self._laps_target = LAPS_TARGET if target == "schedule" else None
 
     def _apply_pending_locked(self):
         if self._pending is None:
             return
         for row, fields in self._pending.overlay(self._pending_target).items():
-            if "laps" in fields:
-                if fields["laps"]:
-                    self.laps[row] = int(fields["laps"])
-                else:
-                    self.laps.pop(row, None)
-            if fields.keys() - {"laps"}:
-                self._merge_row_locked(row, fields.get("url"), fields.get("name"),
-                                       fields.get("stint"))
+            self._merge_row_locked(row, fields.get("url"), fields.get("name"),
+                                   fields.get("stint"))
+        for row, fields in (self._pending.overlay(self._laps_target) if self._laps_target else {}).items():
+            if fields.get("laps"):
+                self.laps[row] = int(fields["laps"])
+            else:
+                self.laps.pop(row, None)
 
     def apply_pending(self):
         with self.lock:
@@ -8481,9 +8489,9 @@ class SetupControl(PushHealth):
         # each logged once per transition.
         self._was_local = set()
         self._save_sources = {"schedule": schedule_source, "qualifying": qual_source,
-                              "pov": pov_source}
+                              "pov": pov_source, LAPS_TARGET: schedule_source}
         for target, src in self._save_sources.items():
-            if src is not None and hasattr(src, "attach_pending"):
+            if src is not None and hasattr(src, "attach_pending") and target != LAPS_TARGET:
                 src.attach_pending(self.saves, target)
 
     # -- shared blocking push -> (ok, error); diagnostics like TimerStore ----
@@ -8511,8 +8519,11 @@ class SetupControl(PushHealth):
             self.push_url, payload, expected_action,
             timeout=WEBHOOK_ASYNC_SAVE_TIMEOUT_S, attempts=WEBHOOK_ASYNC_SAVE_ATTEMPTS,
             budget_s=WEBHOOK_ASYNC_SAVE_BUDGET_S)
-        if ok and "laps" in payload and _webhook_version(body) < WEBHOOK_LAPS_VERSION:
-            return False, WEBHOOK_LAPS_OUTDATED_ERROR
+        if "laps" in payload:
+            if ok and _webhook_version(body) < WEBHOOK_LAPS_VERSION:
+                return False, WEBHOOK_LAPS_OUTDATED_ERROR
+            if not ok and "no Laps column" in (err or ""):
+                return False, WEBHOOK_LAPS_NO_COLUMN_ERROR
         return ok, err
 
     def _queue_save(self, target, row, fields):
@@ -8574,7 +8585,8 @@ class SetupControl(PushHealth):
             outdated = webhook_error_permanent(err)
             if outdated:
                 self._mark_push_failed(err)
-            state = self.saves.done(target, row, rev, ok=False, err=err, hold=outdated)
+            hold = outdated or err in (WEBHOOK_LAPS_OUTDATED_ERROR, WEBHOOK_LAPS_NO_COLUMN_ERROR)
+            state = self.saves.done(target, row, rev, ok=False, err=err, hold=hold)
             if state == pending_saves.LOCAL and key not in self._was_local:
                 self._was_local.add(key)
                 LOG.warning("sheet save %s kept in relay, not in the sheet yet: %s",
@@ -8747,11 +8759,12 @@ class SetupControl(PushHealth):
         if not self.push_url:
             return {"error": "webhook not configured: set RACECAST_SHEET_PUSH_URL "
                              "in the active profile or .env (wiki: Sheet-Webhook)"}
-        if type(row) is not int or row < 2:
-            return {"error": "row is the stint's sheet row, 2 or more"}
         if laps is not None and (type(laps) is not int or not 0 < laps <= 999):
             return {"error": "laps is a whole number from 1 to 999, or null"}
-        self._queue_save("schedule", row, {"laps": "" if laps is None else str(laps)})
+        src = self._save_sources.get(LAPS_TARGET)
+        if type(row) is not int or src is None or row not in {r[3] for r in src.get_rows()}:
+            return {"error": "row is not a stint of the Schedule"}
+        self._queue_save(LAPS_TARGET, row, {"laps": "" if laps is None else str(laps)})
         return {"ok": True, "row": row, "pending": True}
 
     def qualifying_set(self, row, url=None, name=None, stint=None):
@@ -16457,6 +16470,15 @@ def _on_air_watch_kwargs(runtime, invite_cache):
             "invite_active": lambda: invite_cache.get() is not None}
 
 
+def _stint_plan(relay):
+    """(sheet row, lap count) of the race stint on air, for the red flag's restart plan."""
+    src = getattr(relay, "race_source", None)
+    if src is None or not hasattr(src, "laps_at") or relay.mode != "race":
+        return None, None
+    idx, rows = relay.on_air_row_idx(), src.get_rows()
+    return (rows[idx][3], src.laps_at(idx)) if 0 <= idx < len(rows) else (None, None)
+
+
 def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0, on_air_path=None,
                        clock=time.time, invite_active=lambda: True):
     """Tell the driver race when the broadcast switches stints: that opens the driver
@@ -17466,8 +17488,7 @@ def main():
         trace_for=lambda pick_id: track_pick.store.tracks.reference_trace(pick_id)
         if track_pick.store.tracks else None,
         multi_lobby=lambda: not relay.solo, recording_dir=runtime,
-        stint_laps=lambda: relay.race_source.laps_at(relay.on_air_row_idx())
-        if relay.race_source is not None and hasattr(relay.race_source, "laps_at") else None)
+        stint_plan=lambda: _stint_plan(relay))
     _hub_invite = driver_invite.Cache(driver_invite.path_in(runtime))
     driver_hub = driver_ingest.Hub(multi_lobby=lambda: not relay.solo, on_sample=race_svc.update,
                                    invite_id=lambda: (_hub_invite.get() or {}).get("id"))

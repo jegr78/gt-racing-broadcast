@@ -400,10 +400,10 @@ class Race:
                 ent.change_stop = ent.stall = None
                 ent.halted = None
 
-    def red_flag(self, now, mode, planned_laps=None):
+    def red_flag(self, now, mode, planned_laps=None, planned_row=None):
         """Freeze every entry; each continues from its anchor in the restart lobby. The
         first flag keeps the restart plan: the lobby leader's lap and average lap time
-        and `planned_laps`, the lobby's count then."""
+        and `planned_laps`, the lobby's count then, of schedule row `planned_row`."""
         self._advance(now)
         if self._red is None:
             lead = self._lobby_leader(now)
@@ -411,7 +411,7 @@ class Race:
             self._red = {"at": now, "mode": mode,
                          "lobby_lap": self._cars[lead.active].lap if lead is not None else None,
                          "avg_lap_ms": round(sum(times) / len(times)) if times else None,
-                         "planned_laps": planned_laps}
+                         "planned_laps": planned_laps, "planned_row": planned_row}
         else:
             self._red["mode"] = mode
         self._red_flags += 1
@@ -454,6 +454,7 @@ class Race:
         is; one waiting in a restart lobby resumes when it leaves the box."""
         self._red = None
         for ent in self._entries.values():
+            ent.lobby_ms = []                      # the restart lobby's pace starts over
             car = self._cars.get(ent.active)
             if ent.waiting and car is not None and not car.restart_ready and car.lap is not None:
                 car.counting, ent.waiting = True, False
@@ -1815,16 +1816,17 @@ class Race:
             return None
         return max(1, math.floor((car.anchor + ent.adjust - car.f0) / self.length) + count + 1 - car.lap0)
 
-    def _lobby_runners(self, now):
-        """(entry, car) of each running car that counted since the lobby's stint switch or restart."""
+    def _lobby_runners(self, now, quiet=False):
+        """(entry, car) of each running car that counted since the lobby's stint switch or
+        restart; `quiet` keeps a car that stopped sending."""
         return [(e, c) for e in self._entries.values()
                 if not self._out(e) and not e.waiting and e.finished_at is None and e.since is not None
-                and (self._lobby_at is None or e.since >= self._lobby_at) and not self._quiet(e, now)
+                and (self._lobby_at is None or e.since >= self._lobby_at) and (quiet or not self._quiet(e, now))
                 for c in [self._cars.get(e.active)] if c is not None and c.counting and c.lap is not None]
 
     def _lobby_leader(self, now):
         """The entry leading the lobby on the road: the highest counter, the earlier crossing first."""
-        runners = self._lobby_runners(now)
+        runners = self._lobby_runners(now, quiet=True)
         if not runners:
             return None
         return min(runners, key=lambda ec: (-ec[1].lap, ec[0].crossed[0] if ec[0].crossed else now))[0]
@@ -1832,11 +1834,7 @@ class Race:
     def _lobby_lap(self, now):
         """GT7's counter of the lobby on air: the highest among the running cars that
         counted since its stint switch or restart; None before one does."""
-        laps = [c.lap for e in self._entries.values()
-                if not self._out(e) and not e.waiting and e.finished_at is None and e.since is not None
-                and (self._lobby_at is None or e.since >= self._lobby_at) and not self._quiet(e, now)
-                for c in [self._cars.get(e.active)] if c is not None and c.counting and c.lap is not None]
-        return max(laps, default=None)
+        return max((c.lap for _e, c in self._lobby_runners(now)), default=None)
 
     def _mismatches(self, ordered):
         """Entries whose GT7 positions contradict the distance order (single lobby only)."""

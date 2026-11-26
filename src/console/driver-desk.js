@@ -598,9 +598,11 @@
     var planBuffer = el("input", {type: "number", min: "0", max: "120", placeholder: "buffer min",
                                   "aria-label": "Buffer until the restart, minutes"});
     var plan = null, planOf = null;
+    // Take writes the stint the plan was made for, even after a switch during the hold.
     var planTake = button("Take", "", null, function () {
-      if (plan && plan.laps >= 1 && planOf && planOf.stint_row) {
-        act("/drivers/race/stint-laps", {row: planOf.stint_row, laps: plan.laps}, "Restart lobby set to " + plan.laps + " laps");
+      var row = planOf && planOf.red_flag && planOf.red_flag.planned_row;
+      if (plan && plan.laps >= 1 && row) {
+        act("/drivers/race/stint-laps", {row: row, laps: plan.laps}, "Restart lobby set to " + plan.laps + " laps");
       }
     });
     var planRow = el("div", {cls: "row", hidden: ""}, [planLine, planBuffer, planTake]);
@@ -608,8 +610,9 @@
       planOf = r;
       plan = r.stints ? restartPlan(r.red_flag, parseFloat(planBuffer.value)) : null;
       planRow.hidden = !(r.stints && r.red_flag);
+      if (!r.red_flag && document.activeElement !== planBuffer) planBuffer.value = "";
       planLine.textContent = planRow.hidden ? "" : planText(plan, r.red_flag);
-      planTake.disabled = !plan || !(plan.laps >= 1) || !r.stint_row;
+      planTake.disabled = !plan || !(plan.laps >= 1) || !r.red_flag.planned_row;
     }
     planBuffer.addEventListener("input", function () { if (planOf) renderPlan(planOf); });
 
