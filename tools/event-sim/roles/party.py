@@ -7,6 +7,7 @@ only after the page showed its result. Without a browser every action is skipped
 A driver (the invite page on a phone) is a party with a page too.
 
 An action is a mechanism (click this, submit that); the scenario decides the order."""
+import re
 from urllib.parse import quote, urlsplit
 
 from roles import ShotUnavailable, StepError, Unavailable, builtin, register, selectors
@@ -26,6 +27,9 @@ MEDIA_PLAYING = "OBS_MEDIA_STATE_PLAYING"
 MEDIA_SLACK_S = 10.0     # how long past its length a clip may take to end on air
 ERROR_S = 2.0            # how long a page takes to show the reason of a refused request
 POINTER_STEPS = 12       # mouse moves per pointer travel in a record run: visible motion, not a jump
+HOLD_MAX_S = 300
+STANDINGS_HOLD_S = 8
+DURATION = re.compile(r"\d{1,2}:[0-5]\d:[0-5]\d")   # H:MM:SS as the panel's timer shows it
 
 
 def stint_label(value):
@@ -62,6 +66,16 @@ class Surface(builtin.PageRole):
         if self.pg is None and action != "open":
             self.act_open({})
         return super().do(action, args)
+
+    def act_hold(self, args):
+        """Keep the page in view for `seconds`: the action lasts that long, so the film
+        plays the moment in real time."""
+        seconds = args.get("seconds")
+        if type(seconds) not in (int, float) or not 0 < seconds <= HOLD_MAX_S:
+            raise StepError(f"hold: seconds is a number above 0 and up to {HOLD_MAX_S}, not {seconds!r}")
+        with self.timed("wait", f"hold {seconds:g}s", budget=None):
+            self.pg.wait_for_timeout(seconds * 1000)
+        return {"seconds": seconds}
 
     # -- acting on controls ---------------------------------------------------
     def sel(self, key, **values):
@@ -196,10 +210,20 @@ class Surface(builtin.PageRole):
         loc = self.pg.locator(selector)
         return self.text(selector) if loc.count() and loc.first.is_visible() else ""
 
-    def accepting(self, act):
-        """Run `act`, answering the page's one native confirm dialog with OK."""
-        self.pg.once("dialog", lambda dialog: dialog.accept())
-        act()
+    def accepting(self, act, text=None):
+        """Run `act`, answering the one native dialog it opens with OK (with `text` for a
+        prompt). The answer is withdrawn when `act` ends, so no later dialog gets it."""
+        answered = []
+
+        def answer(dialog):
+            if not answered:
+                answered.append(True)
+                dialog.accept() if text is None else dialog.accept(text)
+        self.pg.on("dialog", answer)
+        try:
+            return act()
+        finally:
+            self.pg.remove_listener("dialog", answer)
 
     def toggle(self, key, what, route, args, poll=None):
         """Press a toggle key whose light is the class `on`. With `on` in `args`, let the
@@ -459,8 +483,8 @@ class DirectorRole(LiveColumn, CrewChat, Surface):
     """The director on the Director Panel: `approve_link` (stint, area), `next`, `scene`
     (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode`
     (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text,
-    target, level), `chat` (text, name), `play` (media: intro, trailer or outro), `view`
-    (area), `fit`."""
+    target, level), `chat` (text, name), `play` (media: intro, trailer or outro), `timer`
+    (duration as H:MM:SS), `view` (area), `fit`."""
     kind = "director"
     vocab_stint_actions = ("approve_link",)   # their `stint` is a label of the Configuration Stints column
     path, ready = "/panel", selectors.READY["DIRECTOR"]
@@ -600,8 +624,7 @@ class DirectorRole(LiveColumn, CrewChat, Surface):
         self.control(switch, "mode switch")
         if mode.upper() not in self.text(switch).upper():
             raise StepError(f"the switch offers {self.text(switch)!r}, not {mode}")
-        self.answered(lambda: self.accepting(lambda: self.click(switch, "mode switch")),
-                      "/mode/" + mode, "mode switch")
+        self.accepting(lambda: self.answered(lambda: self.click(switch, "mode switch"), "/mode/" + mode, "mode switch"))
         self.until(lambda: self.text(self.sel("mode_chip")).upper() == mode.upper(), f"{mode} mode")
         return {"mode": mode}
 
@@ -619,6 +642,18 @@ class DirectorRole(LiveColumn, CrewChat, Surface):
         status = self.sel("part_status")
         self.until(lambda: any(word in self.text(status) for word in shows), f"{label}: the Part status")
         return {"part": label, "status": self.text(status)}
+
+    def act_timer(self, args):
+        """SET… in the HUD area's Timer keys: the race duration, typed into the panel's prompt."""
+        duration = str(args.get("duration", ""))
+        if not DURATION.fullmatch(duration):
+            raise StepError(f"timer: duration is H:MM:SS, not {duration!r}")
+        self.area("hud")
+        # The prompt's answer stays armed until its request is answered, then never longer.
+        self.accepting(lambda: self.answered(lambda: self.click(self.sel("timer_set"), "Timer SET"),
+                                             "/timer/set/" + duration, "Timer SET"), duration)
+        self.until(lambda: f"duration {duration}" in self.text(self.sel("timer_info")), f"the timer's duration {duration}")
+        return {"duration": duration}
 
     def act_start_part(self, args):
         """Start the next broadcast Part: OBS goes live after the typed confirmation."""
@@ -664,9 +699,10 @@ class DirectorRole(LiveColumn, CrewChat, Surface):
 
 @register
 class RaceControlRole(LiveColumn, Surface):
-    """Race Control on its desk: `approve_driver` (name, entry), `approve_drivers`,
-    `reject_driver` (name), `correct_driver` (name, entry, stint), `compound` (entry, code),
-    `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry),
+    """Race Control on its desk: `approve_driver` (name, entry), `approve_drivers` (one by
+    one), `approve_all` (Approve all waiting), `reject_driver` (name), `correct_driver`
+    (name, entry, stint), `compound` (entry, code), `compounds` (code, skip), `race_start`,
+    `show_standings` (entry), `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry),
     `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason),
     `set_time` and `add_lap` (entry, time; qualifying), `note` (text, target), `confirm_dc`
     (entry), `class_laps` (class, laps), `view` (area), `fit`. An
@@ -679,6 +715,7 @@ class RaceControlRole(LiveColumn, Surface):
     live_required = selectors.LIVE_REQUIRED["RACE_CONTROL"]
     selectors = selectors.RACE_CONTROL
     masked = ("links",)
+    tabs = ("standings",)    # a record run records the Show standings tab as `race_control:standings`
 
     def _line(self):
         status = self.sel("status")
@@ -789,6 +826,88 @@ class RaceControlRole(LiveColumn, Surface):
             self.act_approve_driver({"name": name})
             names.append(name)
         return {"approved": len(names), "names": names}
+
+    def act_approve_all(self, args):
+        """Approve all waiting: one confirmed press approves the requests the desk lists."""
+        self.area("drivers")
+        try:
+            self.until(lambda: self.count(self.sel("waiting")), "a waiting driver request")
+        except StepError:
+            raise StepError("approve_all: no waiting driver request") from None
+        label = DESK["approve_all"]
+        button, before = self.sel("button", label=label), self._line()
+        self.click(button, label)
+        self.until(lambda: self.text(button) == DESK["confirm_prefix"] + label, f"{label}: the confirm state")
+        resp = self.answered(lambda: self.click(button, label), self.base + "/drivers/requests/approve-pending", label)
+        try:
+            body = resp.json() or {}
+        except Exception:  # noqa: BLE001  an answer without a body approved nothing the step can name
+            body = {}
+        approved, skipped = list(body.get("approved") or []), list(body.get("skipped") or [])
+        done = f"{len(approved)} driver" if approved else "No driver approved"
+        return {"approved": len(approved), "skipped": len(skipped), "names": [a.get("name") for a in approved],
+                "status": self._status(label, done, before)}
+
+    def act_compounds(self, args):
+        """Enter `code` as the compound of every entry the tyre table lists, except `skip`;
+        an entry already on it is kept, since its select would send nothing."""
+        code, skip = str(args.get("code") or ""), list(args.get("skip") or [])
+        self.area("dashboard")
+        try:
+            entries = self.until(lambda: self.texts(self.sel("tyre_entries")), "the tyre table's entries")
+        except StepError:
+            raise StepError("compounds: the tyre table lists no entry") from None
+        unknown = [e for e in skip if e not in entries]
+        if unknown:
+            raise StepError(f"compounds: skip: no entry {unknown[0]!r} in the tyre table")
+        changed, kept = [], []
+        for entry in entries:
+            if entry in skip:
+                continue
+            if self.control(self.sel("compound", entry=entry), f"compound of {entry}").input_value() == code:
+                kept.append(entry)
+                continue
+            self.act_compound({"entry": entry, "code": code})
+            changed.append(entry)
+        return {"code": code, "changed": changed, "kept": kept}
+
+    def act_race_start(self, args):
+        """Race start in the Race area, pressed with the cars on the grid."""
+        self.area("race")
+        return self._press(DESK["race_start"], "/drivers/race/start", "Race start armed", armed=True)
+
+    def act_show_standings(self, args):
+        """Show standings of `entry`'s disconnect event: the desk opens the frozen standings
+        of before its last packet in a new tab, which stays in view for `seconds` once it
+        lists its rows, then closes. A record run records the tab as `<role>:standings`."""
+        entry, seconds = str(args.get("entry", "")), args.get("seconds", STANDINGS_HOLD_S)
+        if type(seconds) not in (int, float) or not 0 < seconds <= HOLD_MAX_S:
+            raise StepError(f"show_standings: seconds is a number above 0 and up to {HOLD_MAX_S}, not {seconds!r}")
+        self.area("race")
+        key, what = self.sel("dc_standings", entry=entry), f"Show standings of {entry}"
+        try:
+            self.control(key, what)
+        except StepError:
+            raise StepError(f"no event of {entry!r} to show the standings of") from None
+        try:
+            with self.context.expect_page(timeout=CONTROL_MS) as info:
+                self.click(key, what)
+            tab = info.value
+        except StepError:
+            raise
+        except Exception as exc:  # noqa: BLE001  Playwright's text says why no tab opened
+            raise StepError(f"{what}: no tab opened ({builtin.redact(exc, self.ctx.secrets)})") from None
+        rec = getattr(self.ctx, "recorder", None)
+        if rec:
+            rec.page_opened(f"{self.name}:{self.tabs[0]}", tab, self.viewport)
+        try:
+            tab.wait_for_load_state(timeout=CONTROL_MS)
+            rows = self.until(lambda: tab.locator(self.sel("snapshot_rows")).count(), "the frozen standings")
+            with self.timed("wait", f"hold {seconds:g}s", budget=None):
+                self.pg.wait_for_timeout(seconds * 1000)
+        finally:
+            tab.close()
+        return {"entry": entry, "rows": rows}
 
     def act_final_lap(self, args):
         return self._press(DESK["final_lap"], "/drivers/race/final-lap", "Final lap", armed=True)

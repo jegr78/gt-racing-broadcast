@@ -39,6 +39,7 @@ DIRECTOR = {
     "mode_switch": "#modeSwitch", "mode_chip": "#modeChip",
     "part_button": "#partActionBtn", "part_status": "#partStatus", "part_phrase": "#partModalPhrase",
     "part_input": "#partModalInput", "part_confirm": "#partModalConfirm",
+    "timer_set": '#timerBus button.k:has-text("SET…")', "timer_info": "#timerInfo",
 }
 
 RACE_CONTROL = {
@@ -53,6 +54,9 @@ RACE_CONTROL = {
     "approved": '.dd .reqs-ok .req:has(strong[title="{name}"]) span.grow',   # "entry · stint"
     "compound": '.dd select[aria-label="Tyre compound of {entry}"]',
     "dc_confirm": '.dd tr:has(div:text-is("{entry}")) button[data-label="Confirm DC"]:not([hidden])',
+    "dc_standings": '.dd tr:has(div:text-is("{entry}")) button[data-label="Show standings"]',
+    "snapshot_rows": "#rows tr",   # the frozen standings Show standings opens in a new tab
+    "tyre_entries": '.dd tr:has(select[aria-label^="Tyre compound of "]) > td:first-child',
     "button": '.dd button[data-label="{label}"]',
     "select": '.dd select[aria-label="{label}"]',
     "input": '.dd input[aria-label="{label}"]',
@@ -105,7 +109,10 @@ DESK = {
     "set_time": "Set time",
     "add_lap": "Add lap",
     "approve": "Approve",
+    "approve_all": "Approve all waiting",
     "reject": "Reject",
+    "race_start": "Race start",
+    "show_standings": "Show standings",
     "dashboard_show": "Show dashboard",
     "dashboard_hide": "Hide dashboard",
     "confirm_prefix": "Confirm ",
@@ -128,7 +135,8 @@ READY = {"PRODUCER": "#evt-track", "DIRECTOR": "#nextBtn", "RACE_CONTROL": "#liv
 SOURCES = {
     "PRODUCER": ("src/ui/control-center.html",),
     "DIRECTOR": ("src/director/director-panel.html", "src/console/driver-desk.js"),
-    "RACE_CONTROL": ("src/racecontrol/race-control.html", "src/console/driver-desk.js"),
+    "RACE_CONTROL": ("src/racecontrol/race-control.html", "src/console/driver-desk.js",
+                     "src/console/race-snapshot.html"),
     "COMMENTATOR": ("src/cockpit/cockpit.html",),
     "VIEWER": ("src/console/timing.html",),
     "DRIVER": ("src/console/drive.html",),

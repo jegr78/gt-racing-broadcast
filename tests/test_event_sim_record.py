@@ -4,11 +4,13 @@ the card look, the generated clips, the limits and the watchdog, the real OBS's
 configuration and its WebSocket sequence. No browser, no OBS, nothing heavy spawned.
 Run: python3 tests/test_event_sim_record.py"""
 import atexit
+import base64
 import copy
 import json
 import os
 import re
 import shutil
+import struct
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -23,9 +25,11 @@ import event_sim  # noqa: E402
 import obs_real  # noqa: E402
 import obs_sim  # noqa: E402
 import obs_ws  # noqa: E402
+import probes  # noqa: E402
 import record  # noqa: E402
 import rtmp_sink  # noqa: E402
 import roles  # noqa: E402
+import stream_stub  # noqa: E402
 import test_event_sim_roles as fake  # noqa: E402
 
 
@@ -98,6 +102,50 @@ def t_a_record_run_records_each_page_at_its_viewport_with_pointer_and_mask():
     assert rec.recordings == [{"view": "driver", "kind": "page", "file": "pages/driver/abc.webm",
                                "size": {"width": 390, "height": 844}, "at": 50.0}], rec.recordings
 
+
+def t_the_standings_tab_is_its_own_recording_and_stays_open_for_its_hold():
+    out = _tmp()
+    clock = {"t": 50.0}
+    rec = record.Recorder(out, clock=lambda: clock["t"])
+    role, page, _ = _role(party.RaceControlRole, recorder=rec, video=os.path.join(out, "pages", "race_control", "a.webm"))
+    role.do("open", {})
+    page.add('.navbtn[data-area="race"]')
+    tab = fake.Page(page.clock)
+    tab.video = Video(os.path.join(out, "pages", "race_control", "b.webm"))
+    tab.add("#rows tr", count=14)
+    opened = {}
+
+    def click():
+        clock["t"] = 60.0
+        opened["t"] = page.clock.t
+        role.context.opened.append(tab)
+    page.add('.dd tr:has(div:text-is("B #2")) button[data-label="Show standings"]', on_click=click)
+    assert role.do("show_standings", {"entry": "B #2", "seconds": 8}) == {"entry": "B #2", "rows": 14}
+    assert rec.recordings[-1] == {"view": "race_control:standings", "kind": "page", "file": "pages/race_control/b.webm",
+                                  "size": dict(role.viewport), "at": 60.0}, rec.recordings
+    assert tab.closed and page.clock.t - opened["t"] >= 8, "the tab stays in view for the step's hold, then closes"
+    fails = []
+    for bad in (0, "8", 301):
+        try:
+            role.do("show_standings", {"entry": "B #2", "seconds": bad})
+        except roles.StepError:
+            fails.append(bad)
+    assert fails == [0, "8", 301], fails
+
+
+def t_a_focus_may_name_the_standings_tab_of_race_control_only():
+    import scenario
+    reg = roles.default_registry()
+    steps = [{"id": "a", "role": "race_control", "do": "show_standings", "args": {"entry": "x"},
+              "focus": ["race_control:standings"]}]
+    assert scenario.from_dict({"step": steps}, reg).steps[0].focus == ["race_control:standings"]
+    steps[0]["focus"] = ["director:standings"]
+    try:
+        scenario.from_dict({"step": steps}, reg)
+    except scenario.ScenarioError as exc:
+        assert "no view of this run" in str(exc), exc
+    else:
+        raise AssertionError("only Race Control opens a standings tab")
 
 def t_a_run_without_record_has_no_video_no_pointer_and_no_mask():
     role, page, browser = _role(party.DriverRole)
@@ -563,6 +611,110 @@ class NotReady(Session):
             raise ValueError(f"{kind} failed: {{'code': 207, 'comment': 'OBS is not ready to perform the request.', "
                              "'result': False}")
         return super().request(kind, data)
+
+
+def _strip(w, h, code, stint):
+    """rgb24 bytes of a w x h picture that carries the stub's identity strip; code 0 is black."""
+    rgb = bytearray(w * h * 3)
+    for x, y, bw, bh, white in stream_stub.identity_boxes(w, h, code, stint) if code else ():
+        for yy in range(y, y + bh):
+            rgb[(yy * w + x) * 3:(yy * w + x + bw) * 3] = (b"\xff" if white else b"\x00") * (bw * 3)
+    return bytes(rgb)
+
+
+def _bmp(rgb, w, h, bpp=24, top_down=False, masks=None):
+    """A BMP as Qt writes one: BITMAPINFOHEADER, BGR(A) rows padded to 4 bytes. `masks`
+    (red, green, blue) writes a 32 bit BI_BITFIELDS picture with each channel at its mask."""
+    step = bpp // 8
+    pad = (-w * step) % 4
+    rows = []
+    for y in range(h):
+        row = bytearray()
+        for x in range(w):
+            r, g, b = rgb[(y * w + x) * 3:(y * w + x) * 3 + 3]
+            if masks:
+                row += struct.pack("<I", sum(v * (m & -m) for v, m in zip((r, g, b), masks, strict=True)))
+            else:
+                row += bytes((b, g, r)) + (b"\xff" if step == 4 else b"")
+        rows.append(bytes(row) + b"\x00" * pad)
+    pixels = b"".join(rows if top_down else rows[::-1])
+    extra = struct.pack("<III", *masks) if masks else b""
+    info = struct.pack("<IiiHHIIiiII", 40, w, -h if top_down else h, 1, bpp, 3 if masks else 0, len(pixels),
+                       2835, 2835, 0, 0)
+    start = 54 + len(extra)
+    return b"BM" + struct.pack("<IHHI", start + len(pixels), 0, 0, start) + info + extra + pixels
+
+
+class _ShotSession:
+    """The real OBS as the mirror asks it: Stint on program, and a picture per source."""
+
+    def __init__(self, pictures):
+        self.pictures, self.shots = pictures, []
+
+    def request(self, kind, data):
+        if kind == "GetCurrentProgramScene":
+            return {"currentProgramSceneName": "Stint"}
+        if kind == "GetSourceScreenshot":
+            self.shots.append(dict(data))
+            picture = self.pictures.get(data["sourceName"])
+            if picture is None:
+                raise ValueError("GetSourceScreenshot failed: {'code': 600}")
+            return {"imageData": "data:image/bmp;base64," + base64.b64encode(picture).decode()}
+        if kind in ("GetCurrentPreviewScene", "GetSceneItemList"):
+            raise ValueError(f"{kind} failed: {{'code': 506}}")
+        return {}
+
+
+class _RelayFeed:
+    """The grabber: the relay's feed shows comms1 whatever OBS plays."""
+
+    def frames(self, urls):
+        return {u: (_strip(640, 360, 1, 1), 640, 360) for u in urls}
+
+
+def t_the_program_check_under_a_real_obs_reads_obs_s_own_picture_of_each_feed():
+    w, h = 640, 360
+    stub = SimpleNamespace(channels=lambda: {"comms1": {"code": 1}, "comms2": {"code": 2}})
+    clock = fake.Clock()
+    session = _ShotSession({"Feed A": _bmp(_strip(w, h, 2, 2), w, h)})
+    mirror = obs_real.ObsMirror(_collection(), session, grabber=_RelayFeed(), clock=clock)
+    probe = probes.ObsProbe(SimpleNamespace(state=mirror), stub, stream_stub.decode_identity)
+    assert probe.program_channels == ["comms2"], \
+        "the channel OBS plays in Feed A, not the one the relay serves on its port"
+    assert [(s["sourceName"], s["imageFormat"]) for s in session.shots] == [("Feed A", "bmp")], \
+        f"the feed source alone, under the Overlay's panel that covers the strip on program: {session.shots}"
+    assert probe.program_channels == ["comms2"] and len(session.shots) == 1, "a check's polls share one picture"
+    clock.t += obs_real.SNAPSHOT_S
+    session.pictures["Feed A"] = _bmp(_strip(w, h, 0, 0), w, h, bpp=32, top_down=True)
+    assert probe.program_channels == [], "a black picture in OBS shows no commentator, whatever the relay serves"
+    clock.t += obs_real.SNAPSHOT_S
+    del session.pictures["Feed A"]
+    assert probe.program_channels == [], "a source OBS cannot picture shows no commentator"
+
+
+def t_a_bmp_from_obs_reads_as_rgb_rows_top_down():
+    w, h = 7, 3
+    rgb = bytes(v for y in range(h) for x in range(w) for v in (x * 30, y * 80, x + y))
+    for bpp in (24, 32):
+        for top_down in (False, True):
+            got = obs_real.bmp_rgb(_bmp(rgb, w, h, bpp, top_down))
+            assert got == (rgb, w, h), f"{bpp} bpp, top_down={top_down}"
+    for bad in (b"", b"PNG", _bmp(rgb, w, h)[:60]):
+        try:
+            obs_real.bmp_rgb(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad[:8]!r}: not a whole BMP")
+    rgba = (0x000000FF, 0x0000FF00, 0x00FF0000)
+    assert obs_real.bmp_rgb(_bmp(rgb, w, h, 32, masks=rgba)) == (rgb, w, h), "bit fields put red first here"
+    assert obs_real.bmp_rgb(_bmp(rgb, w, h, 32, masks=(0x00FF0000, 0x0000FF00, 0x000000FF))) == (rgb, w, h)
+    for bad, why in ((_bmp(rgb, w, h, 32, masks=(0x7C00, 0x03E0, 0x001F)), "a 5 bit channel"),
+                     (_bmp(rgb, w, h, 32, masks=(0xFF, 0xFF, 0xFF00)), "two channels on one byte")):
+        try:
+            obs_real.bmp_rgb(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{why}: refused, not read as noise")
 
 
 def t_an_obs_that_is_not_ready_yet_is_asked_again_until_the_start_timeout():

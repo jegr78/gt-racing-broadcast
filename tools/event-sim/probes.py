@@ -192,11 +192,18 @@ class ObsProbe(Probe):
     def recording(self):
         return self.sim.state.snapshot()["record"]["active"]
 
-    def _identity(self, url):
-        grabber = self.sim.state.grabber
-        if grabber is None or self.decode is None:
+    def _identity(self, feed):
+        """The (code, stint) a feed's picture carries: a real OBS's own picture of the feed
+        source, else the grabber's read of the relay's feed URL."""
+        state = self.sim.state
+        if self.decode is None:
             return None
-        frame = grabber.frames([url]).get(url)
+        if hasattr(state, "source_frame"):
+            frame = state.source_frame(feed["input"])
+        elif state.grabber is not None:
+            frame = state.grabber.frames([feed["url"]]).get(feed["url"])
+        else:
+            return None
         return self.decode(*frame) if frame else None
 
     @property
@@ -211,7 +218,7 @@ class ObsProbe(Probe):
             row = {"input": feed["input"], "url": url, "occluded": feed["occluded"],
                    "channel": None, "stint": None}
             if url and not feed["occluded"]:
-                ident = self._identity(url)
+                ident = self._identity(feed)
                 if ident:
                     row["channel"], row["stint"] = codes.get(ident[0]), ident[1]
             out.append(row)

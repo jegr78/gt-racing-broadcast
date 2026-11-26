@@ -809,13 +809,16 @@ action and acts on the controls a person uses; the drivers have no page.
 | Role (`role =`) | Surface | Actions (`do =`) |
 |---|---|---|
 | `producer` | Control Center `/` | `open`, `pick_track` (track), `race_settings` (formation, finish_mode, laps), `start_event` (stint, qualifying), `stop_event`, `relay_restart` |
-| `director` | Director Panel `/panel` | `open`, `approve_link` (stint; `area = "schedule"` approves it in the Schedule area's pending list, which also holds the stint on air and a qualifying link), `next`, `scene` (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode` (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name), `play` (media: intro, trailer or outro; returns at the end of the loop the clip plays, from OBS's `mediaDuration` and `mediaCursor` read after the air light: the panel shows no media state and the clips loop), `view` (area) |
-| `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers`, `reject_driver` (name), `correct_driver` (name, entry, stint: changed on the waiting request, then approved), `compound` (entry, code), `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason), `set_time` and `add_lap` (entry, time; qualifying mode), `note` (text, target), `confirm_dc` (entry), `class_laps` (class, laps), `view` (area) |
+| `director` | Director Panel `/panel` | `open`, `approve_link` (stint; `area = "schedule"` approves it in the Schedule area's pending list, which also holds the stint on air and a qualifying link), `next`, `scene` (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode` (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name), `play` (media: intro, trailer or outro; returns at the end of the loop the clip plays, from OBS's `mediaDuration` and `mediaCursor` read after the air light: the panel shows no media state and the clips loop), `timer` (duration H:MM:SS, typed into the Timer SET… prompt), `view` (area) |
+| `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers` (one by one), `approve_all` (Approve all waiting; result `approved`, `skipped`, `names`), `reject_driver` (name), `correct_driver` (name, entry, stint: changed on the waiting request, then approved), `compound` (entry, code), `compounds` (code, skip: every entry of the tyre table; result `changed`, and `kept` for an entry already on it, whose select sends nothing), `race_start`, `show_standings` (entry, seconds: the frozen standings tab of its disconnect event, kept in view `seconds` (default 8) once it lists rows, then closed; result `rows`), `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason), `set_time` and `add_lap` (entry, time; qualifying mode), `note` (text, target), `confirm_dc` (entry), `class_laps` (class, laps), `view` (area) |
 | `commentator:<crew name>` | `/cockpit` with that person's token; the name must be in `[[event.commentators]]` or a Commentator of a `[sheet.tabs] Crew`, checked at load | `open`, `submit_link` (url, stint), `chat` (text) |
 | `viewer` | `/console/timing` on the event's timing link | `open`, `read` (cars) |
 | `driver` | `/console/drive` on the event's invite link, 390x844, no console token | `open`, `register` (entry, name, stint when the event registers per stint: its number picks the invite's segment label, the key the `drivers` role uses too; the code the page shows goes to the `drivers` role through `ctx.driver_codes`, never into a result) |
 | `probe` | `tools/probe-stage2.py` as the runbook runs it, and the real `racecast-sender.py` (#1116) | `watch`, `mark` (text), `kit` (sheets into the role's temporary folder), `race_reset`, `spectator` (name, position, cars: the sender with the probe key against a simulated PS5; needs `[event] probe = true`), `stop_spectator`, `check` (entry, segment, name: registers and runs `--check`), `report` (`collect` and `report`; its result is `probe_stage2.facts`) |
 | `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints, positions: 0x84 from the road order, skip: `[{entry, stint}]` seats the `driver` page registers; such a seat sends with the code that page showed, and `start` or `lobby` fails while it has none), `start`, `pit` (entry, seconds), `box` (order), `lobby` (stint), `release` (gaps: the rows of a race reading, for a keep restart), `drop` (entry), `rejoin` (entry, seconds), `stop` (entries) |
+
+`hold` keeps any page role's page in view for `seconds` (at most 300) inside the action, so
+the film plays that stretch in real time under the step's caption.
 
 An action is a mechanism. Which one follows which is the scenario's business, never a
 role's: `box`, the director's `next`, `lobby` and `release` are four steps, not one "swap".
@@ -827,7 +830,7 @@ UI or API:
   `Surface.answered` waits for the page's own request to be answered (HTTP 400 and up is
   hard), `Surface.until` for the page to show the result (soft when slower than 2 s; a
   job or a feed start is slow by nature and exempt). The desk's armed buttons (Final lap,
-  Finish, RED FLAG, Restart released, Retire) get both clicks, and an error on the desk's
+  Finish, RED FLAG, Restart released, Retire, Race start, Approve all waiting) get both clicks, and an error on the desk's
   status line fails the step.
 - The panel's RED FLAG and graphic keys toggle from the OBS state the panel polled last
   (every 2 s), so a press right after a change, its own included, repeats the old command.
@@ -934,10 +937,13 @@ times on a maintainer machine, start and teardown included:
   stop count) and the finish.
 - `full` (about 36 min on GitHub's runner, real time): the deck's race day with 14 cars on a
   Suzuka-length lap: Comms 1's qualifying link submitted and approved, one driver on the
-  invite page, one request corrected and one rejected, approval of the other 40, intro and
-  trailer, qualifying, formation, a pit stop with its compound, a DC, an estimate, a DNF, a
-  late stream link, before each swap a next-stint driver on the invite page, a red flag with a
-  keep restart, a pit stop with a compound change, the final lap, the outro. Its steps carry
+  invite page, one request corrected and one rejected, Approve all for the other 40, intro and
+  trailer, crew chat, qualifying, the race timer set to the race length, Race start on the
+  grid (the timer runs from the first race lap), every car's compound at each stint's start,
+  formation, a pit stop with its compound, a DC (a held suspected phase, its standings of
+  before the drop), an estimate, a DNF, a late stream link, before each swap a next-stint
+  driver on the invite page and a held splitscreen once the incoming feed serves, a red flag
+  with a keep restart, a pit stop with a compound change, the final lap, the outro. Its steps carry
   the walkthrough film's twelve chapters, captions and focus; `tests/test_event_sim_roles.py`
   holds the 50 shot names to their steps, roles and elements, not to their content. It
   runs in the workflow; locally it exceeds the 2 GiB E2E unit. Its 50 screenshots carry
@@ -996,7 +1002,8 @@ python3 tools/event-sim/event_sim.py --restore-obs   # macOS: put back the OBS c
 - `DIR/timeline.json`: `steps` (each step that ran: `id`, `role`, `action`, `status`,
   `start`, `acted`, `end`, plus `caption`, `chapter` and `focus` when the scenario step has
   them) and `recordings` (`view`, `kind` page or program, `file` relative to DIR, `size`,
-  `start`). `acted` is when the action returned; from there to `end` the step waited for its
+  `start`). A tab a step opens is its own page recording: Race Control's Show standings tab
+  is the view `race_control:standings`, which a scenario's `focus` may name. `acted` is when the action returned; from there to `end` the step waited for its
   expects, which the film treats as waiting time. All times are seconds since the engine started; a recording started before has a negative
   start. It goes through the run's redaction.
 - Feeds and clips: the stream stub runs the `card` look, and before the relay starts the
@@ -1064,7 +1071,10 @@ python3 tools/event-sim/event_sim.py --restore-obs   # macOS: put back the OBS c
   no quit request), SIGTERM 30 s later, and only after that is its process group killed, as
   a finding. A signal to the whole group kills the browser's GPU process first. The probes
   and the `obs` role read OBS through `ObsMirror`, an `ObsState` of the same collection
-  that follows OBS's program scene, item visibility and outputs.
+  that follows OBS's program scene, item visibility and outputs. `program_channels` reads
+  each visible feed from OBS's own BMP screenshot of that feed source (`source_frame`, at
+  most every 0.5 s per source), never the relay's port: on program the Overlay's panel
+  covers the identity strip, and a black or failed picture names no channel.
 
 ### Event walkthrough video (`tools/build-event-video.py`, #1312, #1313)
 
