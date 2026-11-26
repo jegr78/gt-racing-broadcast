@@ -281,6 +281,7 @@ def main():
         "league widget resources shipped": all(os.path.isfile(os.path.join(PKG, *parts)) for parts in
             (("scripts", "league_widgets.py"), ("ui", "league-widgets.js"))),
         "overlay fit script shipped": os.path.isfile(os.path.join(PKG, "ui", "overlay-fit.js")),
+        "track map script shipped": os.path.isfile(os.path.join(PKG, "ui", "track-map.js")),
         "ui page shipped": os.path.isfile(os.path.join(PKG, "ui", "control-center.html")),
         "slides director deck shipped": os.path.isfile(
             os.path.join(PKG, "docs", "slides", "director.html")),

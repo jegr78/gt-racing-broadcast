@@ -13,6 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 TOWER = os.path.join(ROOT, "src", "obs", "drivers.html")
 TIMING = os.path.join(ROOT, "src", "console", "timing.html")
+MAP = os.path.join(ROOT, "src", "ui", "track-map.js")
 
 # A DOM just large enough for the page's top-level code and its row builders.
 _DOM = r"""
@@ -54,14 +55,20 @@ def _run(js):
     return json.loads(out.stdout)
 
 
+def _page():
+    """The overlay's script after the shared track map it loads first."""
+    with open(MAP, encoding="utf-8") as fh:
+        return "const window = globalThis;\n" + fh.read() + "\n" + _script(TOWER)
+
+
 def _tower(body):
-    return _run(_DOM + _script(TOWER) + "\n;console.log(JSON.stringify((function () {"
+    return _run(_DOM + _page() + "\n;console.log(JSON.stringify((function () {"
                 + body + "})()));")
 
 
 def _tower_async(body):
     """Like _tower, for a body that returns a promise."""
-    return _run(_DOM + _script(TOWER) + "\n;(async function () {" + body
+    return _run(_DOM + _page() + "\n;(async function () {" + body
                 + "})().then(r => console.log(JSON.stringify(r)));")
 
 
@@ -188,7 +195,7 @@ def t_status_rows_keep_their_value_when_a_lap_lands():
 
 
 def t_the_page_takes_the_seconds_from_the_payload():
-    got = _run(_DOM + _script(TOWER) + """
+    got = _run(_DOM + _page() + """
       ;(async function () {
         const out = [];
         for (const show of [{last_lap_s: 9}, {}]) {
@@ -322,7 +329,7 @@ def t_the_map_fetches_a_missing_line_again_after_a_while():
         await at(60000);           // kept, never asked again
         dash.track = "spa";
         await at(61000);           // a new track asks at once
-        return {seen: seen, drawn: !!view};
+        return {seen: seen, drawn: els["dd-svg"].children.length > 0};
       })();""")
     if got is None:
         return
@@ -977,14 +984,14 @@ def t_the_stripes_restart_in_each_class():
 
 
 def t_the_map_rings_the_class_and_est_wins():
-    got = _tower(f"""
-      line = {{points: [[0, 0], [100, 0], [100, 100], [0, 100]]}};
-      drawLine();
+    got = _tower_async(f"""
+      fetch = async () => ({{ok: true, json: async () => ({{points: [[0, 0], [100, 0], [100, 100], [0, 100]]}})}});
+      await map.sync("t");
       const base = {json.dumps(CAR)};
-      drawCars([Object.assign({{}}, base, {{entry: "a", x: 10, z: 0, class_color: "#0a0"}}),
+      map.draw([Object.assign({{}}, base, {{entry: "a", x: 10, z: 0, class_color: "#0a0"}}),
                 Object.assign({{}}, base, {{entry: "b", x: 50, z: 0, class_color: "#0a0", status: "est"}}),
                 Object.assign({{}}, base, {{entry: "c", x: 90, z: 0}})]);
-      return els["dd-cars"].children.map(g => g.children[0].attrs).reverse();""")
+      return els["dd-svg"].children[1].children.map(g => g.children[0].attrs).reverse();""")
     if got is None:
         return
     ring, est, plain = got

@@ -12627,6 +12627,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     league_widgets_script = os.path.join(_SRC_BASE, "ui", "league-widgets.js")
     # Shared text auto-fit of the overlay pages and the builder canvas (#957).
     fit_script = os.path.join(_SRC_BASE, "ui", "overlay-fit.js")
+    track_map_script = os.path.join(_SRC_BASE, "ui", "track-map.js")
 
     # Shared across all H instances (one limiter per relay). The CHAT limiter is
     # keyed on the authenticated streamer (per-commentator). The AUTH-FAILURE
@@ -14275,6 +14276,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     and driver_desk_path:
                 # Public static code shared by both desks (#1114); its data routes stay gated.
                 return self._send_file(driver_desk_path, "application/javascript; charset=utf-8")
+            if urlparse(self.path).path in ("/track-map.js", "/console/track-map.js"):
+                # Public static code of the overlay and both desks; the line route stays gated.
+                return self._send_file(track_map_script, "application/javascript; charset=utf-8")
             if urlparse(self.path).path in ("/driver-radio-ui.js", "/console/driver-radio-ui.js"):
                 # Public static code only; every data/control route remains authenticated.
                 return self._send_file(os.path.join(radio_page_dir, "driver-radio.js"), "application/javascript; charset=utf-8")

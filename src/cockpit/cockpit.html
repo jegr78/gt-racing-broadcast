@@ -140,7 +140,10 @@
   #stintPlan .live { font-weight: 700; font-size: 10px; padding: 1px 6px; border-radius: 999px;
                      background: #c1121f; color: #fff; letter-spacing: .04em; }
   #stintPlan .empty { padding: 10px 12px; opacity: .6; font-size: 13px; }
-  #chat { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
+  #chat { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; position: relative; }
+  /* The track map lies over the crew chat while shown, so the broadcast chat never moves. */
+  #mapOver { position: absolute; inset: 0; z-index: 2; background: var(--panel); }
+  #mapOver svg { display: block; width: 100%; height: 100%; padding: 8px; overflow: visible; }
   #chatlog { flex: 1; overflow-y: auto; padding: 8px 10px; }
   #chatlog .msg { margin-bottom: 6px; overflow-wrap: anywhere; }
   #chatlog .u { font-weight: 600; color: #8ab4f8; }
@@ -161,7 +164,7 @@
   h2 .ro { font-size: 11px; font-weight: 500; color: #8a929c; border: 1px solid #2a3038;
            border-radius: 6px; padding: 1px 6px; margin-left: 6px; vertical-align: middle; }
   .chatbar { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #232830; }
-  .chatbar input { flex: 1; padding: 8px; background: #0b0d10; color: #e8eaed;
+  .chatbar input { flex: 1; min-width: 0; padding: 8px; background: #0b0d10; color: #e8eaed;
                    border: 1px solid #2a3038; border-radius: 6px; }
   .chatbar button { padding: 8px 12px; background: #1d4ed8; color: #fff; border: 0;
                     border-radius: 6px; cursor: pointer; }
@@ -389,8 +392,9 @@
   </main>
   <aside class="rail" data-tab="chat" aria-label="Chats">
     <div class="card" id="chatCard">
-      <h2>Crew chat</h2>
+      <h2>Crew chat <button type="button" id="mapToggle" class="bcompose" aria-expanded="false" aria-controls="mapOver" hidden>Map</button></h2>
       <div id="chat">
+        <div id="mapOver" hidden><svg class="tmap" id="timingMap" viewBox="0 0 100 100" role="img" aria-label="Track map"></svg></div>
         <div id="chatlog"></div>
         <div class="chatbar">
           <input id="chatin" placeholder="Message the crew…" maxlength="500">
@@ -414,6 +418,7 @@
 <nav id="crewTabs" class="crewtabs" role="tablist" aria-label="Sections"
      data-tabs='[["live","Live"],["timing","Timing"],["stint","Stint"],["graphics","Graphics"],["notes","Notes"],["chat","Chat"]]'></nav>
 <!--__CREW_FRAME__-->
+<script src="__RC_API_BASE__/track-map.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 
@@ -1007,6 +1012,31 @@ function timingTyre(e) {
   s.textContent = code;
   return {node: s};
 }
+// The track map from the same delayed answer as the table; qualifying shows the line only, as the overlay.
+let timingMapView = null;
+function drawTimingMap(d) {
+  if (!window.TrackMap) return;
+  timingMapView = timingMapView || TrackMap.create($('timingMap'));
+  const cars = d.mode === 'qualifying' ? [] : (d.entries || []);
+  timingMapView.sync(d.track || null).then(function () { timingMapView.draw(cars); applyMap(); });
+}
+// Shown over the crew chat on request, remembered per browser; no toggle while there is no line.
+const MAP_KEY = 'cockpit_track_map';
+let mapWanted = false;
+try { mapWanted = localStorage.getItem(MAP_KEY) === '1'; } catch (e) { /* private mode */ }
+function applyMap() {
+  const line = $('timingMap').children.length > 0;
+  const on = line && mapWanted;
+  $('mapToggle').hidden = !line;
+  $('mapToggle').textContent = on ? 'Hide map' : 'Map';
+  $('mapToggle').setAttribute('aria-expanded', on ? 'true' : 'false');
+  $('mapOver').hidden = !on;
+}
+$('mapToggle').addEventListener('click', () => {
+  mapWanted = !mapWanted;
+  try { localStorage.setItem(MAP_KEY, mapWanted ? '1' : '0'); } catch (e) { /* private mode */ }
+  applyMap();
+});
 async function pollTiming() {
   let d;
   try { d = await j('/drivers/dashboard'); } catch (e) { setTimeout(pollTiming, 5000); return; }
@@ -1017,6 +1047,7 @@ async function pollTiming() {
   });
   $('timingData').hidden = !shown;
   $('timingEmpty').hidden = shown;
+  drawTimingMap(d);
   const head = $('timingHead');
   head.textContent = '';
   const parts = [];

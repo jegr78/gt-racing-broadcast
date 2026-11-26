@@ -290,10 +290,12 @@ def public_brands(view, has_logo):
 
 
 def with_brands(standings, roster):
-    """A copy of `standings` whose entries carry their roster brand, for the desks."""
+    """A copy of `standings` whose entries carry their roster brand, number and colours, for the desks."""
     def one(e):
-        brand, name = _brand(roster.get(e.get("entry")) or {})
-        return dict(e, brand=brand, brand_name=name)
+        info = roster.get(e.get("entry")) or {}
+        brand, name = _brand(info)
+        return dict(e, brand=brand, brand_name=name, number=info.get("number") or "",
+                    color=info.get("bgColor") or "", text_color=info.get("textColor") or "")
     return dict(standings, entries=[one(e) for e in standings.get("entries") or ()])
 
 
