@@ -230,8 +230,9 @@ def t_a_red_flag_over_a_held_race_keeps_its_restart_mode():
     svc.set_restart_mode("rc:Anna", "keep")
     clock[0] = 30.0
     again = svc.red_flag("director:Bo")["red_flag"]
-    assert again == {"at": 30.0, "mode": "keep"}, \
+    assert again["mode"] == "keep", \
         f"a second flag over a held race keeps Race Control's restart mode, not the league default: {again}"
+    assert again["at"] == 0.0 and again["held_s"] == 30.0, f"the race counts as held since the first flag: {again}"
     assert svc._current()._red_flags == 2 and [r["action"] for r in _audit(path)][-1] == "red_flag"
     chosen = svc.red_flag("director:Bo", mode="neutralise")["red_flag"]
     assert chosen["mode"] == "neutralise", f"a mode named with the flag wins: {chosen}"

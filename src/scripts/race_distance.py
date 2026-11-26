@@ -220,6 +220,7 @@ class _Entry:
         self.switch_pit = False    # a pit stop already counted since the latest stint switch
         self.finished_at = None
         self.last_lap_ms = None
+        self.lobby_ms = []         # its lap times in the lobby on air
         self.counted = []          # its laps that counted for the fastest lap, kept for a void
         self.stint_laps = 0        # race laps since the active car began counting
         self.parked = None         # (conn, counting state) of the car moved away from it
@@ -394,6 +395,7 @@ class Race:
             self._window_until, self._switched = now + CHANGE_WINDOW_S, True
             self._lobby_at = now
             for ent in self._entries.values():
+                ent.lobby_ms = []
                 ent.changed, ent.stint_end, ent.switch_pit = False, None, False
                 ent.change_stop = ent.stall = None
                 ent.halted = None
@@ -401,7 +403,14 @@ class Race:
     def red_flag(self, now, mode):
         """Freeze every entry; each continues from its anchor in the restart lobby."""
         self._advance(now)
-        self._red = {"at": now, "mode": mode}
+        if self._red is None:
+            lead = self._lobby_leader(now)
+            times = lead.lobby_ms if lead is not None else []
+            self._red = {"at": now, "mode": mode,
+                         "lobby_lap": self._cars[lead.active].lap if lead is not None else None,
+                         "avg_lap_ms": round(sum(times) / len(times)) if times else None}
+        else:
+            self._red["mode"] = mode
         self._red_flags += 1
         self._restart_mode = mode
         if self._stopped is None:                  # a second red flag keeps the first stoppage
@@ -940,6 +949,7 @@ class Race:
                 car.pending = None                # faster than the line allows, or not this lap's time
                 return
             ent.last_lap_ms = car.pending[2] = last_ms
+            ent.lobby_ms.append(last_ms)
         # GT7 keeps only a valid lap as best lap, so an invalid one never matches.
         if best_ms != car.pending[2]:
             return
@@ -1634,7 +1644,7 @@ class Race:
                 leader = min(leader, count)
             class_lap[name] = leader
             class_count[name] = d["count"] if name == first else count
-        red = None if self._red is None else dict(self._red)
+        red = None if self._red is None else dict(self._red, held_s=round(now - self._red["at"], 1))
         return {"state": self._state(), "line_length_m": self.length, "red_flag": red,
                 "restart_mode": self._restart_mode,
                 "change_window": self._window_until is not None and now <= self._window_until,
@@ -1801,6 +1811,20 @@ class Race:
         if car is None or car.line is None or not self._final_car(ent):
             return None
         return max(1, math.floor((car.anchor + ent.adjust - car.f0) / self.length) + count + 1 - car.lap0)
+
+    def _lobby_runners(self, now):
+        """(entry, car) of each running car that counted since the lobby's stint switch or restart."""
+        return [(e, c) for e in self._entries.values()
+                if not self._out(e) and not e.waiting and e.finished_at is None and e.since is not None
+                and (self._lobby_at is None or e.since >= self._lobby_at) and not self._quiet(e, now)
+                for c in [self._cars.get(e.active)] if c is not None and c.counting and c.lap is not None]
+
+    def _lobby_leader(self, now):
+        """The entry leading the lobby on the road: the highest counter, the earlier crossing first."""
+        runners = self._lobby_runners(now)
+        if not runners:
+            return None
+        return min(runners, key=lambda ec: (-ec[1].lap, ec[0].crossed[0] if ec[0].crossed else now))[0]
 
     def _lobby_lap(self, now):
         """GT7's counter of the lobby on air: the highest among the running cars that
