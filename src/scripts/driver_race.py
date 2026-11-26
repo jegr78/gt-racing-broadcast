@@ -1629,6 +1629,13 @@ class Service:
             elif race.multi_lobby:
                 self._final_on_air, self._final_lobby_laps = False, None
 
+    def final_lobby_laps(self, laps):
+        """The final lobby's lap count changed while it runs: it applies at once."""
+        with self._lock:
+            race = self._current()
+            if self._final_on_air and race.multi_lobby:
+                self._final_lobby_laps = race.lap_count = laps
+
     def final_lap(self, who="tailnet"):
         with self._lock:
             self._current().final_lap(self._clock())

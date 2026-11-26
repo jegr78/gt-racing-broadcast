@@ -107,6 +107,20 @@ def t_a_lap_count_entered_after_the_final_switch_reaches_the_final_lobby():
     assert early._race.lap_count is None, "before the final lobby the count waits"
 
 
+def t_a_stint_count_changed_on_the_desk_reaches_only_a_running_final_lobby():
+    team, clock = _service([{"id": "good"}], multi=True)
+    team.final_lobby_laps(12)
+    assert team._race.lap_count is None, "before the final lobby the count waits for its switch"
+    clock[0] = 100.0
+    team.stint_switch(final_laps=14)
+    clock[0] = 160.0
+    team.final_lobby_laps(11)
+    assert team._race.lap_count == 11 and team._race._final_at == 100.0, \
+        "a reduced count applies at once and keeps the final cars"
+    team._race = None
+    assert team._current().lap_count == 11, "a rebuilt race keeps it"
+
+
 def t_a_race_reset_on_the_last_row_keeps_the_final_lobbys_lap_count():
     team, clock = _service([{"id": "good"}], multi=True)
     clock[0] = 100.0
