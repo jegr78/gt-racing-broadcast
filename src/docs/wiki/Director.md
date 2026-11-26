@@ -308,8 +308,8 @@ pick the right layout here. The producer usually sets it before the event (see
 
 The **Race** area holds the race from the drivers' own telemetry
 ([driver guide](Driver-Telemetry)), with the same controls as the Race Control desk. On
-top sit the race controls (finish mode, lap count, **Final lap**, **Finish**, the red
-flag hold); below them tabs split the rest the way the desk's areas do: **Race**,
+top sit the race controls (finish mode, in a single lobby its lap count, **Final lap**,
+**Finish**, the red flag hold); below them tabs split the rest the way the desk's areas do: **Race**,
 **Drivers**, **Corrections**, **Qualifying**, **Dashboard** and **Links** (invite and
 timing links, race recording). A dot marks waiting requests, an open disconnect or the
 running qualifying, and qualifying opens its tab by itself once per switch. That
@@ -330,7 +330,9 @@ connection line sits under **Troubleshoot**. In short:
   **Reject all waiting** clears every waiting request at once. The approved drivers are
   listed under **Approved drivers** with **Correct** and **Reject**. See
   [approving drivers](Driver-Telemetry#approving-drivers).
-- the finish mode and lap count, **Final lap** and **Finish**
+- the finish mode, in a single lobby the lap count, **Final lap** and **Finish**; in
+  endurance each stint's lap count under **Stint laps** and, while the red flag is out,
+  the [restart plan](Driver-Telemetry#red-flag-rejoin-and-corrections)
 - **Hold race (red flag)**, the restart mode and **Restart released**. The panel's own
   `RED FLAG` button holds the race as well when it raises the cover. Over a race already
   held it keeps the restart mode Race Control chose.

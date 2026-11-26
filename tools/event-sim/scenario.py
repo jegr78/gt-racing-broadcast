@@ -37,8 +37,8 @@ STEP_KEYS = {"id", "at", "role", "do", "args", "expect", "soft", "timeout", "wai
 PROGRAM_VIEW = "program"           # OBS's own recording, a view in every run
 FOCUS_SIZES = (1, 2, 4)            # four views are the quarters of a driver swap
 TOP_KEYS = {"name", "description", "max_minutes", "wait", "event", "sheet", "tolerances", "step"}
-EVENT_KEYS = {"stints", "track", "track_length_m", "cars", "classes", "parts", "qualifying_part", "seed",
-              "commentators", "probe"}
+EVENT_KEYS = {"stints", "stint_laps", "track", "track_length_m", "cars", "classes", "parts", "qualifying_part",
+              "seed", "commentators", "probe"}
 COMMENTATOR_KEYS = {"name", "channel", "stint", "scheduled"}
 
 
@@ -173,6 +173,10 @@ def _event(event):
     stints = event.get("stints", 1)
     if type(stints) is not int or not 1 <= stints <= 255:
         raise ScenarioError(f"event.stints is a whole number 1-255, not {stints!r}")
+    laps = event.get("stint_laps")
+    if laps is not None and not (isinstance(laps, list) and len(laps) == stints
+                                 and all(type(n) is int and 0 < n <= 999 for n in laps)):
+        raise ScenarioError(f"event.stint_laps is one whole number 1-999 per stint, not {laps!r}")
     if type(event.get("seed", 7)) is not int:
         raise ScenarioError(f"event.seed is a whole number, not {event['seed']!r}")
     if not isinstance(event.get("probe", False), bool):

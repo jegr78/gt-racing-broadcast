@@ -188,8 +188,30 @@
     }
     var lap = r.lap || {}, parts = [];
     if (typeof lap.leader === "number") parts.push("Race lap " + lap.leader + (typeof lap.count === "number" ? " / " + lap.count : ""));
-    if (typeof r.lobby_lap === "number") parts.push("Lobby lap " + r.lobby_lap);
+    var count = lobbyCount(r);
+    if (typeof r.lobby_lap === "number") parts.push("Lobby lap " + r.lobby_lap + (count ? " / " + count : ""));
     return parts.join(" \u00b7 ");
+  }
+  // The lap count of the stint lobby on air, or null.
+  function lobbyCount(r) {
+    var on = (r.stints || []).filter(function (x) { return x.row === r.stint_row; })[0];
+    return on && typeof on.laps === "number" ? on.laps : null;
+  }
+  // The restart lobby's laps after a red flag: the stint's count at the flag minus the laps
+  // the leader completed and the laps the time held (and a buffer in minutes) costs at its pace.
+  function restartPlan(red, bufferMin) {
+    if (!red || typeof red.avg_lap_ms !== "number" || !(red.avg_lap_ms > 0)
+        || typeof red.planned_laps !== "number" || typeof red.lobby_lap !== "number") return null;
+    var behind = (red.held_s || 0) + (bufferMin > 0 ? bufferMin * 60 : 0);
+    var lost = behind / (red.avg_lap_ms / 1000);
+    return {behind_s: behind, behind_laps: Math.round(lost * 10) / 10,
+            laps: red.planned_laps - Math.max(red.lobby_lap - 1, 0) - Math.ceil(lost)};
+  }
+  // The plan line; without a plan the time held and what the plan still needs.
+  function planText(plan, red) {
+    if (plan) return "Behind plan " + secs(plan.behind_s) + " \u00b7 " + plan.behind_laps.toFixed(1) + " laps \u00b7 Restart laps " + plan.laps;
+    return "Behind plan " + secs((red && red.held_s) || 0) + " \u00b7 " +
+      (red && typeof red.planned_laps !== "number" ? "set the stint's lap count" : "no lap time of the leader yet");
   }
   // The race rows under their class: [{name, color, lap, laps, rows}] in class order; one group named null outside class mode.
   function classGroups(r) {
@@ -532,6 +554,64 @@
         }
       });
     }
+
+    // Each stint lobby's lap count: the relay uses a change at once, the Sheet's Laps cell follows.
+    var stintBody = el("tbody");
+    var stintBox = el("div", {hidden: ""}, [el("h3", {text: "Stint laps"}),
+      el("div", {cls: "tbl"}, [el("table", {}, [el("thead", {}, [el("tr", {}, ["Stint", "Laps", ""].map(function (h) {
+        return el("th", {text: h}); }))]), stintBody])])]);
+    var stintIn = Object.create(null);
+    var stintKey = null;
+    function stintInput(row, label) {
+      var input = el("input", {type: "number", min: "1", max: "999", placeholder: "laps", "aria-label": "Lap count of " + label});
+      input.addEventListener("change", function () {
+        var n = parseInt(input.value, 10);
+        act("/drivers/race/stint-laps", {row: row, laps: isFinite(n) ? n : null}, label + " lap count saved");
+      });
+      return input;
+    }
+    function renderStints(r) {
+      var stints = Array.isArray(r.stints) ? r.stints : null;
+      stintBox.hidden = !stints;
+      if (!stints) return;
+      var key = JSON.stringify(stints.map(function (x) { return [x.row, x.stint]; }));
+      if (key !== stintKey && !stintBox.contains(document.activeElement)) {
+        stintKey = key;
+        stintIn = Object.create(null);
+        stintBody.replaceChildren.apply(stintBody, stints.map(function (x, i) {
+          var label = x.stint || "Stint " + (i + 1);
+          stintIn[x.row] = {input: stintInput(x.row, label), note: el("td", {cls: "muted"})};
+          return el("tr", {}, [el("td", {text: label}), el("td", {}, [stintIn[x.row].input]), stintIn[x.row].note]);
+        }));
+      }
+      stints.forEach(function (x) {
+        var cell = stintIn[x.row];
+        if (!cell) return;
+        if (document.activeElement !== cell.input) cell.input.value = typeof x.laps === "number" ? x.laps : "";
+        cell.note.textContent = [x.row === r.stint_row ? "on air" : "",
+          x.sync === "local" ? "not in the Sheet yet" : x.sync === "saving" ? "saving to the Sheet" : ""]
+          .filter(Boolean).join(" \u00b7 ");
+      });
+    }
+    // While the red flag is out: how far the race falls behind the stint's plan, and the restart lobby's laps.
+    var planLine = el("span", {cls: "mono grow"});
+    var planBuffer = el("input", {type: "number", min: "0", max: "120", placeholder: "buffer min",
+                                  "aria-label": "Buffer until the restart, minutes"});
+    var plan = null, planOf = null;
+    var planTake = button("Take", "", null, function () {
+      if (plan && plan.laps >= 1 && planOf && planOf.stint_row) {
+        act("/drivers/race/stint-laps", {row: planOf.stint_row, laps: plan.laps}, "Restart lobby set to " + plan.laps + " laps");
+      }
+    });
+    var planRow = el("div", {cls: "row", hidden: ""}, [planLine, planBuffer, planTake]);
+    function renderPlan(r) {
+      planOf = r;
+      plan = r.stints ? restartPlan(r.red_flag, parseFloat(planBuffer.value)) : null;
+      planRow.hidden = !(r.stints && r.red_flag);
+      planLine.textContent = planRow.hidden ? "" : planText(plan, r.red_flag);
+      planTake.disabled = !plan || !(plan.laps >= 1) || !r.stint_row;
+    }
+    planBuffer.addEventListener("input", function () { if (planOf) renderPlan(planOf); });
 
     // -- race table -----------------------------------------------------------------
     var raceBody = el("tbody");
@@ -1004,8 +1084,8 @@
         el("div", {cls: "row finish"}, [mode, laps, finalLap, finish]),
         classLapRow,
         el("div", {cls: "row red"}, [redFlag, restart, release]),
-        redBanner, msgs.live, lastChange],
-      race: [el("div", {cls: "row", style: "flex-wrap: nowrap"}, [raceStart, startNote]), unlockRow, raceNote, raceTable, evTitle,
+        redBanner, planRow, msgs.live, lastChange],
+      race: [el("div", {cls: "row", style: "flex-wrap: nowrap"}, [raceStart, startNote]), unlockRow, raceNote, raceTable, stintBox, evTitle,
         el("div", {cls: "row"}, [el("label", {cls: "check"}, [soundBox, el("span", {cls: "muted", text: "Sound on suspicion"})])]),
         evTable],
       drivers: [reqTitle, reqBar, reqList, okBox, el("h3", {text: "Readiness"}), readyTable,
@@ -1082,7 +1162,9 @@
       qList.textContent = qualiNote(r.quali_overrides, r.quali_laps);
       if (document.activeElement !== mode) mode.value = s.finish_mode || "laps";
       if (document.activeElement !== laps) laps.value = s.lap_count || "";
-      laps.hidden = mode.value !== "laps";
+      laps.hidden = mode.value !== "laps" || Array.isArray(r.stints);
+      renderStints(r);
+      renderPlan(r);
       var red = r.red_flag;
       if (document.activeElement !== restart) restart.value = r.restart_mode || "keep";
       restart.hidden = !red && !(r.entries || []).some(function (e) { return e.status === "red_flag"; });

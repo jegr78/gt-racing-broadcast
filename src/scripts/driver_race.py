@@ -2,9 +2,11 @@
 line and one `race_distance.Race`, behind a lock.
 
 Event settings live in `runtime/<profile>/driver-race.json`: `formation` (default
-on), `finish_mode` (`laps` or `time`) and `lap_count`. In endurance the lap count
-applies to the final stint lobby only; the relay passes it with the stint switch
-that puts the last schedule row on air. A changed layout pick starts a new race,
+on), `finish_mode` (`laps` or `time`) and `lap_count`. In endurance each stint has
+its count in the Schedule's `Laps` cell and the race finishes by the last row's; the
+relay passes it with the stint switch that puts the last schedule row on air, and
+again when it changes while that row runs. `lap_count` is the fallback for an empty
+last row. A changed layout pick starts a new race,
 because distances along another line mean nothing.
 
 Race Control actions (#1113): red flag, restart mode and release, rejoin marks,

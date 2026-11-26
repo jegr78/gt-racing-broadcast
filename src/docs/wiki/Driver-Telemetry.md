@@ -316,10 +316,14 @@ car's own pit lane shows in its gap until it passes where the car ahead lost the
 as at any pit stop. Until both cars have taken over, a car's laps down count from the
 moment the car ahead stopped, so a lapped car driving on to its box while the leader
 stands stays `+1 L`. A car that drives past its box, leaves it without a change or
-waits under a red flag counts its laps down by distance again. The lap count applies to the final lobby only and counts that
-lobby's laps on GT7's counter, from the car that took over after the last stint
-switch: the last row's `Laps` cell of the [Schedule tab](Sheet-Template#schedule-tab),
-else the event setting. A lap count set while the final stint is already on air applies at once.
+waits under a red flag counts its laps down by distance again. Every stint lobby has
+its lap count, the `Laps` cell of its row in the [Schedule tab](Sheet-Template#schedule-tab).
+Race Control sees and changes them on the desk under **Race → Stint laps**: the relay
+uses a change at once and writes the cell in the background, and the live column shows
+the lobby on air as `Lobby lap 7 / 14`. The race finishes by the final lobby's count,
+on GT7's counter, from the car that took over after the last stint switch; an empty
+last row falls back to the event setting. A count changed while the final stint is on
+air applies at once. In a single lobby the desk keeps its own lap count field.
 The final lobby's flag follows the road, as in GT7: the first of its cars to complete
 the count takes it, or after **Final lap** the leader on the road at its next crossing,
 even when another car leads in race distance. A car behind that crosses onto the
@@ -651,6 +655,14 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
   --restart`) says whether a restart keeps the gaps or neutralises them. A second red
   flag before **Restart released** freezes the field again and keeps the restart mode Race
   Control picked.
+- **Restart plan** (endurance): while the red flag is out, the desk's live column shows
+  how far the race falls behind the stint's plan, as time held since the first RED FLAG
+  and as laps of the lobby leader's average lap time (its counted laps in this lobby,
+  lap 1 left out). **Restart laps** is the stint's lap count at the flag minus the laps
+  the leader completed and the laps behind plan, rounded up. Each event decides its
+  buffer: the minutes typed into the buffer field count as time behind plan too. Set
+  the GT7 restart lobby first, then **Take** puts the number into the stint's lap
+  count, or type your own under **Stint laps**.
   - **Keep** is a release staggered by the gaps: Race Control releases each car from
     the restart lobby's box its frozen gap after the leader. Every car starts from
     the leader's frozen distance (an estimated leader's too), a car laps down that many whole laps behind it, so

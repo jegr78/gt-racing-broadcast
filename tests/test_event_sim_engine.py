@@ -1178,6 +1178,15 @@ def t_sheet_tabs_follow_the_event():
     assert tabs["POV"][1] == ["sim://pov", "Dan"], "the scenario's own tabs win"
 
 
+def t_the_schedule_carries_each_stints_lap_count():
+    scn = scenario.from_dict({"event": {"stints": 3, "stint_laps": [14, 14, 12]},
+                              "step": [{"role": "rec", "do": "go"}]}, _reg())
+    assert stack.sheet_tabs(scn)["Schedule"] == [["URL", "Streamer", "Stint", "Laps"], ["", "", "Stint 1", "14"],
+                                                 ["", "", "Stint 2", "14"], ["", "", "Stint 3", "12"]]
+    for bad in ([14, 14], [14, 0, 12], [14, "14", 12], 14, [14, 14, 1000]):
+        _refused([{"role": "rec", "do": "go"}], "event.stint_laps", event={"stints": 3, "stint_laps": bad})
+
+
 def t_the_stint_vocabulary_holds_every_label_the_schedule_tabs_use():
     quali = [["URL", "Streamer", "Stint"], ["", "Comms 1", "Qualifying"]]
     scn = _scn([{"role": "rec", "do": "go"}], event={"stints": 2, "commentators": [{"name": "Comms 1", "channel": "c1"}]},

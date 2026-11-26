@@ -752,12 +752,48 @@ def t_the_desk_class_header_count_follows_the_overall_rule():
 
 
 def t_the_desk_lap_line_shows_the_race_lap_and_the_lobby_lap():
-    got = _desk_fn("lapText", '[lapText({lap: {leader: 4, count: 19}, lobby_lap: 5}), lapText({lap: {leader: 4, count: null}}),'
+    got = _desk_fn("lobbyCount,lapText", '[lapText({lap: {leader: 4, count: 19}, lobby_lap: 5}), lapText({lap: {leader: 4, count: null}}),'
                               ' lapText({lap: {}, lobby_lap: null})]')
     if got is None:
         return
     assert got == ["Race lap 4 / 19 \u00b7 Lobby lap 5", "Race lap 4", ""], \
         f"the race lap against the count, then GT7's lap of the lobby on air: {got}"
+
+
+def t_the_desk_lap_line_shows_the_lobby_on_air_against_its_stint_count():
+    stints = '[{row: 2, stint: "Stint 1", laps: 14}, {row: 3, stint: "Stint 2", laps: null}]'
+    got = _desk_fn("lobbyCount,lapText",
+                   '[lapText({lap: {leader: 20}, lobby_lap: 6, stints: S, stint_row: 2}),'
+                   ' lapText({lap: {leader: 20}, lobby_lap: 6, stints: S, stint_row: 3}),'
+                   ' lapText({lap: {leader: 20}, lobby_lap: 6, stints: S, stint_row: null})]'.replace("S", stints))
+    if got is None:
+        return
+    assert got == ["Race lap 20 \u00b7 Lobby lap 6 / 14", "Race lap 20 \u00b7 Lobby lap 6",
+                   "Race lap 20 \u00b7 Lobby lap 6"], f"the stint on air brings its count, a stint without one none: {got}"
+
+
+def t_the_restart_plan_takes_the_laps_lost_under_the_red_flag_off_the_stint():
+    red = '{held_s: 600, avg_lap_ms: 105000, lobby_lap: 7, planned_laps: 14}'
+    got = _desk_fn("restartPlan,planText,secs",
+                   '[restartPlan(R, null), restartPlan(R, 3), restartPlan(R, 0),'
+                   ' restartPlan({held_s: 600, avg_lap_ms: null, lobby_lap: 7, planned_laps: 14}, null),'
+                   ' restartPlan({held_s: 600, avg_lap_ms: 105000, lobby_lap: 7, planned_laps: null}, null),'
+                   ' restartPlan({held_s: 1800, avg_lap_ms: 105000, lobby_lap: 7, planned_laps: 14}, null),'
+                   ' planText(restartPlan(R, 3))]'.replace("R", red))
+    if got is None:
+        return
+    assert got[0] == {"behind_s": 600, "behind_laps": 5.7, "laps": 2}, \
+        f"14 planned, 6 done, 600 s at 1:45 are 5.7 laps, so 2 laps for the restart: {got[0]}"
+    assert got[1] == {"behind_s": 780, "behind_laps": 7.4, "laps": 0}, f"a 3 minute buffer counts as time lost: {got[1]}"
+    assert got[2] == got[0], f"an empty or zero buffer adds nothing: {got[2]}"
+    assert got[3] is None and got[4] is None, f"without the leader's pace or the stint's count there is no plan: {got}"
+    assert got[5]["laps"] == -10, f"the plan shows a stint with no laps left as it is: {got[5]}"
+    assert got[6] == "Behind plan 13:00.0 \u00b7 7.4 laps \u00b7 Restart laps 0", got[6]
+    held = _desk_fn("restartPlan,planText,secs",
+                    '[planText(null, {held_s: 75, avg_lap_ms: null, lobby_lap: 7, planned_laps: 14}),'
+                    ' planText(null, {held_s: 75, avg_lap_ms: 105000, lobby_lap: 7, planned_laps: null})]')
+    assert held == ["Behind plan 1:15.0 \u00b7 no lap time of the leader yet",
+                    "Behind plan 1:15.0 \u00b7 set the stint's lap count"], f"without a plan the line says what is missing: {held}"
 
 
 def t_the_desk_tables_keep_their_own_text_colour_in_the_panel():
@@ -783,7 +819,7 @@ def t_the_senders_table_shrinks_its_move_choice_to_the_column():
 
 
 def t_the_desk_names_a_qualifying_segment_once():
-    got = _desk_fn("lapText", '["Qualifying", "qualifying 2", "Q1", ""].map(function (s) {'
+    got = _desk_fn("lobbyCount,lapText", '["Qualifying", "qualifying 2", "Q1", ""].map(function (s) {'
                               ' return lapText({mode: "qualifying", segment: s}); })')
     if got is None:
         return

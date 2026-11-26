@@ -1,6 +1,6 @@
 # Layout check (#1267, #1304): every live-column control of the Race Control desk, the
 # Director Panel and the Commentator Cockpit works in a 1440x900 window without scrolling,
-# in the tallest states: driver requests waiting, a red flag with a class lap row, a graphic
+# in the tallest states: driver requests waiting, a red flag with a class lap row and the restart plan, a graphic
 # request under a two-row panel header, and qualifying. The cockpit shows all 14 cars of its
 # timing while they drive. No state waits on a lap. Each fit waits for the controls its state
 # shows; in a 1366x650 laptop window scrolling the column must reach every live control.
@@ -9,6 +9,7 @@ max_minutes = 10
 
 [event]
 stints = 3
+stint_laps = [14, 14, 12]
 track = "6e378b"
 cars = 14
 classes = ["GT3", "GT4"]
@@ -132,7 +133,8 @@ id = "desk_fit_red_flag"
 at = "after:red_flag"
 role = "race_control"
 do = "fit"
-args = { require = ["Restart released", "Restart after the red flag", "Lap count of GT4"] }
+args = { require = ["Restart released", "Restart after the red flag", "Lap count of GT4",
+                   "Buffer until the restart, minutes"] }
 expect = ["result('desk_fit_red_flag').controls >= 8"]
 shot = "desk-red-flag"
 
