@@ -97,6 +97,17 @@ def t_timer_mode():
                         0.0) == "hidden"
 
 
+def t_public_remaining_follows_what_the_hud_shows():
+    def data(mode, end=None, remaining_s=None):
+        return {"mode": mode, "end": end, "remaining_s": remaining_s, "server_now": 1000.0}
+    assert m.public_remaining(None) == (None, False), "--no-timer shows nothing"
+    assert m.public_remaining(data("prestart")) == (None, False), "a reset timer shows nothing"
+    assert m.public_remaining(data("hidden", end=2000.0)) == (None, False), "a hidden clock shows nothing"
+    assert m.public_remaining(data("finished", end=900.0)) == (None, False), "a finished clock shows nothing"
+    assert m.public_remaining(data("paused", remaining_s=300)) == (300, False), "a paused clock stands"
+    assert m.public_remaining(data("running", end=1600.4)) == (600, True), "a running clock counts down"
+
+
 def t_merge_timer_states_newest_wins():
     local = {"end": 1.0, "duration": 60, "visible": True, "updated": 100.0}
     sheet = {"end": 2.0, "duration": 90, "visible": False, "updated": 200.0}

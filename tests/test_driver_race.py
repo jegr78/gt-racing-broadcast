@@ -439,6 +439,20 @@ def t_the_dashboard_says_whether_the_clock_runs_and_how_much_it_is_delayed():
     svc.tick()
     assert svc.dashboard()["remaining_running"] is False, "a paused timer stops the page's clock"
 
+def t_the_public_timer_is_the_delayed_one_and_only_its_hud_fields():
+    ctx = {"roster": ROSTER, "stint": "Stint 1", "remaining": 600, "remaining_running": True, "mode": "race",
+           "end": 1234.0, "duration_s": 3600, "visible": True}
+    svc, clock, _path = _dash_service(ctx)
+    svc.set_settings({"delay_s": 5})
+    svc.tick()
+    clock[0], ctx["remaining"] = 10.0, 590
+    svc.tick()
+    pub = dr.public_view(svc.dashboard())
+    assert pub["remaining"] == 600, "the page's clock is as old as its timing rows"
+    timer = {k for k in pub if k.startswith("remaining") or k in ("end", "duration_s", "server_now", "sync")}
+    assert timer == {"remaining", "remaining_running"}, f"only the HUD's remaining time and run state: {timer}"
+
+
 def t_the_delay_holds_the_dashboard_back():
     ctx = {"roster": ROSTER, "stint": "Stint 1", "remaining": None, "mode": "race"}
     svc, clock, _path = _dash_service(ctx)

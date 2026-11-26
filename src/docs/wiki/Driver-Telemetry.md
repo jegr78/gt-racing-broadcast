@@ -555,6 +555,14 @@ these columns existed shows them only after a redeploy. It has the
 same delay as the broadcast dashboard. Readers can switch columns on and off, and an
 activity list notes new fastest laps, red flags and the chequered flag.
 
+The remaining time of the [race timer](Race-Timer) shows in the line under the title,
+as `1:02:03 left`, counting down while the timer runs and standing while it is paused.
+Unlike the HUD clock it shows no preset duration before the start. It has the same delay as the table, so the clock is never
+ahead of the order it stands next to. Without a race timer, after a reset, with the
+clock hidden on air or once it has run out, the page shows no time. A
+[timing host](#hosted-live-timing-optional) deployed before this keeps `0:00 left`
+standing at the end until the next update; a redeploy blanks it like the relay's page.
+
 With a [league service](Configuration) a league can also show its widgets above the
 table, for example a team score or a championship table. The switch is
 `LEAGUE_WIDGETS_TIMING=1` in the profile, or **Timing page** in the Control Center's

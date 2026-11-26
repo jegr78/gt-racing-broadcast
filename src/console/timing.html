@@ -233,6 +233,14 @@
         return card;
       });
     },
+    // The race timer `elapsedS` after the body was built, as H:MM:SS or "" once it ran out.
+    timerText: function (remaining, running, elapsedS) {
+      if (typeof remaining !== "number") return "";
+      const left = Math.ceil(running === true ? remaining - elapsedS : remaining);
+      if (running === true && left <= 0) return "";
+      const s = Math.max(0, left), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+      return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(x).padStart(2, "0");
+    },
     funnelMove: function (data, search, sinceLoadS) {
       const to = data && data.moved_to;
       if (typeof to !== "string" || !/^https:\/\//.test(to)) return null;
@@ -285,10 +293,6 @@
     if (typeof ms !== "number" || ms <= 0) return "";
     const m = Math.floor(ms / 60000), s = (ms % 60000) / 1000;
     return m + ":" + s.toFixed(3).padStart(6, "0");
-  }
-  function clock(sec) {
-    const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = Math.floor(sec % 60);
-    return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s).padStart(2, "0");
   }
   function hex(c) { return /^#[0-9a-fA-F]{3,8}$/.test(c || "") ? c : ""; }
   function shade(c) {
@@ -560,9 +564,10 @@
   function tick() {
     const since = got ? Math.max(0, (Date.now() - got) / 1000) : 0;
     const left = $("left");
-    if (left && last && typeof last.remaining === "number") {
-      const run = last.remaining_running === true ? Math.floor(since + dataAge) : 0;
-      left.textContent = clock(Math.max(0, last.remaining - run)) + " left";
+    if (left && last) {
+      const text = LOGIC.timerText(last.remaining, last.remaining_running, since + dataAge);
+      left.textContent = text ? text + " left" : "";
+      left.hidden = !text;
     }
     const ageEl = $("age");
     if (ageEl && got) {
