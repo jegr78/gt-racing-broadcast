@@ -40,6 +40,7 @@ DIRECTOR = {
     "part_button": "#partActionBtn", "part_status": "#partStatus", "part_phrase": "#partModalPhrase",
     "part_input": "#partModalInput", "part_confirm": "#partModalConfirm",
     "timer_set": '#timerBus button.k:has-text("SET…")', "timer_info": "#timerInfo",
+    "timer_key": '#timerBus button.k:has-text("{label}")',
 }
 
 RACE_CONTROL = {

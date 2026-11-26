@@ -291,6 +291,7 @@ class Field:
         self.stint = 0
         self.released_at = None
         self._release = False
+        self.box_lead = None         # a leader-first box call: no car enters the pit lane before it
         self.box_station = self.line.length - BOX_BACK_M
         self.errors = 0
         self.outbox = []
@@ -336,13 +337,17 @@ class Field:
         """The car stops at its box the next time it reaches the pit entry."""
         self.car(entry).requests.append({"seconds": float(seconds), "stall": 0})
 
-    def box(self, entries=None):
+    def box(self, entries=None, leader_first=False):
         """Each car drives into the box at its next pit entry and waits for `release`;
-        `entries` sets the box order, the first one furthest forward."""
+        `entries` sets the box order, the first one furthest forward. With `leader_first`
+        a car reaching the pit entry before the first of them drives on another lap."""
         self.released_at, self._release = None, False
+        self.box_lead = None
         for i, c in enumerate(self._pick(entries)):
             if c.mode in ("grid", "drive", "pit_out"):
                 c.requests.append({"hold": True, "stall": i})
+                if leader_first and self.box_lead is None:
+                    self.box_lead = c.entry
 
     def lobby(self, stint):
         """The lobby of 0-based `stint` opens: its drivers stand in the box beside the
@@ -385,6 +390,8 @@ class Field:
         if car.mode in ("dropped", "off"):
             raise DriveError(f"{entry!r} is not sending")
         car.mode, car.v, car.pit, car.requests = "dropped", 0.0, None, []
+        if self.box_lead == entry:
+            self.box_lead = None
 
     def rejoin(self, entry, seconds=5.0):
         """A dropped car's driver of the current stint joins a new session in the box and
@@ -406,6 +413,8 @@ class Field:
         """The senders of `entries` (default all) close."""
         for c in self._pick(entries):
             c.mode, c.v, c.requests = "off", 0.0, []
+            if self.box_lead == c.entry:
+                self.box_lead = None
 
     def snapshot(self):
         return [{"entry": c.entry, "mode": c.mode, "lap": c.lap, "driver": c.driver,
@@ -471,7 +480,10 @@ class Field:
             car.lat = 0.0
             entry_s = self.box_station - PIT_IN_M
             pos = car.odo % length
-            if car.requests and entry_s <= pos < entry_s + speed * dt + 1:
+            waits = self.box_lead not in (None, car.entry) and car.requests and car.requests[0].get("hold")
+            if car.requests and not waits and entry_s <= pos < entry_s + speed * dt + 1:
+                if self.box_lead == car.entry:
+                    self.box_lead = None
                 req = car.requests.pop(0)
                 car.mode = "pit_in"
                 car.pit = dict(req, p=0.0, stop=PIT_IN_M - req["stall"] * STALL_M, v0=max(car.v, 1.0),

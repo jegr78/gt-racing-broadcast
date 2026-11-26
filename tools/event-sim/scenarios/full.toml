@@ -1,27 +1,33 @@
-# Full: the race day of the slide deck, in real time, over three stints in three
-# lobbies with one commentator each. 14 cars on a Suzuka-length lap (about 1:45).
-# Start event, then qualifying mode: Comms 1 submits the qualifying link, the director
-# approves it and feed A runs warm with it (auto-arm). One driver registers on the invite
-# page, the others over the API; Race Control corrects one request, rejects one and
-# approves the rest with Approve all. Intro and trailer, a few crew chat messages,
-# then the desk adds qualifying laps, the director switches to race mode, sets the race
-# timer to the race length and goes live. Race Control presses Race start on the grid and
-# enters every car's tyre compound; the timer starts on the first race lap. A formation
-# lap, the start, a pit stop with its tyre compound; in stint 1 a car disconnects
-# (suspected, the standings of before it, confirmed DC, rejoin mark), another one's sender
-# stops (an estimate 3 s behind another car, rejoin mark), a third retires. Comms 2 sends
-# the stint 2 link late. Before each stint change the invite page registers one driver of
-# the next stint and Race Control approves it; once the incoming feed serves, the
-# splitscreen is on program while the cars box and holds both feeds, the director presses
-# NEXT and cuts back to the stint, and every running team's driver swaps in the new lobby;
-# Race Control enters the new stint's compounds; the DC team rejoins a lap down. A red flag
-# in stint 2 ends in a keep-gaps restart, then a pit stop with a compound change. In stint
-# 3 Race Control calls the final lap; the outro ends the broadcast.
+# Full: qualifying the day before and the race day of the slide deck, in real time, over
+# three stints in three lobbies with one commentator each. 14 cars on a Suzuka-length lap
+# (about 1:45). The day before: Start event with the Qualifying option; Comms 1 submits
+# the qualifying link, the director approves it and feed A runs warm with it (auto-arm),
+# Comms 1 goes on air. One driver registers for qualifying on the invite page, the others
+# over the API, and Race Control approves them all. The director sets a 10 minute timer and
+# starts it as the session starts in the lobby; Race Control adds three laps while the cars
+# drive theirs and the public timing ranks them. Once the timer has run out the cars come in
+# and the producer stops the event. The next day: Start event in race mode. One driver registers on the invite page, the
+# others over the API; Race Control corrects one request, rejects one and approves the
+# rest with Approve all. Intro, trailer, Comms 1 on program, the director resets the
+# qualifying timer, sets the race timer and goes live. Race Control presses Race start on the grid and enters every car's
+# tyre compound; the timer starts on the first race lap. A formation lap, the start, a pit
+# stop with its tyre compound; in stint 1 a car disconnects (suspected, the standings of
+# before it, confirmed DC, rejoin mark), another one's sender stops (an estimate 3 s
+# behind another car, rejoin mark), a third retires. Comms 2 sends the stint 2 link late.
+# Before each stint change the invite page registers one driver of the next stint and
+# Race Control approves it; the cars box behind the leader, the splitscreen goes on
+# program once the leader stands in the box, and the director presses NEXT once every car
+# stands there (5 minutes at most) and cuts back to the stint; Race Control enters the new
+# stint's compounds and every running team's driver swaps in the new lobby; the DC team
+# rejoins a lap down. A red flag in stint 2 ends in a keep-gaps restart, then a pit stop
+# with a compound change. In stint 3 Race Control calls the final lap when the race timer
+# runs out; the outro ends the broadcast.
 # Its 50 screenshots carry deck image names (`<slide>-<n>`): the race-day subset of the
 # deck, see tools/CLAUDE.md for the families it does not produce. The captions, chapters and
 # focus are the walkthrough film's storyboard (spec 2026-11-24-event-walkthrough-video-design).
-# It runs in the workflow (about 36 min there); it exceeds the local 2 GiB E2E unit.
-description = "The deck's race day in real time: qualifying, approval, three stints, DC, estimate, DNF, red flag, finish."
+# It runs in the workflow (about 36 min there plus the qualifying's 14); it exceeds the
+# local 2 GiB E2E unit.
+description = "Qualifying the day before, then the deck's race day in real time: approval, three stints, DC, estimate, DNF, red flag, finish."
 max_minutes = 75
 
 [event]
@@ -62,42 +68,24 @@ id = "track"
 at = "after:relay_up"
 role = "producer"
 do = "pick_track"
-chapter = "Start the event"
-caption = "The producer picks the track in the Control Center"
+chapter = "Qualifying (the day before)"
+caption = "The day before the race: the producer picks the track in the Control Center"
 
 [[step]]
-id = "race_settings"
+id = "quali_event"
 at = "after:track"
 role = "producer"
-do = "race_settings"
-args = { formation = true, finish_mode = "time" }
-expect = ["race.settings.formation",
-          "race.settings.finish_mode == 'time'"]
-caption = "The producer sets the race: a formation lap and a timed finish"
-
-[[step]]
-id = "start_event"
-at = "after:race_settings"
-role = "producer"
 do = "start_event"
+args = { qualifying = true }
 expect = ["obs.scene == 'Standby'",
-          "relay.up"]
-caption = "The producer starts the event"
-
-[[step]]
-id = "quali_mode"
-at = "after:start_event"
-role = "director"
-do = "mode"
-args = { mode = "qualifying" }
-expect = ["relay.status.mode == 'qualifying'"]
-timeout = "20s"
-chapter = "First link"
-caption = "The director switches the relay to qualifying"
+          "relay.up",
+          "relay.status.mode == 'qualifying'"]
+timeout = "30s"
+caption = "The producer starts the qualifying event: Start event with the Qualifying option"
 
 [[step]]
 id = "submit_first"
-at = "after:quali_mode"
+at = "after:quali_event"
 role = "commentator:Comms 1"
 do = "submit_link"
 args = { url = "sim://comms1", stint = "Qualifying" }
@@ -105,7 +93,7 @@ expect = ["webhook.count('submission') == 1",
           "sheet.qualifying[0].url == ''"]
 timeout = "15s"
 caption = "Comms 1 submits the qualifying stream link in the cockpit"
-focus = ["commentator:Comms 1", "director"]
+focus = ["commentator:Comms 1"]
 
 [[step]]
 id = "approve_first"
@@ -138,8 +126,298 @@ timeout = "90s"
 caption = "Feed A runs warm with the qualifying stream as soon as the link is approved"
 
 [[step]]
-id = "driver_signup"
+id = "quali_on_air"
 at = "after:warm_a"
+role = "director"
+do = "scene"
+args = { scene = "Stint" }
+expect = ["'comms1' in obs.program_channels"]
+timeout = "90s"
+chapter = "On air: qualifying (the day before)"
+caption = "The director puts Comms 1 on program for qualifying"
+focus = ["program", "director"]
+
+[[step]]
+id = "dashboard"
+at = "after:quali_on_air"
+role = "director"
+do = "show_dashboard"
+args = { on = true }
+expect = ["race.settings.visible"]
+timeout = "10s"
+caption = "The director shows the driver dashboard"
+focus = ["director", "program"]
+
+[[step]]
+id = "overlay"
+at = "after:dashboard"
+role = "page:overlay"
+do = "open"
+args = { service = "relay", path = "/drivers", wait_for = "#drivers-tower", viewport = [1920, 1080] }
+
+[[step]]
+id = "cockpit1"
+at = "after:overlay"
+role = "commentator:Comms 1"
+do = "open"
+expect = ["page('commentator:Comms 1').on_air"]
+timeout = "20s"
+caption = "Comms 1 is on air: the cockpit shows the qualifying on program"
+focus = ["commentator:Comms 1", "program"]
+
+[[step]]
+id = "timing_open"
+at = "after:cockpit1"
+role = "viewer"
+do = "open"
+
+[[step]]
+id = "chat_mic"
+at = "after:timing_open"
+role = "commentator:Comms 1"
+do = "chat"
+args = { text = "Comms 1 here: mic check on the qualifying feed." }
+caption = "Comms 1 writes in the crew chat"
+focus = ["commentator:Comms 1", "director"]
+
+[[step]]
+id = "chat_mic_reply"
+at = "after:chat_mic"
+role = "director"
+do = "chat"
+args = { text = "Loud and clear, Comms 1." }
+caption = "The director answers in the crew chat"
+focus = ["director", "commentator:Comms 1"]
+
+[[step]]
+id = "quali_signup"
+at = "after:chat_mic_reply"
+role = "driver"
+do = "register"
+args = { entry = "Juniper Motorsport #10", name = "Driver 10-Q", stint = "Qualifying" }
+expect = ["page('driver').registered"]
+timeout = "20s"
+caption = "A driver registers for qualifying on the invite page"
+focus = ["driver"]
+
+[[step]]
+id = "quali_register"
+at = "after:quali_signup"
+role = "drivers:quali"
+do = "register"
+args = { segment = "Qualifying", skip = [{ entry = "Juniper Motorsport #10" }] }
+expect = ["result('quali_register').registered == 13"]
+caption = "The other drivers register for qualifying"
+focus = ["driver"]
+
+[[step]]
+id = "quali_waiting"
+at = "after:quali_register"
+role = "race_control"
+do = "open"
+expect = ["page('race_control').waiting == 14"]
+timeout = "20s"
+
+[[step]]
+id = "quali_approve"
+at = "after:quali_waiting"
+role = "race_control"
+do = "approve_all"
+expect = ["result('quali_approve').approved == 14",
+          "page('race_control').waiting == 0"]
+timeout = "20s"
+caption = "Race Control approves the 14 qualifying requests with Approve all"
+focus = ["race_control", "driver"]
+
+[[step]]
+id = "quali_timer"
+at = "after:quali_approve"
+role = "director"
+do = "timer"
+args = { duration = "0:10:00" }
+expect = ["relay.get('/timer/data').mode == 'prestart'",
+          "relay.get('/timer/data').duration_s == 600"]
+timeout = "10s"
+caption = "The director sets the qualifying timer to 10 minutes"
+focus = ["director", "program"]
+
+[[step]]
+id = "quali_drive"
+at = "after:quali_timer"
+role = "drivers:quali"
+do = "start"
+expect = ["page('drivers:quali').driving == 14"]
+timeout = "60s"
+caption = "The session starts in the lobby: the cars go out for their qualifying laps"
+focus = ["program", "viewer"]
+
+[[step]]
+id = "quali_clock"
+at = "after:quali_drive"
+role = "director"
+do = "timer_key"
+args = { key = "START" }
+expect = ["relay.get('/timer/data').mode == 'running'"]
+timeout = "10s"
+caption = "The director starts the qualifying timer by hand"
+focus = ["director", "program"]
+
+[[step]]
+id = "quali_lap1"
+at = "after:quali_clock"
+role = "race_control"
+do = "add_lap"
+args = { entry = "Blue Harbor Racing #22", time = "1:41.312" }
+caption = "Race Control adds a qualifying lap of Blue Harbor Racing #22"
+focus = ["race_control", "viewer"]
+
+[[step]]
+id = "quali_lap2"
+at = "after:quali_lap1"
+role = "race_control"
+do = "add_lap"
+args = { entry = "Apex Works #11", time = "1:40.208" }
+caption = "Race Control adds a qualifying lap of Apex Works #11"
+focus = ["race_control", "viewer"]
+
+[[step]]
+id = "quali_lap3"
+at = "after:quali_lap2"
+role = "race_control"
+do = "add_lap"
+args = { entry = "Cedar Motorsport #33", time = "1:40.951" }
+caption = "Race Control adds a qualifying lap of Cedar Motorsport #33"
+focus = ["race_control", "viewer"]
+
+[[step]]
+id = "quali_desk"
+at = "after:quali_lap3"
+role = "race_control"
+do = "view"
+args = { area = "qualifying" }
+shot = { name = "quali-desk-1", role = "race_control", element = ".area[data-area=\"qualifying\"]" }
+
+[[step]]
+id = "quali_timing"
+at = "after:quali_desk"
+role = "viewer"
+do = "read"
+args = { cars = 3 }
+expect = ["'Apex Works' in page('viewer').rows[0]",
+          "'Cedar Motorsport' in page('viewer').rows[1]",
+          "'Blue Harbor' in page('viewer').rows[2]"]
+timeout = "20s"
+shot = "quali-public-1"
+caption = "The public timing ranks the qualifying laps"
+focus = ["viewer", "race_control"]
+
+[[step]]
+id = "quali_laps_in"
+at = "after:quali_timing"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.qualifying[13].best_ms > 0"]
+timeout = "10m"
+
+[[step]]
+id = "quali_watch"
+at = "after:quali_laps_in"
+role = "race_control"
+do = "hold"
+args = { seconds = 90 }
+caption = "Race Control follows the qualifying laps at its desk"
+focus = ["race_control", "viewer"]
+
+[[step]]
+id = "shot_quali_cockpit_1"
+at = "after:quali_watch+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "quali-cockpit-1", role = "commentator:Comms 1", element = "#timingCard" }
+
+[[step]]
+id = "shot_quali_tower_gap_1"
+at = "after:shot_quali_cockpit_1+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "quali-tower-gap-1", role = "page:overlay", element = "#drivers-tower" }
+
+[[step]]
+id = "quali_field"
+at = "after:shot_quali_tower_gap_1"
+role = "viewer"
+do = "read"
+args = { cars = 14 }
+expect = ["page('viewer').cars >= 14",
+          "'Apex Works' in page('viewer').rows[0]"]
+timeout = "20s"
+caption = "The public timing ranks every car by its best qualifying lap"
+focus = ["viewer", "program"]
+
+[[step]]
+id = "quali_over"
+at = "after:quali_field"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.status.timer.remaining_s == 0"]
+timeout = "11m"
+
+[[step]]
+id = "quali_in"
+at = "after:quali_over"
+role = "drivers:quali"
+do = "stop"
+caption = "The qualifying timer has run out: the cars come in"
+focus = ["program", "viewer"]
+
+[[step]]
+id = "quali_stop"
+at = "after:quali_in"
+role = "producer"
+do = "stop_event"
+expect = ["not relay.up"]
+timeout = "30s"
+caption = "The producer stops the qualifying event"
+
+[[step]]
+id = "start_event"
+at = "after:quali_stop"
+role = "producer"
+do = "start_event"
+args = { qualifying = false }
+expect = ["obs.scene == 'Standby'",
+          "relay.up",
+          "relay.status.mode == 'race'"]
+timeout = "30s"
+chapter = "Race day: start the event"
+caption = "The next day the producer starts the race event, without the Qualifying option"
+
+[[step]]
+id = "race_settings"
+at = "after:start_event"
+role = "producer"
+do = "race_settings"
+args = { formation = true, finish_mode = "time" }
+expect = ["race.settings.formation",
+          "race.settings.finish_mode == 'time'"]
+caption = "The producer sets the race: a formation lap and a timed finish"
+
+# Stop event ended the qualifying invite: the driver page opens the race event's.
+[[step]]
+id = "driver_open"
+at = "after:race_settings"
+role = "driver"
+do = "open"
+
+[[step]]
+id = "driver_signup"
+at = "after:driver_open"
 role = "driver"
 do = "register"
 args = { entry = "Juniper Motorsport #10", name = "Driver 10-1", stint = 1 }
@@ -232,7 +510,7 @@ at = "after:approve_drivers"
 role = "director"
 do = "play"
 args = { media = "intro" }
-chapter = "On air: qualifying"
+chapter = "Race start"
 caption = "The director plays the intro"
 focus = ["program", "director"]
 
@@ -246,45 +524,26 @@ caption = "The director plays the trailer"
 focus = ["program", "director"]
 
 [[step]]
-id = "quali_on_air"
+id = "stint1_on_air"
 at = "after:trailer"
 role = "director"
 do = "scene"
 args = { scene = "Stint" }
 expect = ["'comms1' in obs.program_channels"]
 timeout = "90s"
-caption = "The director puts Comms 1 on program for qualifying"
+caption = "The director puts Comms 1 on program for stint 1"
 focus = ["program", "director"]
 
 [[step]]
-id = "dashboard"
-at = "after:quali_on_air"
-role = "director"
-do = "show_dashboard"
-args = { on = true }
-expect = ["race.settings.visible"]
-timeout = "10s"
-caption = "The director shows the driver dashboard"
-focus = ["director", "program"]
-
-[[step]]
-id = "overlay"
-at = "after:dashboard"
+id = "overlay_race"
+at = "after:stint1_on_air"
 role = "page:overlay"
 do = "open"
 args = { service = "relay", path = "/drivers", wait_for = "#drivers-tower", viewport = [1920, 1080] }
 
 [[step]]
-id = "cockpit1"
-at = "after:overlay"
-role = "commentator:Comms 1"
-do = "open"
-expect = ["page('commentator:Comms 1').on_air"]
-timeout = "20s"
-
-[[step]]
 id = "cockpit2"
-at = "after:cockpit1"
+at = "after:overlay_race"
 role = "commentator:Comms 2"
 do = "open"
 expect = ["not page('commentator:Comms 2').on_air"]
@@ -298,114 +557,29 @@ do = "open"
 expect = ["not page('commentator:Comms 3').on_air"]
 timeout = "20s"
 
+# The race event has a new timing link.
 [[step]]
-id = "timing_open"
+id = "timing_race"
 at = "after:cockpit3"
 role = "viewer"
 do = "open"
 
+# The qualifying timer stands finished: Race start starts only a timer that never started.
 [[step]]
-id = "chat_mic"
-at = "after:timing_open"
-role = "commentator:Comms 1"
-do = "chat"
-args = { text = "Comms 1 here: mic check on the qualifying feed." }
-caption = "Comms 1 writes in the crew chat"
-focus = ["commentator:Comms 1", "director"]
-
-[[step]]
-id = "chat_mic_reply"
-at = "after:chat_mic"
+id = "timer_reset"
+at = "after:timing_race"
 role = "director"
-do = "chat"
-args = { text = "Loud and clear, Comms 1." }
-caption = "The director answers in the crew chat"
-focus = ["director", "commentator:Comms 1"]
-
-[[step]]
-id = "quali_lap1"
-at = "after:chat_mic_reply"
-role = "race_control"
-do = "add_lap"
-args = { entry = "Blue Harbor Racing #22", time = "1:45.312" }
-caption = "Race Control adds a qualifying lap of Blue Harbor Racing #22"
-focus = ["race_control", "viewer"]
-
-[[step]]
-id = "quali_lap2"
-at = "after:quali_lap1"
-role = "race_control"
-do = "add_lap"
-args = { entry = "Apex Works #11", time = "1:44.208" }
-caption = "Race Control adds a qualifying lap of Apex Works #11"
-focus = ["race_control", "viewer"]
-
-[[step]]
-id = "quali_lap3"
-at = "after:quali_lap2"
-role = "race_control"
-do = "add_lap"
-args = { entry = "Cedar Motorsport #33", time = "1:44.951" }
-caption = "Race Control adds a qualifying lap of Cedar Motorsport #33"
-focus = ["race_control", "viewer"]
-
-[[step]]
-id = "quali_desk"
-at = "after:quali_lap3"
-role = "race_control"
-do = "view"
-args = { area = "qualifying" }
-shot = { name = "quali-desk-1", role = "race_control", element = ".area[data-area=\"qualifying\"]" }
-
-[[step]]
-id = "quali_timing"
-at = "after:quali_desk"
-role = "viewer"
-do = "read"
-args = { cars = 3 }
-expect = ["'Apex Works' in page('viewer').rows[0]",
-          "'Cedar Motorsport' in page('viewer').rows[1]",
-          "'Blue Harbor' in page('viewer').rows[2]"]
-timeout = "20s"
-shot = "quali-public-1"
-caption = "The public timing ranks the qualifying laps"
-focus = ["viewer", "race_control"]
-
-[[step]]
-id = "shot_quali_cockpit_1"
-at = "after:quali_timing+3s"
-role = "api"
-do = "get"
-args = { path = "/status" }
-expect = ["relay.up"]
-shot = { name = "quali-cockpit-1", role = "commentator:Comms 1", element = "#timingCard" }
-
-[[step]]
-id = "shot_quali_tower_gap_1"
-at = "after:shot_quali_cockpit_1+3s"
-role = "api"
-do = "get"
-args = { path = "/status" }
-expect = ["relay.up"]
-shot = { name = "quali-tower-gap-1", role = "page:overlay", element = "#drivers-tower" }
-
-[[step]]
-id = "race_mode"
-at = "after:shot_quali_tower_gap_1"
-role = "director"
-do = "mode"
-args = { mode = "race" }
-expect = ["relay.status.mode == 'race'",
-          "'comms1' in obs.program_channels"]
-timeout = "90s"
-chapter = "Race start"
-caption = "The director switches the relay to race mode"
+do = "timer_key"
+args = { key = "RESET" }
+expect = ["relay.get('/timer/data').mode == 'prestart'"]
+timeout = "10s"
+caption = "The director resets the timer that ran in qualifying"
 focus = ["director", "program"]
 
-# The race's length: 16 laps of about 1:45 plus the two swaps and the red flag.
+# The race up to the final lap call at about lap 15, the two swaps and the red flag included.
 [[step]]
 id = "timer_set"
-at = "after:race_mode"
+at = "after:timer_reset"
 role = "director"
 do = "timer"
 args = { duration = "0:38:00" }
@@ -942,27 +1116,8 @@ do = "view"
 args = { area = "race" }
 
 [[step]]
-id = "box2"
-at = "after:swap1_desk"
-role = "drivers"
-do = "box"
-expect = ["page('drivers').standing == 12"]
-timeout = "4m"
-caption = "The cars come into the box for the driver swap"
-focus = ["program", "race_control"]
-
-[[step]]
-id = "shot_swaps_1"
-at = "after:box2+3s"
-role = "api"
-do = "get"
-args = { path = "/status" }
-expect = ["relay.up"]
-shot = { name = "swaps-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
-
-[[step]]
 id = "warm2"
-at = "after:shot_swaps_1"
+at = "after:swap1_desk"
 role = "director"
 do = "view"
 args = { area = "handover" }
@@ -973,31 +1128,52 @@ caption = "The feed of stint 2 runs warm: the Handover area shows it ready"
 focus = ["director"]
 
 [[step]]
-id = "split2"
+id = "box2"
 at = "after:warm2"
+role = "drivers"
+do = "box"
+args = { leader_first = true }
+caption = "The cars come into the box for the driver swap"
+focus = ["race_control", "program"]
+
+[[step]]
+id = "leader_box2"
+at = "after:box2"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.entries[0].status == 'box'"]
+timeout = "4m"
+
+[[step]]
+id = "split2"
+at = "after:leader_box2"
 role = "director"
 do = "scene"
 args = { scene = "Split" }
 expect = ["obs.scene == 'Splitscreen'"]
 timeout = "20s"
-caption = "The director puts the splitscreen on program while the cars box"
+caption = "The race leader is in the box: the director puts the splitscreen on program"
 focus = ["program", "director"]
 
+# NEXT once every running car stands in the box, after 5 minutes at most when the field is
+# spread out: a soft check ends the wait without failing the step.
 [[step]]
-id = "split2_hold"
+id = "boxed2"
 at = "after:split2"
-role = "director"
-do = "hold"
-args = { seconds = 15 }
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
 expect = ["'comms1' in obs.program_channels",
           "'comms2' in obs.program_channels"]
-timeout = "90s"
-caption = "The splitscreen shows both feeds: Comms 1 and Comms 2"
+soft = ["page('drivers').standing == 12"]
+timeout = "5m"
+caption = "The splitscreen shows both feeds while the cars box: Comms 1 and Comms 2"
 focus = ["program", "director"]
 
 [[step]]
 id = "next2"
-at = "after:split2_hold"
+at = "after:boxed2"
 role = "director"
 do = "next"
 expect = ["page('commentator:Comms 2').on_air"]
@@ -1018,8 +1194,36 @@ caption = "The director cuts back to the stint: Comms 2 alone on program"
 focus = ["program", "director"]
 
 [[step]]
-id = "lobby2"
+id = "compounds2"
 at = "after:stint2_cut"
+role = "race_control"
+do = "compounds"
+args = { code = "RM", skip = ["Ion Racing #9"] }
+expect = ["race.compounds['Apex Works #11'].code == 'RM'"]
+soft = ["len(result('compounds2').changed) == 12",
+        "result('compounds2').kept == ['Blue Harbor Racing #22']"]
+timeout = "15s"
+caption = "Race Control enters the compounds the stint 2 drivers start on"
+
+[[step]]
+id = "desk_stint2"
+at = "after:compounds2"
+role = "race_control"
+do = "view"
+args = { area = "race" }
+
+[[step]]
+id = "shot_swaps_1"
+at = "after:desk_stint2+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "swaps-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
+
+[[step]]
+id = "lobby2"
+at = "after:shot_swaps_1"
 role = "drivers"
 do = "lobby"
 args = { stint = 2 }
@@ -1078,27 +1282,8 @@ expect = ["row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-2'"
 timeout = "60s"
 
 [[step]]
-id = "compounds2"
-at = "after:swapped"
-role = "race_control"
-do = "compounds"
-args = { code = "RM", skip = ["Ion Racing #9"] }
-expect = ["race.compounds['Apex Works #11'].code == 'RM'"]
-soft = ["len(result('compounds2').changed) == 12",
-        "result('compounds2').kept == ['Blue Harbor Racing #22']"]
-timeout = "15s"
-caption = "Race Control enters the compounds the stint 2 drivers start on"
-
-[[step]]
-id = "desk_stint2"
-at = "after:compounds2"
-role = "race_control"
-do = "view"
-args = { area = "race" }
-
-[[step]]
 id = "shot_swaps_3"
-at = "after:desk_stint2+3s"
+at = "after:swapped+3s"
 role = "api"
 do = "get"
 args = { path = "/status" }
@@ -1403,18 +1588,8 @@ do = "view"
 args = { area = "race" }
 
 [[step]]
-id = "box3"
-at = "after:swap2_desk"
-role = "drivers"
-do = "box"
-expect = ["page('drivers').standing == 14"]
-timeout = "4m"
-caption = "The cars come into the box for the driver swap"
-focus = ["program", "race_control"]
-
-[[step]]
 id = "warm3"
-at = "after:box3"
+at = "after:swap2_desk"
 role = "director"
 do = "view"
 args = { area = "handover" }
@@ -1425,31 +1600,52 @@ caption = "The feed of stint 3 runs warm: the Handover area shows it ready"
 focus = ["director"]
 
 [[step]]
-id = "split3"
+id = "box3"
 at = "after:warm3"
+role = "drivers"
+do = "box"
+args = { leader_first = true }
+caption = "The cars come into the box for the driver swap"
+focus = ["race_control", "program"]
+
+[[step]]
+id = "leader_box3"
+at = "after:box3"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.entries[0].status == 'box'"]
+timeout = "4m"
+
+[[step]]
+id = "split3"
+at = "after:leader_box3"
 role = "director"
 do = "scene"
 args = { scene = "Split" }
 expect = ["obs.scene == 'Splitscreen'"]
 timeout = "20s"
-caption = "The director puts the splitscreen on program while the cars box"
+caption = "The race leader is in the box: the director puts the splitscreen on program"
 focus = ["program", "director"]
 
+# NEXT once every running car stands in the box, after 5 minutes at most when the field is
+# spread out: a soft check ends the wait without failing the step.
 [[step]]
-id = "split3_hold"
+id = "boxed3"
 at = "after:split3"
-role = "director"
-do = "hold"
-args = { seconds = 15 }
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
 expect = ["'comms2' in obs.program_channels",
           "'comms3' in obs.program_channels"]
-timeout = "90s"
-caption = "The splitscreen shows both feeds: Comms 2 and Comms 3"
+soft = ["page('drivers').standing == 14"]
+timeout = "5m"
+caption = "The splitscreen shows both feeds while the cars box: Comms 2 and Comms 3"
 focus = ["program", "director"]
 
 [[step]]
 id = "next3"
-at = "after:split3_hold"
+at = "after:boxed3"
 role = "director"
 do = "next"
 expect = ["page('commentator:Comms 3').on_air"]
@@ -1470,8 +1666,26 @@ caption = "The director cuts back to the stint: Comms 3 alone on program"
 focus = ["program", "director"]
 
 [[step]]
-id = "lobby3"
+id = "compounds3"
 at = "after:stint3_cut"
+role = "race_control"
+do = "compounds"
+args = { code = "RS", skip = ["Ion Racing #9"] }
+expect = ["race.compounds['Apex Works #11'].code == 'RS'"]
+soft = ["len(result('compounds3').changed) == 13"]
+timeout = "15s"
+caption = "Race Control enters the compounds the stint 3 drivers start on"
+
+[[step]]
+id = "desk_stint3"
+at = "after:compounds3"
+role = "race_control"
+do = "view"
+args = { area = "race" }
+
+[[step]]
+id = "lobby3"
+at = "after:desk_stint3"
 role = "drivers"
 do = "lobby"
 args = { stint = 3 }
@@ -1495,39 +1709,24 @@ role = "api"
 do = "get"
 args = { path = "/drivers/race" }
 expect = ["row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-3'",
-          "unchanged(result('lap11').entries, race.entries, 'driver') in [[], ['Ion Racing #9']]"]
+          "unchanged(result('lap11').entries, race.entries, 'driver') in [[], ['Ion Racing #9']]",
+          "relay.status.timer.remaining_s > 0"]
 timeout = "60s"
 
+# Race Control calls the final lap when the race timer runs out, whatever the run's pace:
+# the race ends at the leader's next crossing, so the timer runs out during the last lap.
 [[step]]
-id = "compounds3"
+id = "time_up"
 at = "after:stint3"
-role = "race_control"
-do = "compounds"
-args = { code = "RS", skip = ["Ion Racing #9"] }
-expect = ["race.compounds['Apex Works #11'].code == 'RS'"]
-soft = ["len(result('compounds3').changed) == 13"]
-timeout = "15s"
-caption = "Race Control enters the compounds the stint 3 drivers start on"
-
-[[step]]
-id = "desk_stint3"
-at = "after:compounds3"
-role = "race_control"
-do = "view"
-args = { area = "race" }
-
-[[step]]
-id = "lap15"
-at = "after:desk_stint3"
 role = "api"
 do = "get"
-args = { path = "/drivers/race" }
-expect = ["race.lap.leader >= 15"]
-timeout = "12m"
+args = { path = "/status" }
+expect = ["relay.status.timer.remaining_s == 0"]
+timeout = "20m"
 
 [[step]]
 id = "final_lap"
-at = "after:lap15"
+at = "after:time_up"
 role = "race_control"
 do = "final_lap"
 expect = ["race.state in ['final_lap', 'finishing', 'finished']"]
