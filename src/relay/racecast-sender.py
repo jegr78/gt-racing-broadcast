@@ -66,7 +66,8 @@ CHECK_MIN_HZ = 50.0       # GT7 sends about 60 packets per second
 LATENCY_WINDOW = 200      # the posts the latency stats cover
 MAX_POST_MS = 60000
 USER_AGENT = "racecast-sender/" + VERSION
-IPHONE_HINT = "On an iPhone the search fails like this: start the sender with --console <PlayStation IP>"
+CONSOLE_HINT = ("start the sender with --console <PlayStation IP>; Settings, Network, Connection status "
+                "on the PlayStation shows it")
 ROUTE_PROBE = "192.0.2.1"   # TEST-NET-1: picks the default-route interface, never contacted
 NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,32}\Z")   # the relay accepts these names only
 
@@ -401,6 +402,8 @@ class Sender:
         if not bind:
             raise OSError("no network interface found: pass --bind <this device's LAN address>")
         self.sock.bind((bind, port))
+        self.bind_addr = bind
+        self._swept = False              # a search went address by address
         self.sock.settimeout(0.5)
         self.fwd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) if forward else None
         self.stats = dict.fromkeys(("received", "forwarded", "interruptions", "heartbeats",
@@ -417,13 +420,43 @@ class Sender:
         try:
             self.sock.sendto(HEARTBEAT, (target, self.console_port))
             self.stats["heartbeats"] += 1
+            return
         except OSError as exc:
-            self.heartbeat_failed += 1
-            hint = ""
-            if not self.console and not self._search_hinted:
-                self._search_hinted = True
-                hint = ". " + IPHONE_HINT
-            self.say(f"heartbeat to {target} failed: {exc}{hint}")
+            if self.console:
+                self.heartbeat_failed += 1
+                self.say(f"heartbeat to {target} failed: {exc}")
+                return
+            error = exc
+        # iOS refuses the broadcast but lets unicast through: this round goes address by address.
+        if not self._swept:
+            self.say(f"the broadcast failed ({error}): searching the local network address by address")
+        self._swept = True
+        self._heartbeat_each(error)
+
+    def _heartbeat_each(self, error):
+        """One heartbeat to every other address of the bound interface's /24."""
+        net, _, own = self.bind_addr.rpartition(".")
+        if self.bind_addr == "0.0.0.0" or self.bind_addr.startswith("127."):
+            net = None
+        sent = 0
+        for host in range(1, 255) if net else ():
+            if str(host) == own:
+                continue
+            try:
+                self.sock.sendto(HEARTBEAT, (f"{net}.{host}", self.console_port))
+                sent += 1
+            except OSError as exc:
+                error = exc
+        if sent:
+            self.stats["heartbeats"] += 1
+            return
+        self.heartbeat_failed += 1
+        hint = ""
+        if not self._search_hinted:
+            self._search_hinted = True
+            hint = ". " + CONSOLE_HINT
+        where = f"no address of {net}.0/24 took a heartbeat" if net else "the search needs the device's network address"
+        self.say(f"{where}: {error}{hint}")
 
     def receive_once(self):
         try:
@@ -533,10 +566,11 @@ def self_check(sender, up, duration=CHECK_S, say=_say):
         results.append(("heartbeat", "skipped", "listening on UDP %d for another app's packets" % port))
     elif sender.stats["heartbeats"]:
         results.append(("heartbeat", "OK", "%d sent to %s" % (
-            sender.stats["heartbeats"], sender.console or "the local network (broadcast)")))
+            sender.stats["heartbeats"], sender.console or ("the local network, address by address"
+                                                           if sender._swept else "the local network (broadcast)"))))
     else:
         results.append(("heartbeat", "FAIL", "%d failed: pass --console <PlayStation IP>. %s" % (
-            sender.heartbeat_failed, IPHONE_HINT)))
+            sender.heartbeat_failed, CONSOLE_HINT)))
     received = sender.stats["received"]
     first_t, first_n = sender.first_rx or (ended, received)
     span = ended - first_t

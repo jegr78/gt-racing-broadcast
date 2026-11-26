@@ -95,11 +95,11 @@ program can receive it. Pick the line that matches what you already run:
   port for forwarded packets. This was not tested with the sender, so prefer a second
   device.
 
-The sender finds the PlayStation by itself, except on an iPhone. There its search
-broadcast to 255.255.255.255 fails with "No route to host". An iPad was not tested.
-On an iPhone, type the PlayStation's IP address into the invite page's **PlayStation IP
-address** field right after registering, and the commands end with `--console
-<PlayStation IP>`. Wherever the sender reports "no console found", add
+The sender finds the PlayStation by itself. Where the network refuses its search
+broadcast, as on an iPhone ("No route to host"), it sends the request to every other
+address of the device's network instead (the 254 addresses that share its first three
+numbers) and takes the PlayStation that answers. Wherever
+the sender reports "no console found", add
 `--console <PlayStation IP>` to the command you have. The PlayStation's network
 settings show the address.
 
@@ -135,10 +135,10 @@ relay's certificate.
   matter), then run the Python command. Run `termux-wake-lock` first so Android does not
   pause Termux. After the race `termux-wake-unlock` in Termux releases it.
 - **iPhone (a-Shell).** Download the script with
-  `curl -o racecast-sender.py "<script link>"` and run the Python command with the
-  PlayStation's IP address in it, as described above. Without `--console` the search
-  fails with "No route to host", also with Local Network access granted, and the sender
-  says to add `--console`. An iPad was not tested. iOS runs a-Shell only in the
+  `curl -o racecast-sender.py "<script link>"` and run the Python command. a-Shell needs
+  Local Network access (iOS asks at the first start, Settings, a-Shell otherwise): the
+  sender then finds the PlayStation address by address, since iOS refuses its broadcast.
+  An iPad was not tested. iOS runs a-Shell only in the
   foreground: keep a-Shell in front and the device charging. a-Shell keeps the screen on
   while the sender runs, so Auto-Lock needs no change. The probe ran 15 minutes this way
   at 59.9 packets per second without a loss.

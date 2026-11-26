@@ -1021,8 +1021,7 @@ python3 tools/event-sim/event_sim.py --restore-obs   # macOS: put back the OBS c
   below the memory plus `e2e_safety.MEMORY_MARGIN`, and on a Mac with less memory. On local
   Linux the run's unit gets these limits (`e2e_safety.enter(..., limits=)`, carried to the
   owner watcher). Outside a verified unit (macOS, a hosted runner) a watchdog samples the
-  run's whole process tree every `WATCH_INTERVAL_S` (on macOS each process's footprint, which
-  counts compressed and swapped memory, elsewhere its resident size), walking ppid from the run, since
+  run's whole process tree every `WATCH_INTERVAL_S`, walking ppid from the run, since
   Playwright's driver, the browsers and their ffmpeg run in their own process groups. Past
   the memory limit it sends the run a SIGINT (the report gets a hard finding, the cleanup
   still quits OBS and restores its configuration) and kills the descendants when the tree is
