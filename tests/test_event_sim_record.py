@@ -388,6 +388,7 @@ def t_a_record_run_is_admitted_before_its_unit_and_gets_its_own_limits():
         record.admission = lambda: ""
         assert event_sim.main(argv) == 0 and entered[0]["limits"] == record.LIMITS, \
             "the record run's unit gets the record limits"
+        assert entered[0]["stop_pipe"], "a stop signal reaches the contained run through its stop pipe"
         event_sim.main(["--scenario", "smoke", "--out", _tmp()])
         assert "limits" not in entered[1], "a run without --record keeps the E2E unit's limits"
     finally:

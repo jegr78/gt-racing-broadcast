@@ -7,10 +7,12 @@ import http.server
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -290,7 +292,8 @@ def t_repeat_runs_each_run_in_its_own_unit_one_after_the_other():
     atexit.register(shutil.rmtree, out, True)
     entered, waited = [], []
 
-    def enter(script, argv, seconds=None, long=False):
+    def enter(script, argv, seconds=None, long=False, stop_pipe=False):
+        assert stop_pipe, "a stop signal reaches each contained run through its stop pipe"
         entered.append(argv)
         run_out = argv[argv.index("--out") + 1]
         if len(entered) == 2:
@@ -329,6 +332,30 @@ def t_repeat_runs_each_run_in_its_own_unit_one_after_the_other():
             pass  # argparse refuses it
 
 
+def t_a_stopped_repeat_set_still_summarizes_its_finished_runs():
+    scn = scenario.load(scenario.find("smoke", os.path.join(SIM, "scenarios")), REG)
+    out = tempfile.mkdtemp(prefix="event-sim-repeat-")
+    atexit.register(shutil.rmtree, out, True)
+
+    def enter(script, argv, seconds=None, long=False, stop_pipe=False):
+        run_out = argv[argv.index("--out") + 1]
+        if run_out.endswith("run-02"):
+            raise event_sim.Stopped(signal.SIGTERM)
+        report.write(run_out, {"scenario": "smoke", "description": "", "ok": True, "duration": 1.0, "pages": {},
+                               "steps": [], "findings": []})
+        return 0
+    args = event_sim.build_parser().parse_args(["--scenario", "smoke", "--out", out, "--repeat", "3"])
+    try:
+        event_sim.repeat(scn, out, args, enter=enter, wait=lambda: True)
+        raise AssertionError("a stop must end the set")
+    except event_sim.Stopped:
+        pass  # the set ends on the stop
+    with open(os.path.join(out, "summary.json"), encoding="utf-8") as fh:
+        summary = json.load(fh)
+    assert summary["counts"] == {"pass": 1, "fail": 0, "not-run": 0} and summary["meta"]["stopped"] == "SIGTERM", \
+        f"the summary holds the finished run and names the stop: {summary['counts']}, {summary['meta']}"
+
+
 def t_repeat_never_reads_an_old_report_and_needs_exit_0_for_a_pass():
     scn = scenario.load(scenario.find("smoke", os.path.join(SIM, "scenarios")), REG)
     out = tempfile.mkdtemp(prefix="event-sim-repeat-")
@@ -339,7 +366,7 @@ def t_repeat_never_reads_an_old_report_and_needs_exit_0_for_a_pass():
                        "steps": [], "findings": []})
     entered = []
 
-    def enter(script, argv, seconds=None, long=False):
+    def enter(script, argv, seconds=None, long=False, stop_pipe=False):
         entered.append(argv)
         return 3
     args = event_sim.build_parser().parse_args(["--scenario", "smoke", "--out", out, "--repeat", "2"])
@@ -347,7 +374,7 @@ def t_repeat_never_reads_an_old_report_and_needs_exit_0_for_a_pass():
         "an out dir that already holds run-02 is refused before any run: its report is not this set's"
     shutil.rmtree(old)
 
-    def crashed_after_its_report(script, argv, seconds=None, long=False):
+    def crashed_after_its_report(script, argv, seconds=None, long=False, stop_pipe=False):
         run_out = argv[argv.index("--out") + 1]
         os.makedirs(run_out)
         report.write(run_out, {"scenario": "smoke", "description": "", "ok": True, "duration": 1.0, "pages": {},
@@ -385,6 +412,326 @@ def t_a_run_owns_its_work_dir_and_names_it_in_its_out_dir():
     with event_sim.owned_work(out) as work:
         os.remove(os.path.join(out, event_sim.WORK_NOTE))
     assert not os.path.exists(work), "a note someone removed meanwhile does not break the cleanup"
+
+
+class _StopStack:
+    """stack.Stack without services; `on_start` runs in its start, `on_stop` inside the teardown."""
+    on_start = None
+    on_stop = None
+    obs_of = None
+    last = None
+
+    def __init__(self, scn, work, **_):
+        self.urls, self.token, self.stub, self.event_link = {}, None, None, None
+        self.obs = _StopStack.obs_of() if _StopStack.obs_of else None
+        self.kill_relay, self.log_checks, self.stopped = None, None, []
+        self.work = work
+        self.track_line, self.track_trace = "simulated lap", None
+        _StopStack.last = self
+
+    def start(self):
+        if _StopStack.on_start:
+            _StopStack.on_start()
+
+    def run_secrets(self):
+        return ()
+
+    def probes(self):
+        return {}
+
+    def stop(self, logs_to=None):
+        if _StopStack.on_stop:
+            _StopStack.on_stop()
+        self.stopped.append(logs_to)
+        return []
+
+
+class _QuietEngine:
+    """An engine whose run ends at once."""
+
+    def __init__(self, scn, ctx, *_, **__):
+        self.scenario, self.results, self.start = scn, {}, None
+
+    def run(self):
+        return self.data([])
+
+    def data(self, results):
+        return {"scenario": self.scenario.name, "description": "", "ok": True, "duration": 1.0, "pages": {},
+                "steps": [], "findings": []}
+
+
+class _SignalledEngine:
+    """An engine whose run receives `signum` from outside, then looks for a stop as the engine's loop does."""
+    signum = None
+
+    def __init__(self, scn, ctx, *_, interrupted=None, **__):
+        self.scenario, self.results, self.start, self.interrupted = scn, {}, None, interrupted
+
+    def run(self):
+        signal.raise_signal(_SignalledEngine.signum)
+        self.interrupted()
+        raise AssertionError("the stop signal did not end the run")
+
+    def data(self, results):
+        return {"scenario": self.scenario.name, "description": "", "ok": True, "duration": 1.0, "pages": {},
+                "steps": [], "findings": []}
+
+
+def _signalled_run(signum, on_stop=None):
+    """event_sim.run with a fake stack and engine whose run gets `signum`. -> (exc, out, stack)."""
+    scn = scenario.load(scenario.find("smoke", os.path.join(SIM, "scenarios")), REG)
+    out = tempfile.mkdtemp(prefix="event-sim-stop-")
+    atexit.register(shutil.rmtree, out, True)
+    old = stack.Stack, engine.Engine
+    stack.Stack, engine.Engine = _StopStack, _SignalledEngine
+    _SignalledEngine.signum, _StopStack.on_stop, _StopStack.last = signum, on_stop, None
+    try:
+        event_sim.run(scn, out)
+    except KeyboardInterrupt as exc:
+        return exc, out, _StopStack.last
+    finally:
+        (stack.Stack, engine.Engine), _StopStack.on_stop = old, None
+    raise AssertionError("a stopped run must not end as a normal one")
+
+
+def t_sigterm_stops_the_run_like_ctrl_c():
+    before = signal.getsignal(signal.SIGTERM)
+    exc, out, st = _signalled_run(signal.SIGTERM)
+    assert getattr(exc, "signum", None) == signal.SIGTERM, f"the stop names its signal: {exc!r}"
+    assert st.stopped == [os.path.join(out, "logs")], "the stack and its children are torn down"
+    assert not os.path.exists(st.work) and not os.path.exists(os.path.join(out, event_sim.WORK_NOTE)), \
+        "the work dir goes as on a normal stop"
+    with open(os.path.join(out, "report.json"), encoding="utf-8") as fh:
+        data = json.load(fh)
+    assert not data["ok"] and "SIGTERM" in data["findings"][0]["message"], \
+        f"the report says the run was stopped: {data['findings']}"
+    assert signal.getsignal(signal.SIGTERM) == before, "the run's handlers are gone after it"
+
+
+def t_a_second_stop_signal_does_not_cut_the_teardown_short():
+    nums = [getattr(signal, n) for n in ("SIGTERM", "SIGHUP") if hasattr(signal, n)]
+    exc, _, st = _signalled_run(nums[-1], on_stop=lambda: [signal.raise_signal(n) for n in nums])
+    assert st.stopped and exc.signum == nums[-1], "the teardown finishes despite more stop signals"
+
+
+def t_an_inherited_ignored_sigterm_still_stops_the_run():
+    old = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    try:
+        exc, _, st = _signalled_run(signal.SIGTERM)
+        assert st.stopped and exc.signum == signal.SIGTERM, "an ignored SIGTERM still stops the run"
+        assert signal.getsignal(signal.SIGTERM) is signal.SIG_IGN, "the ignored SIGTERM is restored after the run"
+    finally:
+        signal.signal(signal.SIGTERM, old)
+
+
+def t_a_sigint_a_background_start_ignored_stops_the_run_again():
+    old = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        _, _, st = _signalled_run(signal.SIGINT)
+        assert st.stopped and not os.path.exists(st.work), "Ctrl+C stops a background run and tears it down"
+        assert signal.getsignal(signal.SIGINT) is signal.SIG_IGN, "the ignored SIGINT is restored after the run"
+    finally:
+        signal.signal(signal.SIGINT, old)
+
+
+def t_the_stop_pipe_closing_stops_a_contained_run():
+    if os.name == "nt":
+        return  # no stop pipe on Windows: no unit there
+    r, w = os.pipe()
+    try:
+        with event_sim.stop_signals(stop_fd=r):
+            os.close(w)
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                time.sleep(0.05)
+        raise AssertionError("the closed stop pipe did not stop the run")
+    except event_sim.Stopped as exc:
+        assert exc.signum == signal.SIGTERM, exc
+    finally:
+        os.close(r)
+
+
+class _RealObs:
+    recording = False
+
+    def start_record(self):
+        return 0.0
+
+
+def t_a_stop_held_during_the_obs_quit_still_writes_the_report():
+    exc = None
+    scn = scenario.load(scenario.find("smoke", os.path.join(SIM, "scenarios")), REG)
+    out = tempfile.mkdtemp(prefix="event-sim-stop-")
+    atexit.register(shutil.rmtree, out, True)
+    saved = stack.Stack, engine.Engine, event_sim.record.in_unit
+    stack.Stack, engine.Engine, event_sim.record.in_unit = _StopStack, _QuietEngine, lambda *a: True
+    _StopStack.on_stop = lambda: signal.raise_signal(signal.SIGTERM)
+    _StopStack.obs_of = _RealObs
+    try:
+        event_sim.run(scn, out, record_dir=os.path.join(out, "rec"), obs="real")
+        raise AssertionError("a SIGTERM during the teardown must still stop the run")
+    except event_sim.Stopped as stop:
+        exc = stop
+    finally:
+        (stack.Stack, engine.Engine, event_sim.record.in_unit), _StopStack.on_stop, _StopStack.obs_of = saved, None, None
+    assert exc.signum == signal.SIGTERM, exc
+    assert os.path.exists(os.path.join(out, "report.json")), "the held signal waits until the report is written"
+
+
+class _ClosingBrowser:
+    """browser.Browser without Chromium; `on_close` runs as it closes."""
+    on_close = None
+
+    def __init__(self, headless=True):
+        self.closed = False
+
+    def close(self):
+        if _ClosingBrowser.on_close:
+            _ClosingBrowser.on_close()
+        self.closed = True
+
+
+def _fake_run(engine_cls=_QuietEngine, on_start=None, on_stop=None, on_close=None, **run_kw):
+    """event_sim.run on fakes. -> (its return value or the exception it raised, out, stack)."""
+    import browser
+    scn = scenario.load(scenario.find("smoke", os.path.join(SIM, "scenarios")), REG)
+    out = tempfile.mkdtemp(prefix="event-sim-stop-")
+    atexit.register(shutil.rmtree, out, True)
+    saved = stack.Stack, engine.Engine, browser.Browser
+    stack.Stack, engine.Engine, browser.Browser = _StopStack, engine_cls, _ClosingBrowser
+    _StopStack.on_start, _StopStack.on_stop, _ClosingBrowser.on_close, _StopStack.last = on_start, on_stop, on_close, None
+    try:
+        result = event_sim.run(scn, out, **run_kw)
+    except KeyboardInterrupt as exc:
+        result = exc
+    finally:
+        stack.Stack, engine.Engine, browser.Browser = saved
+        _StopStack.on_start = _StopStack.on_stop = _ClosingBrowser.on_close = None
+    return result, out, _StopStack.last
+
+
+def _report(out):
+    with open(os.path.join(out, "report.json"), encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def t_a_stop_during_the_teardown_waits_until_the_report_is_written():
+    for where in ("on_stop", "on_close"):
+        result, out, st = _fake_run(**{where: lambda: signal.raise_signal(signal.SIGTERM)})
+        assert getattr(result, "signum", None) == signal.SIGTERM, f"{where}: the stop still ends the run: {result!r}"
+        assert st.stopped and not os.path.exists(st.work), f"{where}: the teardown finishes"
+        data = _report(out)
+        assert not data["ok"] and any("SIGTERM" in f["message"] for f in data["findings"]), \
+            f"{where}: the report names the stop: {data['findings']}"
+
+
+def t_a_stop_while_the_stack_starts_tears_down_and_writes_a_report():
+    result, out, st = _fake_run(on_start=lambda: signal.raise_signal(signal.SIGTERM))
+    assert getattr(result, "signum", None) == signal.SIGTERM, result
+    assert st.stopped and not os.path.exists(st.work), "the half-started stack is torn down"
+    data = _report(out)
+    assert not data["ok"] and "SIGTERM" in data["findings"][0]["message"], data["findings"]
+
+
+class _Unwritable:
+    """A stream on a hung-up terminal."""
+
+    def write(self, _text):
+        raise OSError(5, "Input/output error")
+
+    def flush(self):
+        raise OSError(5, "Input/output error")
+
+
+def t_a_hung_up_terminal_does_not_change_the_exit_code():
+    old = sys.stdout, sys.stderr
+    sys.stdout = sys.stderr = _Unwritable()
+    try:
+        result, out, _ = _fake_run()
+    finally:
+        sys.stdout, sys.stderr = old
+    assert result == 0, f"a passing run still exits 0 when its console is gone: {result!r}"
+    old_run, old_enter = event_sim.run, event_sim.e2e_safety.enter
+
+    def stopped(*_, **__):
+        raise event_sim.Stopped(signal.SIGTERM)
+    try:
+        event_sim.run, event_sim.e2e_safety.enter = stopped, lambda *a, **kw: None
+        sys.stdout = sys.stderr = _Unwritable()
+        code = event_sim.main(["--scenario", "smoke", "--out", out])
+    finally:
+        sys.stdout, sys.stderr = old
+        event_sim.run, event_sim.e2e_safety.enter = old_run, old_enter
+    assert code == 128 + signal.SIGTERM, f"a stop still ends with 143 when its console is gone, not {code}"
+
+
+class _BlockingCallEngine:
+    """An engine inside a blocking browser call when the stops arrive. Like sync Playwright's
+    dispatcher greenlet, the call breaks for good if a signal handler raises inside it."""
+    broke = None
+
+    def __init__(self, scn, ctx, *_, interrupted=None, **__):
+        self.scenario, self.results, self.start, self.interrupted = scn, {}, None, interrupted
+
+    def run(self):
+        try:
+            for num in (signal.SIGTERM, signal.SIGINT, signal.SIGTERM):
+                signal.raise_signal(num)
+        except BaseException as exc:
+            _BlockingCallEngine.broke = exc
+            raise
+        for _ in range(200):
+            self.interrupted()
+            time.sleep(0.01)
+        raise AssertionError("the engine never saw the stop")
+
+    def data(self, results):
+        return _QuietEngine.data(self, results)
+
+
+def t_a_stop_during_a_browser_call_is_raised_from_the_engine_not_inside_the_call():
+    _BlockingCallEngine.broke = None
+    result, out, st = _fake_run(engine_cls=_BlockingCallEngine)
+    assert _BlockingCallEngine.broke is None, \
+        f"a signal handler must not raise inside a browser call: {_BlockingCallEngine.broke!r}"
+    assert getattr(result, "signum", None) == signal.SIGTERM, f"the first stop ends the run: {result!r}"
+    assert st.stopped and not os.path.exists(st.work), "the run is torn down"
+    assert "SIGTERM" in _report(out)["findings"][0]["message"], "the report names the stop"
+
+
+def t_the_engine_sees_a_stop_between_steps_and_inside_its_waits():
+    waiting = [{"id": "w", "role": "rec", "do": "go", "expect": ["box.value == 1"], "timeout": "30s"}]
+    later = [{"id": "late", "role": "rec", "do": "go", "at": "2m"}]
+    for steps in (waiting, later):
+        clock, ctx = Clock(), engine.RunContext()
+        ctx.box = Box()
+
+        def interrupted(clock=clock):
+            if clock() - 1000 >= 5:
+                raise event_sim.Stopped(signal.SIGTERM)
+        eng = engine.Engine(_scn(steps), ctx, {"box": ctx.box}, registry=_reg(), clock=clock, sleep=clock.sleep,
+                            interrupted=interrupted)
+        try:
+            eng.run()
+            raise AssertionError(f"{steps[0]['id']}: the engine ran on after the stop")
+        except event_sim.Stopped:
+            pass  # raised from the engine's own loop
+        assert clock() - 1000 < 6, f"{steps[0]['id']}: the stop is seen within a poll, not after {clock() - 1000:g}s"
+
+
+def t_main_exits_non_zero_on_a_stop_signal():
+    old_run, old_enter = event_sim.run, event_sim.e2e_safety.enter
+    out = tempfile.mkdtemp(prefix="event-sim-stop-")
+    atexit.register(shutil.rmtree, out, True)
+
+    def stopped(*_, **__):
+        raise event_sim.Stopped(signal.SIGTERM)
+    try:
+        event_sim.run, event_sim.e2e_safety.enter = stopped, lambda *a, **kw: None
+        code = event_sim.main(["--scenario", "smoke", "--out", out])
+    finally:
+        event_sim.run, event_sim.e2e_safety.enter = old_run, old_enter
+    assert code == 128 + signal.SIGTERM, f"a SIGTERM ends the run with 143, not {code}"
 
 
 # -- expect ----------------------------------------------------------------------

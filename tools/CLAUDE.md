@@ -564,7 +564,16 @@ regional apt mirror and fails within its time limit instead of hanging.
 Runs a scenario against the fakes above plus the real relay and Control Center, and writes
 `OUT/report.html`, `OUT/report.json`, `OUT/shots/` and `OUT/logs/` (spec
 `docs/superpowers/specs/2026-11-21-event-simulation-design.md`). Exit 0: no hard finding;
-1: a hard finding; 2: the scenario or the stack did not start. Not in `tools/run-tests.py`;
+1: a hard finding; 2: the scenario or the stack did not start. Ctrl+C, SIGTERM and SIGHUP
+(unless nohup ignores it) stop a run the same way: teardown, work dir removed, the report so
+far, exit 128 plus the signal. SIGTERM and a SIGINT that a background start ignored are
+handled again. While the engine runs, a signal is only recorded (raising inside a sync
+Playwright call breaks its dispatcher); the engine raises it between steps and in its waits,
+within a poll. On local Linux the caller forwards them to the contained run through its stdin
+(`e2e_safety.enter(..., stop_pipe=True)`) and waits up to `STOP_GRACE_SECONDS` for its
+teardown (a second signal ends that wait). A signal during the teardown waits until the report
+is written; a stop while the stack starts still writes one, and a stopped `--repeat` set still
+writes its summary. Not in `tools/run-tests.py`;
 `tests/test_event_sim_engine.py` covers the engine with in-process fakes and a fake clock.
 Each page role's last JS heap, DOM node and event listener counts (Chromium's Performance
 metrics, also `page(role)`'s `heap_mb`, `dom_nodes`, `listeners`) go into the report's

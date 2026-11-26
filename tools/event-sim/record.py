@@ -459,15 +459,16 @@ def descendants(rows, root, known):
 
 @contextlib.contextmanager
 def deferred_signals(names=("SIGINT", "SIGTERM", "SIGHUP")):
-    """Hold SIGINT, SIGTERM and SIGHUP while the block runs (quitting OBS and restoring the
-    user's configuration must not be cut short), then deliver them to the handlers before."""
+    """Hold SIGINT, SIGTERM and SIGHUP while the block runs (a teardown, quitting OBS and
+    restoring the user's configuration must not be cut short), then deliver them to the
+    handlers before. Yields the held signal numbers; an ignored signal stays ignored."""
     held, old = [], {}
     for name in names:
         num = getattr(signal, name, None)
-        if num is not None:
+        if num is not None and signal.getsignal(num) is not signal.SIG_IGN:
             old[num] = signal.signal(num, lambda n, f: held.append(n))
     try:
-        yield
+        yield held
     finally:
         for num, handler in old.items():
             signal.signal(num, handler)

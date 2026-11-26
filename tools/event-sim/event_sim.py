@@ -7,18 +7,21 @@ Stands up the simulated Sheet, webhook sink, stream stub and OBS, then the relay
 the Control Center in simulation mode on the demo profile, runs the scenario's steps
 and writes DIR/report.html, DIR/report.json, DIR/shots/ and DIR/logs/. Exit code 0:
 every hard check passed; 1: a hard failure; 2: the scenario or the stack could not
-start. `--check` only loads and validates the scenario. `--repeat N` runs it N times, one
-contained run after the other, and writes DIR/summary.html and DIR/summary.json over
-DIR/run-NN/ (tools/CLAUDE.md, hunting a flake). Maintainer tool, not shipped."""
+start. Ctrl+C, SIGTERM or SIGHUP stop the run, tear the stack down, write the report so
+far and exit 128 plus the signal number. `--check` only loads and validates the scenario.
+`--repeat N` runs it N times, one contained run after the other, and writes
+DIR/summary.html and DIR/summary.json over DIR/run-NN/ (tools/CLAUDE.md, hunting a flake). Maintainer tool, not shipped."""
 import argparse
 import contextlib
 import dataclasses
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -31,6 +34,7 @@ import e2e_safety  # noqa: E402
 import flake  # noqa: E402
 import logsetup  # noqa: E402
 import record  # noqa: E402
+import redaction  # noqa: E402
 import roles  # noqa: E402
 import scenario  # noqa: E402
 import stack  # noqa: E402
@@ -39,6 +43,7 @@ SCENARIOS = os.path.join(HERE, "scenarios")
 MAX_REPEAT = 50
 WORK_NOTE = "work-dir.txt"   # names the run's own work dir while it exists
 TRACES = ("off", "fail", "all")
+STOP_SIGNALS = ("SIGTERM", "SIGHUP")   # no SIGHUP on Windows
 
 
 def setup_meta(load, trace, st):
@@ -87,6 +92,74 @@ def build_parser():
     return ap
 
 
+Stopped = e2e_safety.Stopped
+
+
+def _watch_stop_pipe(fd, active):
+    """SIGTERM to this process once `fd` (the contained run's stop pipe) reaches EOF."""
+    try:
+        while os.read(fd, 1024):
+            pass
+    except OSError:
+        pass  # a broken pipe is an EOF too
+    if active.is_set():
+        os.kill(os.getpid(), signal.SIGTERM)
+
+
+class Stopper:
+    """The run's stop signal. Outside `deferred()` the first one raises Stopped at once; inside,
+    the handler only records it (raising inside a sync Playwright call kills its dispatcher)
+    and `check()` raises it from the run's own code. Later signals are ignored: they must not
+    cut the teardown short."""
+
+    def __init__(self):
+        self.signum, self.polling = None, False
+
+    def handle(self, signum, _frame):
+        if self.signum is not None:
+            return
+        self.signum = signum
+        if not self.polling:
+            raise Stopped(signum)
+
+    def check(self):
+        if self.signum is not None:
+            raise Stopped(self.signum)
+
+    @contextlib.contextmanager
+    def deferred(self):
+        self.polling = True
+        try:
+            yield
+        finally:
+            self.polling = False
+
+
+@contextlib.contextmanager
+def stop_signals(stop_fd=None):
+    """While the block runs, SIGTERM, SIGHUP (unless nohup ignored it) and SIGINT, even one a
+    background start ignored, go to the yielded Stopper. EOF on `stop_fd` counts as a SIGTERM.
+    The handlers before are restored at the end."""
+    stopper = Stopper()
+    if threading.current_thread() is not threading.main_thread():
+        yield stopper
+        return
+    old, active = {}, threading.Event()
+    for name in (*STOP_SIGNALS, "SIGINT"):
+        num = getattr(signal, name, None)
+        if num is not None and (name != "SIGHUP" or signal.getsignal(num) is not signal.SIG_IGN):
+            old[num] = signal.signal(num, stopper.handle)
+    active.set()
+    if stop_fd is not None:
+        threading.Thread(target=_watch_stop_pipe, args=(stop_fd, active), daemon=True, name="stop-pipe").start()
+    try:
+        yield stopper
+    finally:
+        active.clear()
+        for num, handler in old.items():
+            signal.signal(num, handler)
+
+
 @contextlib.contextmanager
 def owned_work(out, keep=False):
     """The run's own work dir: named in OUT/work-dir.txt while it exists, so a run that
@@ -126,13 +199,44 @@ def owned_work(out, keep=False):
 
 def run(scn, out, keep_work=False, headed=False, no_skips=False, trace="off", load=None, record_dir=None,
         obs="sim"):
-    with owned_work(out, keep=keep_work) as work:
+    stop_fd = 0 if os.environ.get(e2e_safety.STOP_PIPE_ENV) == "1" else None
+    with stop_signals(stop_fd) as stopper, owned_work(out, keep=keep_work) as work:
         return _run(scn, out, work, no_skips=no_skips, headed=headed, trace=trace, load=load,
-                    record_dir=record_dir, obs=obs)
+                    record_dir=record_dir, obs=obs, stopper=stopper)
 
 
 def _unchanged(value):
     return value
+
+
+def _say(text, err=False):
+    """Print `text`; a console that is gone (a hung-up terminal) must not change the outcome."""
+    try:
+        print(text, file=sys.stderr if err else sys.stdout, flush=True)
+    except OSError:
+        pass  # nobody is left to read it
+
+
+def _stop_name(exc):
+    return str(exc) if isinstance(exc, Stopped) else "SIGINT"
+
+
+def _bare_data(scn):
+    """The report data of a run whose engine never ran."""
+    return {"scenario": scn.name, "description": scn.description, "ok": False, "duration": 0.0, "steps": [],
+            "pages": {}, "findings": []}
+
+
+def _interrupted(data, exc, dog):
+    """`data` with why the run was interrupted as its first hard finding. -> (data, the stop to
+    raise once the report is written, or None for the record watchdog's own interrupt)."""
+    data["ok"] = False
+    if dog is not None and dog.reason:
+        reason, stop = dog.reason, None
+    else:
+        reason, stop = f"the run was stopped by {_stop_name(exc)}", exc
+    data["findings"].insert(0, {"severity": "hard", "role": "", "step": "", "message": reason})
+    return data, stop
 
 
 def write_timeline(rec, eng, scrub):
@@ -143,7 +247,8 @@ def write_timeline(rec, eng, scrub):
     return rec.write(scrub(rec.timeline(eng.scenario, steps, eng.start)))
 
 
-def _run(scn, out, work, headed=False, no_skips=False, trace="off", load=None, record_dir=None, obs="sim"):
+def _run(scn, out, work, headed=False, no_skips=False, trace="off", load=None, record_dir=None, obs="sim",
+         stopper=None):
     import browser
     import engine
     import report
@@ -155,6 +260,8 @@ def _run(scn, out, work, headed=False, no_skips=False, trace="off", load=None, r
     br = browser.Browser(headless=not headed)
     busy = flake.Load(flake.parse_load(load)[1]) if load else None
     data = None
+    stopped = None
+    ctx = None
     try:
         try:
             st.start()
@@ -163,9 +270,9 @@ def _run(scn, out, work, headed=False, no_skips=False, trace="off", load=None, r
                 rec.program_started(None, size=dict(zip(("width", "height"), stack.obs_real.CANVAS, strict=True)),
                                     at=at)
         except Exception as exc:
-            print(f"event-sim: the stack did not start: {exc}", file=sys.stderr)
+            _say(f"event-sim: the stack did not start: {exc}", err=True)
             return 2
-        print(f"event-sim: track line: {st.track_line}")
+        _say(f"event-sim: track line: {st.track_line}")
         if busy:
             busy.start(work, stack.lifetime(scn))
         ctx = engine.RunContext(urls=st.urls, token=st.token, stub=st.stub, obs=st.obs,
@@ -174,65 +281,70 @@ def _run(scn, out, work, headed=False, no_skips=False, trace="off", load=None, r
                                 track_trace=st.track_trace)
         eng = engine.Engine(scn, ctx, st.probes(), registry=roles.default_registry(),
                             shots_dir=os.path.join(out, "shots"), final_checks=[st.log_checks],
-                            no_skips=no_skips, traces_dir=os.path.join(out, "traces"))
+                            no_skips=no_skips, traces_dir=os.path.join(out, "traces"),
+                            interrupted=stopper.check if stopper else None)
         try:
-            data = eng.run()
-        except KeyboardInterrupt:
-            if dog is None or not dog.reason:
-                raise
-            data = eng.data(list(eng.results.values()))
-            data["ok"] = False
-            data["findings"].insert(0, {"severity": "hard", "role": "", "step": "", "message": dog.reason})
+            with stopper.deferred() if stopper else contextlib.nullcontext():
+                data = eng.run()
+            if stopper:
+                stopper.check()     # a stop after the engine's last look
+        except KeyboardInterrupt as exc:
+            data, stopped = _interrupted(eng.data(list(eng.results.values())), exc, dog)
         except Exception:
             data = eng.data([r for r in eng.results.values()])
             data["ok"] = False
             data["findings"].insert(0, {"severity": "hard", "role": "", "step": "",
                                         "message": ctx.scrub("engine error: " + traceback.format_exc(limit=3))})
-    except KeyboardInterrupt:
-        if dog is None or not dog.reason:
-            raise
-        print(f"event-sim: {dog.reason}", file=sys.stderr)
-        return 1
+    except KeyboardInterrupt as exc:     # before the engine ran: while the stack started
+        data, stopped = _interrupted(_bare_data(scn), exc, dog)
     finally:
-        if dog is not None:
-            dog.disarm()
-        br.close()          # closing the contexts finishes the page videos
-        problems = []
-        if obs == "real" and getattr(st.obs, "recording", False):
+        # A stop signal now waits until the teardown and the report are done, OBS's quit included.
+        with record.deferred_signals() as held:
+            if dog is not None:
+                dog.disarm()
+            br.close()          # closing the contexts finishes the page videos
+            problems = []
+            if obs == "real" and getattr(st.obs, "recording", False):
+                try:
+                    rec.program_file(st.obs.stop_record())
+                except Exception as exc:  # noqa: BLE001  OBS still quits with the stack
+                    problems.append(f"OBS recording stop: {type(exc).__name__}: {exc}")
             try:
-                rec.program_file(st.obs.stop_record())
-            except Exception as exc:  # noqa: BLE001  OBS still quits with the stack
-                problems.append(f"OBS recording stop: {type(exc).__name__}: {exc}")
-        try:
-            write_timeline(rec, eng, ctx.scrub if eng is not None else _unchanged)
-        except Exception as exc:  # noqa: BLE001  the stack still stops and the report is still written
-            problems.append(f"timeline: {type(exc).__name__}: {exc}")
-        try:
-            problems += busy.stop() if busy else []
-        except Exception as exc:  # noqa: BLE001  the stack still stops and the report is still written
-            problems.append(f"load workers: {type(exc).__name__}: {exc}")
-        with record.deferred_signals() if obs == "real" else contextlib.nullcontext():
+                write_timeline(rec, eng, ctx.scrub if eng is not None else _unchanged)
+            except Exception as exc:  # noqa: BLE001  the stack still stops and the report is still written
+                problems.append(f"timeline: {type(exc).__name__}: {exc}")
+            try:
+                problems += busy.stop() if busy else []
+            except Exception as exc:  # noqa: BLE001  the stack still stops and the report is still written
+                problems.append(f"load workers: {type(exc).__name__}: {exc}")
             problems += st.stop(logs_to=os.path.join(out, "logs"))
-        for p in problems:
-            if "--restore-obs" in p:
-                print(f"event-sim: {p}", file=sys.stderr)
-        if data is not None:
-            data["setup"] = setup_meta(load, trace, st)
+            if held and stopped is None and data is not None:
+                data["ok"] = False
+                data["findings"].insert(0, {"severity": "hard", "role": "", "step": "", "message":
+                                            f"the run was stopped by {signal.Signals(held[0]).name} during its teardown"})
+            if data is not None:
+                scrub = ctx.scrub if ctx is not None else redaction.scrub
+                data["setup"] = setup_meta(load, trace, st)
+                for p in problems:
+                    data["findings"].append({"severity": "soft", "role": "", "step": "", "message": scrub(p)})
+                report.write(out, data)
             for p in problems:
-                data["findings"].append({"severity": "soft", "role": "", "step": "", "message": ctx.scrub(p)})
-            report.write(out, data)
-        if dog is not None:
-            dog.stop()
+                if "--restore-obs" in p:
+                    _say(f"event-sim: {p}", err=True)
+            if dog is not None:
+                dog.stop()
     hard = [f for f in data["findings"] if f["severity"] == "hard"]
     soft = [f for f in data["findings"] if f["severity"] == "soft"]
     for s in data["steps"]:
-        print(f"  {s['status']:<8} {s['id']:<24} {s['role']}.{s['do']}" + (f"  {s['error']}" if s["error"] else ""))
+        _say(f"  {s['status']:<8} {s['id']:<24} {s['role']}.{s['do']}" + (f"  {s['error']}" if s["error"] else ""))
     for f in hard:
-        print(f"  HARD  {f.get('step') or f.get('role') or 'run'}: {f['message']}")
+        _say(f"  HARD  {f.get('step') or f.get('role') or 'run'}: {f['message']}")
     skipped = sum(1 for s in data["steps"] if s["status"] == "skipped")
-    print(f"event-sim: {scn.name} {'PASS' if data['ok'] else 'FAIL'}: {len(data['steps'])} steps "
+    _say(f"event-sim: {scn.name} {'PASS' if data['ok'] else 'FAIL'}: {len(data['steps'])} steps "
           f"({skipped} skipped), {len(hard)} hard, {len(soft)} soft findings; "
           f"report {os.path.join(out, 'report.html')}")
+    if stopped is not None:
+        raise stopped
     return 0 if data["ok"] else 1
 
 
@@ -261,7 +373,26 @@ def repeat(scn, out, args, enter=e2e_safety.enter, wait=flake.wait_for_unit):
     if taken:
         print(f"event-sim: {out} already holds {', '.join(taken)}; use a fresh --out", file=sys.stderr)
         return 2
-    runs = []
+    runs, stop = [], None
+    try:
+        _repeat_runs(scn, out, args, enter, wait, runs)
+    except KeyboardInterrupt as exc:     # the finished runs still get their summary
+        stop = exc
+    summary = flake.summarize(runs)
+    meta = {"scenario": scn.name, "runs": args.repeat, "load": args.load, "trace": args.trace,
+            "no_skips": args.no_skips, "sha": _sha(), "stopped": _stop_name(stop) if stop else None}
+    path = flake.write(out, summary, meta)
+    _say(f"event-sim: {scn.name} x{args.repeat}: {summary['counts']}; summary {path}")
+    for sid, d in summary["steps"].items():
+        if d["failed"]:
+            _say(f"  {sid}: failed {d['failed']}x")
+    if stop is not None:
+        raise stop
+    return 0 if summary["counts"]["pass"] == args.repeat else 1
+
+
+def _repeat_runs(scn, out, args, enter, wait, runs):
+    """The runs of `repeat`, each appended to `runs` as it ends."""
     for i in range(1, args.repeat + 1):
         run_out = os.path.join(out, f"run-{i:02d}")
         if not wait():
@@ -270,7 +401,7 @@ def repeat(scn, out, args, enter=e2e_safety.enter, wait=flake.wait_for_unit):
             continue
         argv = _run_argv(scn, run_out, args)
         try:
-            code = enter(__file__, argv, seconds=stack.lifetime(scn), long=True)
+            code = enter(__file__, argv, seconds=stack.lifetime(scn), long=True, stop_pipe=True)
         except RuntimeError as exc:      # the admission refused it, e.g. host memory pressure
             print(f"event-sim: run {i}: not started: {exc}", file=sys.stderr)
             runs.append({"run": i, "code": None, "report": None})
@@ -284,17 +415,8 @@ def repeat(scn, out, args, enter=e2e_safety.enter, wait=flake.wait_for_unit):
         except (OSError, ValueError):
             data = None
         runs.append({"run": i, "code": code, "report": data})
-        print(f"event-sim: run {i}/{args.repeat}: "
-              f"{'no report' if data is None else ('PASS' if data.get('ok') and code == 0 else 'FAIL')} (exit {code})")
-    summary = flake.summarize(runs)
-    meta = {"scenario": scn.name, "runs": args.repeat, "load": args.load, "trace": args.trace,
-            "no_skips": args.no_skips, "sha": _sha()}
-    path = flake.write(out, summary, meta)
-    print(f"event-sim: {scn.name} x{args.repeat}: {summary['counts']}; summary {path}")
-    for sid, d in summary["steps"].items():
-        if d["failed"]:
-            print(f"  {sid}: failed {d['failed']}x")
-    return 0 if summary["counts"]["pass"] == args.repeat else 1
+        _say(f"event-sim: run {i}/{args.repeat}: "
+             f"{'no report' if data is None else ('PASS' if data.get('ok') and code == 0 else 'FAIL')} (exit {code})")
 
 
 def main(argv=None):
@@ -326,6 +448,14 @@ def main(argv=None):
     if args.repeat and args.record:
         print("event-sim: --record makes one recording, not --repeat runs", file=sys.stderr)
         return 2
+    try:
+        return _start(scn, out, args)
+    except KeyboardInterrupt as exc:
+        _say(f"event-sim: stopped by {_stop_name(exc)}", err=True)
+        return 128 + getattr(exc, "signum", signal.SIGINT)
+
+
+def _start(scn, out, args):
     if args.repeat:
         return repeat(scn, out, args)
     if args.record:
@@ -336,7 +466,7 @@ def main(argv=None):
     # The contained run starts in tools/, so it gets absolute paths.
     try:
         contained = e2e_safety.enter(__file__, _run_argv(scn, out, args), seconds=stack.lifetime(scn), long=True,
-                                     **({"limits": record.LIMITS} if args.record else {}))
+                                     stop_pipe=True, **({"limits": record.LIMITS} if args.record else {}))
     except RuntimeError as exc:          # no containment, or the host under memory pressure
         print(f"event-sim: not started: {exc}", file=sys.stderr)
         return 2
