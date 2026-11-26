@@ -1145,18 +1145,18 @@ def desk_button(page, label, route, says, cls="msg", armed=True):
 
 def t_a_control_the_page_renders_anew_is_found_again():
     role, page, _ = desk()
-    key = desk_button(page, "Final lap", "/drivers/race/final-lap", "Final lap")
+    key = desk_button(page, "Final lap", "/drivers/race/final-lap", "Final lap", armed=False)
     page.els[key].rerenders = 2
     assert role.do("final_lap", {}) == {"status": "Final lap"}, "the desk re-renders a row between find and click"
     page.els[key].rerenders = 10 ** 6
     fails(lambda: role.do("final_lap", {}), "not attached")
 
 
-def t_an_armed_desk_button_is_confirmed_with_a_second_click():
+def t_final_lap_is_one_click_and_an_armed_button_two():
     role, page, _ = desk()
-    key = desk_button(page, "Final lap", "/drivers/race/final-lap", "Final lap")
+    key = desk_button(page, "Final lap", "/drivers/race/final-lap", "Final lap", armed=False)
     assert role.do("final_lap", {}) == {"status": "Final lap"}
-    assert page.clicks == [key, key], "arm, then confirm"
+    assert page.clicks == [key], f"Final lap is one click: {page.clicks}"
     desk_button(page, "Finish", "/drivers/race/finish", "Race finished")
     desk_button(page, "Restart released", "/drivers/race/release", "Restart released")
     assert role.do("finish", {}) == {"status": "Race finished"}
@@ -1170,7 +1170,7 @@ def t_an_error_on_the_desks_status_line_fails_the_step():
     desk_button(page, "RED FLAG", "/red-flag", "RED FLAG: banner, cover and race held")
     assert role.do("red_flag", {})["status"].startswith("RED FLAG")
     assert role.page()["status_error"] is False
-    desk_button(page, "Final lap", "/drivers/race/final-lap", "Something else")
+    desk_button(page, "Final lap", "/drivers/race/final-lap", "Something else", armed=False)
     fails(lambda: role.do("final_lap", {}), "Something else", "not 'Final lap'")
 
 
@@ -1182,10 +1182,6 @@ def t_the_desks_line_of_the_action_before_is_not_this_actions_result():
     el = page.add(key, text="Final lap")
 
     def click():
-        if el.text == "Final lap":
-            el.text = "Confirm Final lap"
-            return
-        el.text = "Final lap"
         page.respond("/console/race-control/drivers/race/final-lap")
         page.after(0.3, lambda: (setattr(status, "text", "Final lap"), status.attrs.update({"class": "msg"})))
     el.on_click = click

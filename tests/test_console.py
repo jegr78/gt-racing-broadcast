@@ -642,6 +642,13 @@ def t_the_desk_arms_one_button_at_a_time():
     assert got["expired"] == [["Reject", False], ["Reject", False]], f"the timer disarms the rebuilt button: {got}"
 
 
+def t_final_lap_takes_one_click_and_finish_keeps_its_confirm():
+    with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
+        desk = fh.read()
+    assert 'button("Final lap", "warn", null, ' in desk, "Final lap only signals the last lap, one click sends it"
+    assert 'button("Finish", "warn", "finish", ' in desk, "Finish still asks for the second click"
+
+
 def t_the_desk_offers_a_lap_count_per_slower_class():
     with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
         desk = fh.read()
