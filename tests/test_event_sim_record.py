@@ -457,8 +457,25 @@ def t_the_pictures_need_stock_ffmpeg_filters_and_playwright_but_no_drawtext():
 
 def t_ps_rows_reads_pid_ppid_rss_and_start():
     out = "  100     1  2048 Wed Nov 25 09:00:00 2026\n  bad line\n  101   100     4 Wed Nov 25 09:00:01 2026\n"
-    rows = record.ps_rows(run=lambda argv, **kw: SimpleNamespace(stdout=out))
+    rows = record.ps_rows(run=lambda argv, **kw: SimpleNamespace(stdout=out), footprint=lambda pid: None)
     assert rows == [(100, 1, 2 * MiB, "Wed Nov 25 09:00:00 2026"), (101, 100, 4096, "Wed Nov 25 09:00:01 2026")], rows
+
+
+def t_ps_rows_counts_a_process_by_its_footprint_where_the_system_has_one():
+    out = "  100     1  2048 Wed Nov 25 09:00:00 2026\n  101   100     4 Wed Nov 25 09:00:01 2026\n"
+    footprints = {101: 3 * 1024 * MiB}
+    rows = record.ps_rows(run=lambda argv, **kw: SimpleNamespace(stdout=out), footprint=footprints.get)
+    assert [r[2] for r in rows] == [2 * MiB, 3 * 1024 * MiB], \
+        f"memory swapped or compressed out of RAM counts too, resident size only without a footprint: {rows}"
+
+
+def t_the_footprint_reader_answers_a_number_or_none():
+    got = record.phys_footprint(os.getpid())
+    if sys.platform == "darwin":
+        assert isinstance(got, int) and got > 0, f"macOS reports this process's footprint: {got!r}"
+    else:
+        assert got is None, f"no footprint off macOS: {got!r}"
+    assert record.phys_footprint(2 ** 31 - 2) is None, "a pid that does not exist has no footprint"
 
 
 def t_signals_during_the_obs_quit_and_restore_wait_until_it_finished():
