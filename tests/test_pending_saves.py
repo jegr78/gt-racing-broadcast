@@ -89,6 +89,20 @@ def t_reconcile_releases_confirmed_when_sheet_matches():
     assert len(s) == 0
 
 
+def t_a_laps_save_waits_for_the_sheets_laps_cell():
+    s, _c = _store()
+    s.put("schedule", 3, {"laps": "12"})
+    assert s.next_job() == ("schedule", 3, {"laps": "12"}, 1), "laps is a schedule field"
+    s.done("schedule", 3, 1, ok=True)
+    assert s.reconcile("schedule", {3: ("https://youtu.be/a", "JeGr", "", "14")}) == [], \
+        "the sheet still shows the old count"
+    assert s.reconcile("schedule", {3: ("https://youtu.be/a", "JeGr", "", "12")}) == [3]
+    s.put("qualifying", 2, {"url": "https://youtu.be/q"})
+    j = s.next_job(); s.done(j[0], j[1], j[3], ok=True)
+    assert s.reconcile("qualifying", {2: ("https://youtu.be/q", "", "")}) == [2], \
+        "a source without a laps cell still compares its three fields"
+
+
 def t_reconcile_never_releases_saving_or_local():
     s, _c = _store()
     s.put("schedule", 3, {"url": "https://youtu.be/a"})

@@ -2765,6 +2765,9 @@ def post_webhook(url, payload, timeout=10):
 
 WEBHOOK_OUTDATED_ERROR = ("webhook script outdated (no action echo). Redeploy "
                           "the v2 script (wiki: Sheet-Webhook)")
+WEBHOOK_LAPS_OUTDATED_ERROR = ("webhook script outdated: writing the Schedule Laps cell needs "
+                               "the v8 script (wiki: Sheet-Webhook)")
+WEBHOOK_LAPS_VERSION = 8
 
 
 def check_webhook_response(body, expected_action=None):
@@ -2808,10 +2811,19 @@ POV_SHEET_ROW = 2     # the Apps Script writes the POV tab's row 2 (writePov)
 WEBHOOK_SLOW_S = 5.0
 
 
+def _webhook_version(body):
+    """The script version a webhook answer names, 0 when it names none."""
+    try:
+        v = json.loads((body or b"{}").decode("utf-8", "replace")).get("v")
+    except (ValueError, AttributeError):
+        return 0
+    return v if type(v) is int else 0
+
+
 def webhook_error_permanent(err):
     """True iff *err* is the permanent 'script outdated' config error (never retry).
     Any other non-ok error (a transient 'did not confirm') is retryable. Pure."""
-    return err == WEBHOOK_OUTDATED_ERROR
+    return err in (WEBHOOK_OUTDATED_ERROR, WEBHOOK_LAPS_OUTDATED_ERROR)
 
 
 def _mask_webhook(text, url):
@@ -7750,6 +7762,20 @@ class ScheduleSource:
         with self.lock:
             return self.laps.get(self.rows[-1][3]) if self.rows else None
 
+    def laps_at(self, idx):
+        """The lap count of schedule row `idx` (0-based), a desk save first, or None."""
+        with self.lock:
+            return self.laps.get(self.rows[idx][3]) if 0 <= idx < len(self.rows) else None
+
+    def stint_laps(self):
+        """Each stint's sheet row, label, lap count and the sync state of a desk save."""
+        with self.lock:
+            rows = list(self.rows)
+            laps = dict(self.laps)
+        states = self.sync_states()
+        return [{"row": line, "stint": stint, "laps": laps.get(line),
+                 "sync": states.get(line, (None, None))[0]} for _u, _n, stint, line in rows]
+
     @staticmethod
     def _parse_csv(text):
         """URL-only wrapper around _parse_rows; kept for the URL-list callers/tests."""
@@ -7786,8 +7812,9 @@ class ScheduleSource:
                 self.last_ok = time.time()
                 self.last_error = None
                 if self._pending is not None:
+                    laps = self.laps
                     self._pending.reconcile(self._pending_target,
-                                            {l: (u, n, s) for u, n, s, l in rows})
+                                            {l: (u, n, s, str(laps.get(l, ""))) for u, n, s, l in rows})
                     self._apply_pending_locked()
             try:
                 with open(self.cache_path, "w", encoding="utf-8") as fh:
@@ -7875,8 +7902,14 @@ class ScheduleSource:
         if self._pending is None:
             return
         for row, fields in self._pending.overlay(self._pending_target).items():
-            self._merge_row_locked(row, fields.get("url"), fields.get("name"),
-                                   fields.get("stint"))
+            if "laps" in fields:
+                if fields["laps"]:
+                    self.laps[row] = int(fields["laps"])
+                else:
+                    self.laps.pop(row, None)
+            if fields.keys() - {"laps"}:
+                self._merge_row_locked(row, fields.get("url"), fields.get("name"),
+                                       fields.get("stint"))
 
     def apply_pending(self):
         with self.lock:
@@ -8474,10 +8507,12 @@ class SetupControl(PushHealth):
 
     def _save_push(self, payload, expected_action):
         """One async-save push: the long attempt, NOT the panel lock's 30 s."""
-        ok, err, _body = push_webhook_retrying(
+        ok, err, body = push_webhook_retrying(
             self.push_url, payload, expected_action,
             timeout=WEBHOOK_ASYNC_SAVE_TIMEOUT_S, attempts=WEBHOOK_ASYNC_SAVE_ATTEMPTS,
             budget_s=WEBHOOK_ASYNC_SAVE_BUDGET_S)
+        if ok and "laps" in payload and _webhook_version(body) < WEBHOOK_LAPS_VERSION:
+            return False, WEBHOOK_LAPS_OUTDATED_ERROR
         return ok, err
 
     def _queue_save(self, target, row, fields):
@@ -8705,6 +8740,19 @@ class SetupControl(PushHealth):
     def schedule_set(self, row, url=None, name=None, stint=None):
         """Write a race Schedule row (the default tab)."""
         return self._schedule_write(row, url, name, stint, tab=None)
+
+    def schedule_laps(self, row, laps):
+        """Set the lap count of a race Schedule row's stint lobby, or clear it with None:
+        live in the relay at once, written to the `Laps` cell in the background."""
+        if not self.push_url:
+            return {"error": "webhook not configured: set RACECAST_SHEET_PUSH_URL "
+                             "in the active profile or .env (wiki: Sheet-Webhook)"}
+        if type(row) is not int or row < 2:
+            return {"error": "row is the stint's sheet row, 2 or more"}
+        if laps is not None and (type(laps) is not int or not 0 < laps <= 999):
+            return {"error": "laps is a whole number from 1 to 999, or null"}
+        self._queue_save("schedule", row, {"laps": "" if laps is None else str(laps)})
+        return {"ok": True, "row": row, "pending": True}
 
     def qualifying_set(self, row, url=None, name=None, stint=None):
         """Write the qualifying row. Same payload, but targeting the Qualifying

@@ -21,7 +21,7 @@ machine and the panel's HUD row + URLs section are display-only.
 |---|---|
 | `timer` | Timer tab (race-timer state: see [Race-Timer](Race-Timer)) |
 | `setup` | Setup tab: the cell **below** a header (`Stint`, `Streamer`, `Session`, `Race Control`, `Flag`): found by text, so the tab layout may move. The set of accepted headers is the script's `SETUP_FIELDS` allowlist; a value for a header not in it is rejected (`unknown setup field`), so a new setup field needs the header in the Setup tab **and** in `SETUP_FIELDS` (redeploy) |
-| `schedule` | **Schedule** tab (or the **Qualifying** tab when the payload carries `"tab":"Qualifying"`), **physical row N** (the panel sends the CSV line number automatically): URL + Streamer + Stint label, located by the `URL`/`Streamer`/`Stint` headers in row 1 (falls back to fixed cols A/B with no header row); row `last+1` appends. The Stint cell is only written when a `Stint` header exists. The Qualifying tab has the **same structure** as the Schedule tab. **Neither tab may have leading blank rows**, the gviz CSV export maps physical sheet rows to CSV lines 1:1 when the tab starts at row 1. A header row is silently skipped when reading but its physical line number is still used when writing. |
+| `schedule` | **Schedule** tab (or the **Qualifying** tab when the payload carries `"tab":"Qualifying"`), **physical row N** (the panel sends the CSV line number automatically): URL + Streamer + Stint label, located by the `URL`/`Streamer`/`Stint` headers in row 1 (falls back to fixed cols A/B with no header row); row `last+1` appends. The Stint cell is only written when a `Stint` header exists. A stint's lap count (`laps`, from the desk) goes into the `Laps` column, and the write fails when the tab has none. The Qualifying tab has the **same structure** as the Schedule tab. **Neither tab may have leading blank rows**, the gviz CSV export maps physical sheet rows to CSV lines 1:1 when the tab starts at row 1. A header row is silently skipped when reading but its physical line number is still used when writing. |
 | `pov` | POV tab **row 2**: the `url` and/or `name` cell, located by header text (so the columns may move) |
 | `teams` | Setup tab: the cell **below** the `Team <slot>` header (slot 1–3 → `A6`/`B6`/`C6` in the shipped layout): found by text, same as the other Setup fields. The Overlay tab only mirrors them read-only |
 | `crew` | **Crew** tab (`Name \| Commentator \| Director \| Producer \| Race Control \| Discord \| Race Engineer`, header in row 1). `{"action":"crew","row":N,"name":..,"commentator":bool,"director":bool,"producer":bool,"race_control":bool,"discord":".."}` writes **data row N** (sheet row N+1; `row last+1` appends). Columns are located **by header text** (any order; extra columns are ignored), so a pre-existing `Name\|Director\|Producer` tab is auto-extended with the `Commentator`, `Race Control` and `Discord` columns on first write. `commentator`/`director`/`producer`/`race_control` are written as **`TRUE`/`FALSE` booleans** (checkbox-compatible, never the string `X`, which would break a Google Sheets checkbox cell); `discord` is the verbatim username. `{"action":"crew","row":N,"delete":true}` deletes data row N (rows shift up). The tab must start at row 1 with the header and have no interior blank rows (the Control Center editor maintains this). |
@@ -270,7 +270,7 @@ events where all Parts share one key already configured in OBS.
            : out({ok: false, action: 'get_stream_key', error: "no key for ref '" + String(p.ref || '') + "'"});
        }
        else return out({error: 'unknown action: ' + action});
-       return out({ok: true, action: action, v: 7});
+       return out({ok: true, action: action, v: 8});
      } catch (err) { return out({error: String(err)}); }
    }
 
@@ -334,9 +334,12 @@ events where all Parts share one key already configured in OBS.
      const urlCol = colOf('url') || 1;
      const nameCol = colOf('streamer') || 2;
      const stintCol = colOf('stint');
+     const lapsCol = colOf('laps');
+     if ('laps' in p && !lapsCol) throw 'no Laps column in the ' + target + ' tab';
      if ('url' in p) sheet.getRange(row, urlCol).setNumberFormat('@').setValue(p.url);
      if ('name' in p) sheet.getRange(row, nameCol).setNumberFormat('@').setValue(p.name);
      if ('stint' in p && stintCol) sheet.getRange(row, stintCol).setNumberFormat('@').setValue(p.stint);
+     if ('laps' in p) sheet.getRange(row, lapsCol).setValue(p.laps);
    }
 
    function writePov(ss, p) {
@@ -450,10 +453,12 @@ answers. A Crew row (Control Center) keeps one 30 s attempt. Every failed attemp
 needed a retry or took 5 s or longer is logged as INFO, so a slowing script shows up before
 the panel turns red. The webhook URL and its key never appear in the log.
 
-The current script is **v7** (v3 added the Schedule `Stint` column; v4 lets the
+The current script is **v8** (v3 added the Schedule `Stint` column; v4 lets the
 `schedule` action target the **Qualifying** tab via `"tab":"Qualifying"`; v5 added
 `teams`; v6 added the `crew` action and the `Crew` tab; v7 makes `crew` header-aware
-and adds the `Commentator` + `Discord` columns). The relay does not enforce the
+and adds the `Commentator` + `Discord` columns; v8 writes a stint's `Laps` cell, which
+Race Control sets on the desk). A stint lap count needs v8: with an older script the
+relay keeps the count, uses it, and the desk shows that the Sheet was not updated. The relay does not enforce the
 version, so an older script degrades gracefully: a v2 script ignores Stint
 write-back; v2/v3 scripts ignore the `tab` field and write the **Schedule** tab,
 qualifying-row edits would land on the race Schedule until you redeploy; a v5 script
