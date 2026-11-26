@@ -1547,7 +1547,7 @@ def drive_page(segments=()):
     page.add('#segment option:not([value=""])', count=len(segments), texts=list(segments))
     page.add("#name")
     err = page.add("#err", text="", visible=False)
-    command = page.add("#cmdPy", text="", visible=False)
+    command = page.add("#cmd", text="", visible=False)
     page.issued, page.answer = [], {"status": 200, "error": ""}
 
     def register():
@@ -1581,7 +1581,7 @@ def t_a_driver_registers_through_the_invite_page_on_a_phone():
     role.do("register", {"entry": "B #2", "name": "Bo"})
     assert ctx.driver_codes[("B #2", "")] == "D1:code2.sig", \
         "a second registration keeps the code the page shows for it, not the one still on screen"
-    assert "D1:code2.sig" in page.els["#cmdPy"].text, \
+    assert "D1:code2.sig" in page.els["#cmd"].text, \
         "register returns once the page shows this registration's code, not the one still on screen"
     page.answer = {"status": 429, "error": "Too many registrations from this device."}
     fails(lambda: role.do("register", {"entry": "B #2", "name": "Cy"}), "HTTP 429", "Too many registrations")

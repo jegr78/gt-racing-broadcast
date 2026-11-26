@@ -77,7 +77,7 @@ VIEWER = {"rows": "#timing tbody tr", "session": "#session", "state": "#state",
 
 DRIVER = {"entry": "#entry", "entry_option": '#entry option[value="{entry}"]', "segment": "#segment",
           "segments": '#segment option:not([value=""])',
-          "name": "#name", "register": "#register", "error": "#err", "command": "#cmdPy",
+          "name": "#name", "register": "#register", "error": "#err", "command": "#cmd",
           "commands": "#runSec code"}
 
 # The OBS media source each Intro, Trailer and Outro key plays (the panel's MEDIA_SCENE_ASSETS).

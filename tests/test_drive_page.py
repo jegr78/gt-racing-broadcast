@@ -58,6 +58,49 @@ def t_a_non_lan_address_says_why_it_is_refused():
         assert "four numbers" in short and ok == "", f"a malformed address keeps its own hint: {got}"
 
 
+def _view(code, body):
+    """statusView(code, body) of the page under node; None where node is missing."""
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return None
+    with open(PAGE, encoding="utf-8") as fh:
+        html = fh.read()
+    i = html.index("  function statusView(")
+    src = html[i:html.index("\n  }\n", i) + 4]
+    out = subprocess.run([node, "-"], input=f"{src}\nconsole.log(JSON.stringify(statusView({code}, {json.dumps(body)})));",
+                         capture_output=True, text=True, encoding="utf-8", errors="replace",
+                         check=True, timeout=30).stdout
+    return json.loads(out)
+
+
+def t_the_status_shows_each_state_of_the_registration():
+    got = _view(200, {"state": "quiet", "entry": "Team A #1", "segment": "Stint 2", "name": "Max", "quiet_s": 42})
+    if got is None:
+        return
+    assert got["label"] == "No data" and "for 42 s" in got["text"] and got["who"] == "Team A #1 · Stint 2 · Max", got
+    assert not got["stop"], "a quiet sender may come back, so the page keeps asking"
+    for state, label in (("pending", "Waiting"), ("approved", "Approved"), ("receiving", "Live")):
+        assert _view(200, {"state": state})["label"] == label, state
+
+
+def t_a_final_state_ends_the_polling_and_forgets_the_code():
+    for code, body in ((200, {"state": "rejected"}), (200, {"state": "disconnected"}), (403, {"error": "x"})):
+        got = _view(code, body)
+        if got is None:
+            return
+        assert got["stop"] and got["forget"] and got["cls"] == "bad", (code, body, got)
+
+
+def t_an_answer_the_page_cannot_read_never_shows_as_waiting():
+    for code, body in ((429, {"error": "too many"}), (500, None), (404, {"error": "not found"}),
+                       (0, None), (200, {"state": "new-thing"})):
+        got = _view(code, body)
+        if got is None:
+            return
+        assert got["error"] and got["label"] == "Unknown" and not got["stop"], (code, body, got)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
