@@ -238,7 +238,9 @@ def t_a_red_flag_over_a_held_race_keeps_its_restart_mode():
     team.red_flag("rc:Anna")
     laps["n"] = 3
     assert team.standings()["red_flag"]["planned_laps"] == 14, "the plan keeps the count the stint had at the flag"
-    broken, _c = _service([{"id": "good"}], multi=True, stint_laps=lambda: [][0])
+    def unreadable():
+        raise IndexError("no row on air")
+    broken, _c = _service([{"id": "good"}], multi=True, stint_laps=unreadable)
     assert broken.red_flag("rc:Anna")["red_flag"]["planned_laps"] is None, "a schedule error never stops the flag"
     assert svc._current()._red_flags == 2 and [r["action"] for r in _audit(path)][-1] == "red_flag"
     chosen = svc.red_flag("director:Bo", mode="neutralise")["red_flag"]
