@@ -80,6 +80,12 @@ in the normal CI, real league data or real race footage.
 - A caption line names the role and the action ("Race Control confirms the disconnect of
   #33"). A chapter title appears at each phase. A clock shows the race time, and a
   fast-forward mark shows while time is sped up.
+- Title cards (#1348) frame the film: an intro, a card before the chapter that opens
+  qualifying and one before the chapter that opens race day, and an outro. The stage draws
+  each one over the whole canvas on its own dark backdrop with the cyan accent, so no
+  recording shows behind it. Its title and subtitle fade in and out (0.6 s). The scenario
+  sets the texts: `intro` and `outro` at its top level, `card` on the step that opens a
+  chapter. A recording made before the cards existed takes them from its scenario file.
 
 ### Pace
 
@@ -104,6 +110,13 @@ in the normal CI, real league data or real race footage.
   positions never jump.
 - The film starts once the views of the first caption have opened, so it opens on them.
 - The film has no length limit.
+- The title cards add film time and play no source time: the intro 5 s, a chapter's card
+  3 s, the outro 6 s, each a whole number of frames. Every other frame shows the same
+  source time as a film without cards, only later by the cards before it. A carded
+  chapter's mark in `chapters.txt` is the start of its card, the chapter bar shows it once
+  the card has gone, and every caption ends where a card starts. The first chapter stays
+  at 0:00 and so begins with the intro, while the chapter bar shows it only after the
+  intro and its own card.
 
 ### Sound
 
@@ -166,7 +179,8 @@ Three stages, each usable on its own.
   is committed and nothing is downloaded.
 - **Timeline.** The run writes `timeline.json`: per step its id, role, action, start
   time, `acted` (when the action returned, before the step's checks were awaited), end
-  time, caption, chapter and focus, plus each recording's start offset.
+  time, caption, chapter, focus and card, the scenario's intro and outro, plus each
+  recording's start offset.
 
 ### 2. Scenario: `full`, extended
 
@@ -176,6 +190,9 @@ New step keys, all optional and ignored outside record mode:
 - `chapter`: starts a chapter with this title.
 - `focus`: the views to enlarge, when it is not the step's own role. Four views lay out
   as quarters (the swap switch only).
+- `card`: `{title, subtitle}` of a title card before the chapter this step opens; the
+  step needs a `chapter` and a `caption`. The scenario's top-level `intro` and `outro` take the same
+  table.
 
 New actions:
 
@@ -205,8 +222,9 @@ names. The deck images are regenerated only at the next deck update.
   needs no second pass.
 - Outputs under `runtime/event-video/<run>/`: `event-walkthrough.mp4`, `chapters.txt`
   (time and title per chapter, in the form video platforms read) and `captions.vtt`.
-- Rendering reads only the recording directory. A recording can be rendered again with a
-  changed stage without a new simulation run.
+- Rendering reads the recording directory, and for a recording whose timeline has no
+  title cards, its scenario file (`tools/event-sim/scenarios/<scenario>.toml`) for them.
+  A recording can be rendered again with a changed stage without a new simulation run.
 
 ### Limits and safety
 

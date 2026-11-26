@@ -40,7 +40,8 @@ CLOCK_SIDE = 128
 FILTERS = ("gradients", "color", "sine", "anullsrc", "overlay", "scale", "format", "rotate", "fade", "drawbox",
            "null")
 PAGES = "pages"
-STEP_KEYS = ("caption", "chapter", "focus")    # the film's step keys, when the scenario has them
+STEP_KEYS = ("caption", "chapter", "focus", "card")    # the film's step keys, when the scenario has them
+FILM_KEYS = ("intro", "outro")
 
 # Drawn only in record mode, in the top frame, above everything and never hit by a click.
 POINTER_SCRIPT = """(() => {
@@ -145,7 +146,8 @@ class Recorder:
 
     def timeline(self, scenario, steps, start):
         """The timeline of a run whose engine started at `start` (this recorder's clock).
-        `steps` are the report's steps; their scenario steps add caption, chapter and focus.
+        `steps` are the report's steps; their scenario steps add caption, chapter, focus and card,
+        the scenario its intro and outro.
         A step's action ran from `start` to `acted`; from `acted` to `end` it waited for its expects."""
         by_id = {s.id: s for s in getattr(scenario, "steps", [])}
         out = []
@@ -164,7 +166,8 @@ class Recorder:
             out.append(row)
         recordings = [{"view": r["view"], "kind": r["kind"], "file": r["file"], "size": r["size"],
                        "start": round(r["at"] - start, 3)} for r in self.recordings]
-        return {"scenario": getattr(scenario, "name", ""), "steps": out, "recordings": recordings}
+        film = {key: getattr(scenario, key) for key in FILM_KEYS if getattr(scenario, key, None) is not None}
+        return {"scenario": getattr(scenario, "name", ""), **film, "steps": out, "recordings": recordings}
 
     def write(self, timeline):
         os.makedirs(self.dir, exist_ok=True)

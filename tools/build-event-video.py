@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Render the event walkthrough film from a record run (maintainer tool, #1312).
 
-Reads only the recording directory that `event_sim.py --record DIR` wrote (timeline.json,
-pages/, program/) and writes into runtime/event-video/<run>/: event-walkthrough.mp4,
+Reads the recording directory that `event_sim.py --record DIR` wrote (timeline.json,
+pages/, program/), and the scenario file for the title cards of a recording made before
+them, and writes into runtime/event-video/<run>/: event-walkthrough.mp4,
 chapters.txt and captions.vtt, plus a work/ dir with the transcoded recordings and the
 finished segments, so a killed render resumes and a changed stage renders again without a
 new simulation run.
