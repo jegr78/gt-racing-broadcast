@@ -42,12 +42,12 @@ def t_settings_validate_persist_and_fall_back():
         f"one bad value falls back alone, the others stay: {got}"
 
 
-def _service(pick, multi=False):
+def _service(pick, multi=False, **kw):
     path = os.path.join(tempfile.mkdtemp(), "driver-race.json")
     dr.write_settings(path, {"formation": False})
     clock = [0.0]
     svc = dr.Service(path, pick=lambda: pick[0], trace_for=lambda i: TRACE if i == "good" else None,
-                     multi_lobby=lambda: multi, clock=lambda: clock[0])
+                     multi_lobby=lambda: multi, clock=lambda: clock[0], **kw)
     return svc, clock
 
 
@@ -233,6 +233,13 @@ def t_a_red_flag_over_a_held_race_keeps_its_restart_mode():
     assert again["mode"] == "keep", \
         f"a second flag over a held race keeps Race Control's restart mode, not the league default: {again}"
     assert again["at"] == 0.0 and again["held_s"] == 30.0, f"the race counts as held since the first flag: {again}"
+    laps = {"n": 14}
+    team, _c = _service([{"id": "good"}], multi=True, stint_laps=lambda: laps["n"])
+    team.red_flag("rc:Anna")
+    laps["n"] = 3
+    assert team.standings()["red_flag"]["planned_laps"] == 14, "the plan keeps the count the stint had at the flag"
+    broken, _c = _service([{"id": "good"}], multi=True, stint_laps=lambda: [][0])
+    assert broken.red_flag("rc:Anna")["red_flag"]["planned_laps"] is None, "a schedule error never stops the flag"
     assert svc._current()._red_flags == 2 and [r["action"] for r in _audit(path)][-1] == "red_flag"
     chosen = svc.red_flag("director:Bo", mode="neutralise")["red_flag"]
     assert chosen["mode"] == "neutralise", f"a mode named with the flag wins: {chosen}"

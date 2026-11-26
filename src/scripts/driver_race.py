@@ -654,14 +654,17 @@ class Service:
     """Thread-safe holder of the live race."""
 
     def __init__(self, settings_path, pick, trace_for, multi_lobby, clock=time.monotonic,
-                 enabled=lambda: True, league_path=None, wall=time.time, context=None, recording_dir=None):
+                 enabled=lambda: True, league_path=None, wall=time.time, context=None, recording_dir=None,
+                 stint_laps=None):
         """`enabled()` False (the relay in qualifying mode) ignores samples.
         `league_path` holds the profile's restart default; `wall` dates the audit log.
         `context()` gives the dashboard {roster, stint, remaining, mode, segment,
         connections}; every key optional. `recording_dir` holds the per-event
         race recording; nothing opens it before open_recording(), which the relay
-        calls once it owns its control port."""
+        calls once it owns its control port. `stint_laps()` is the lap count of the
+        stint lobby on air, which a red flag keeps for the restart plan."""
         self._path = settings_path
+        self._stint_laps = stint_laps or (lambda: None)
         self._pick, self._trace_for = pick, trace_for
         self._multi_lobby = multi_lobby
         self._clock = clock
@@ -1340,9 +1343,17 @@ class Service:
         with self._lock:
             race = self._current()
             mode = mode or (race.restart_mode if race.red_flagged else league)
-            race.red_flag(self._clock(), mode)
+            race.red_flag(self._clock(), mode, planned_laps=None if race.red_flagged else self._planned_laps())
             self._log(who, "red_flag", mode=mode)
         return self.standings()
+
+    def _planned_laps(self):
+        """The stint lobby's count for the restart plan; a schedule error never stops a red flag."""
+        try:
+            laps = self._stint_laps()
+        except Exception:  # noqa: BLE001
+            return None
+        return laps if type(laps) is int else None
 
     def set_restart_mode(self, who, mode):
         mode = _mode(mode)

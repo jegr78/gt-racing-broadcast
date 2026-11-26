@@ -400,15 +400,18 @@ class Race:
                 ent.change_stop = ent.stall = None
                 ent.halted = None
 
-    def red_flag(self, now, mode):
-        """Freeze every entry; each continues from its anchor in the restart lobby."""
+    def red_flag(self, now, mode, planned_laps=None):
+        """Freeze every entry; each continues from its anchor in the restart lobby. The
+        first flag keeps the restart plan: the lobby leader's lap and average lap time
+        and `planned_laps`, the lobby's count then."""
         self._advance(now)
         if self._red is None:
             lead = self._lobby_leader(now)
             times = lead.lobby_ms if lead is not None else []
             self._red = {"at": now, "mode": mode,
                          "lobby_lap": self._cars[lead.active].lap if lead is not None else None,
-                         "avg_lap_ms": round(sum(times) / len(times)) if times else None}
+                         "avg_lap_ms": round(sum(times) / len(times)) if times else None,
+                         "planned_laps": planned_laps}
         else:
             self._red["mode"] = mode
         self._red_flags += 1
