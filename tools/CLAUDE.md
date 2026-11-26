@@ -829,8 +829,7 @@ UI or API:
   one outside the 1440x900 viewport as a soft finding and scrolls it into view.
   `Surface.answered` waits for the page's own request to be answered (HTTP 400 and up is
   hard), `Surface.until` for the page to show the result (soft when slower than 2 s; a
-  job or a feed start is slow by nature and exempt). The desk's armed buttons (Final lap,
-  Finish, RED FLAG, Restart released, Retire, Race start, Approve all waiting) get both clicks, and an error on the desk's
+  job or a feed start is slow by nature and exempt). The desk's armed buttons (Finish, RED FLAG, Restart released, Retire, Race start, Approve all waiting) get both clicks, and an error on the desk's
   status line fails the step.
 - The panel's RED FLAG and graphic keys toggle from the OBS state the panel polled last
   (every 2 s), so a press right after a change, its own included, repeats the old command.

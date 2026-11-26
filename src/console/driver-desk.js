@@ -478,7 +478,7 @@
       var n = parseInt(laps.value, 10);
       act("/drivers/race/settings", {lap_count: isFinite(n) ? n : null}, "Lap count saved");
     });
-    var finalLap = button("Final lap", "warn", "final", function () { act("/drivers/race/final-lap", {}, "Final lap"); });
+    var finalLap = button("Final lap", "warn", null, function () { act("/drivers/race/final-lap", {}, "Final lap"); });
     var finish = button("Finish", "warn", "finish", function () { act("/drivers/race/finish", {}, "Race finished"); });
     // The panel has its own RED FLAG for cover and banner; here it only holds the race.
     var redFlag = button(fullRedFlag ? "RED FLAG" : "Hold race (red flag)", "alarm", "red", async function () {

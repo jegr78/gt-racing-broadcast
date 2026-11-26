@@ -357,8 +357,9 @@ connection line sits under **Troubleshoot**. In short:
   distance and corrections) and **Disconnect**. Drivers still waiting for approval show
   as *pending* in both.
 
-Buttons that change the race for everyone (Final lap, Finish, the red flag, a change,
-a disconnect, a rejection) ask for a second press within four seconds.
+Buttons that change the race for everyone (Finish, the red flag, a change, a disconnect,
+a rejection) ask for a second press within four seconds. **Final lap** takes one press:
+it only signals the last lap, the last GT7 lobby decides when the race ends.
 
 ![Director Panel: the Race area with the race controls, the desk tabs and the race order](images/director-panel-drivers.png)
 

@@ -910,7 +910,7 @@ class RaceControlRole(LiveColumn, Surface):
         return {"entry": entry, "rows": rows}
 
     def act_final_lap(self, args):
-        return self._press(DESK["final_lap"], "/drivers/race/final-lap", "Final lap", armed=True)
+        return self._press(DESK["final_lap"], "/drivers/race/final-lap", "Final lap")
 
     def act_finish(self, args):
         return self._press(DESK["finish"], "/drivers/race/finish", "Race finished", armed=True)
