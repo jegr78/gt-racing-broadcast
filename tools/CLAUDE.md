@@ -1048,6 +1048,39 @@ python3 tools/event-sim/event_sim.py --restore-obs   # macOS: put back the OBS c
   and the `obs` role read OBS through `ObsMirror`, an `ObsState` of the same collection
   that follows OBS's program scene, item visibility and outputs.
 
+### Event walkthrough video (`tools/build-event-video.py`, #1312, #1313)
+
+The film is a maintainer run in two steps: record a scenario, then render the recording.
+Spec: `docs/superpowers/specs/2026-11-24-event-walkthrough-video-design.md`.
+
+```bash
+python3 tools/event-sim/event_sim.py --scenario full --record DIR --obs real --out OUT
+python3 tools/build-event-video.py DIR [--music FILE] [--workers N] [--from T] [--to T]
+```
+
+- Machine: recording runs on the maintainer Mac (Apple M3, 8 cores, 16 GB). The Linux box
+  broke the CPU, task and memory limits of the local E2E unit in gate G4. Record mode
+  limits itself to 6 GiB, 4096 tasks and 600 % CPU (`record.py`). `full` takes about
+  43 minutes and writes about 1.2 GB of page videos.
+- OBS: `--obs real` needs OBS 33 on macOS 27.2; OBS 32.2.2 crashes at launch there. Your
+  own OBS stays closed for the whole run. On macOS the run refuses while any OBS runs, and
+  it backs up `~/Library/Application Support/obs-studio` and restores it afterwards. A run
+  killed from outside leaves the backup, and the next run refuses until
+  `event_sim.py --restore-obs` puts it back. Without `--obs real` the OBS stand-in runs,
+  nothing records the program, and the film leaves the program view out.
+- Render: the renderer transcodes each recording once to all-keyframe VP8 (about 2.5 GB
+  per recording of `full`, about 25 GB in all) and checks the free disk before it starts.
+  `--from`/`--to` (seconds, `m:ss` or `h:mm:ss`) render a part of the film, named
+  `event-walkthrough-<a>s-<b>s.mp4`. A killed render resumes from its finished segments.
+  Without `--music` the film is silent.
+- Outputs under `runtime/event-video/<name of DIR>/` (or `--out`): `event-walkthrough.mp4`,
+  `chapters.txt` and `captions.vtt`, plus `work/` with the transcodes and segments.
+- Films, clips and recordings are never committed; the user uploads the film.
+- Pipeline check: every dispatch of the manual Event simulation workflow also runs the
+  `event-video` job. It records `smoke` with `--obs sim` and renders its first five
+  seconds, then uploads the part, `chapters.txt`, `captions.vtt`, the timeline and the
+  report. `tests/test_event_sim_workflow.py` pins that job.
+
 ## Driver replay (`tools/driver-replay.py`, #1115)
 
 Up to 15 simulated senders for a running relay: they register on the event's invite,
