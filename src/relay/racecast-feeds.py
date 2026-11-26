@@ -2765,6 +2765,13 @@ def post_webhook(url, payload, timeout=10):
 
 WEBHOOK_OUTDATED_ERROR = ("webhook script outdated (no action echo). Redeploy "
                           "the v2 script (wiki: Sheet-Webhook)")
+WEBHOOK_LAPS_OUTDATED_ERROR = ("webhook script outdated: writing the Schedule Laps cell needs "
+                               "the v8 script (wiki: Sheet-Webhook)")
+WEBHOOK_LAPS_NO_COLUMN_ERROR = ("the Schedule tab has no Laps column: add a Laps header to write "
+                                "stint lap counts (wiki: Sheet-Template)")
+WEBHOOK_LAPS_VERSION = 8
+# A stint lap count is its own pending save, so a Sheet that cannot take it holds no other field of the row.
+LAPS_TARGET = "schedule_laps"
 
 
 def check_webhook_response(body, expected_action=None):
@@ -2806,6 +2813,15 @@ POV_SHEET_ROW = 2     # the Apps Script writes the POV tab's row 2 (writePov)
 # A success slower than this is logged, so the relay log shows a slowing script
 # before it starts to time out.
 WEBHOOK_SLOW_S = 5.0
+
+
+def _webhook_version(body):
+    """The script version a webhook answer names, 0 when it names none."""
+    try:
+        v = json.loads((body or b"{}").decode("utf-8", "replace")).get("v")
+    except (ValueError, AttributeError):
+        return 0
+    return v if type(v) is int else 0
 
 
 def webhook_error_permanent(err):
@@ -7647,6 +7663,7 @@ class ScheduleSource:
         # value not yet in the sheet is what the feeds, RELOAD and NEXT see.
         self._pending = None
         self._pending_target = None
+        self._laps_target = None
 
     @staticmethod
     def _parse_rows(text, allow_local=True):
@@ -7750,6 +7767,20 @@ class ScheduleSource:
         with self.lock:
             return self.laps.get(self.rows[-1][3]) if self.rows else None
 
+    def laps_at(self, idx):
+        """The lap count of schedule row `idx` (0-based), a desk save first, or None."""
+        with self.lock:
+            return self.laps.get(self.rows[idx][3]) if 0 <= idx < len(self.rows) else None
+
+    def stint_laps(self):
+        """Each stint's sheet row, label, lap count and the sync state of a desk save."""
+        with self.lock:
+            rows = list(self.rows)
+            laps = dict(self.laps)
+        states = self._pending.states(self._laps_target) if self._pending and self._laps_target else {}
+        return [{"row": line, "stint": stint, "laps": laps.get(line),
+                 "sync": states.get(line, (None, None))[0]} for _u, _n, stint, line in rows]
+
     @staticmethod
     def _parse_csv(text):
         """URL-only wrapper around _parse_rows; kept for the URL-list callers/tests."""
@@ -7786,8 +7817,10 @@ class ScheduleSource:
                 self.last_ok = time.time()
                 self.last_error = None
                 if self._pending is not None:
-                    self._pending.reconcile(self._pending_target,
-                                            {l: (u, n, s) for u, n, s, l in rows})
+                    shown = {l: (u, n, s, str(self.laps.get(l, ""))) for u, n, s, l in rows}
+                    self._pending.reconcile(self._pending_target, shown)
+                    if self._laps_target:
+                        self._pending.reconcile(self._laps_target, shown)
                     self._apply_pending_locked()
             try:
                 with open(self.cache_path, "w", encoding="utf-8") as fh:
@@ -7799,6 +7832,8 @@ class ScheduleSource:
             # Nothing came back (sheet down, or an emptied tab): no row to compare,
             # but a confirmed save's grace still runs out.
             self._pending.expire(self._pending_target)
+            if self._laps_target:
+                self._pending.expire(self._laps_target)
         return False
 
     def load_initial(self, template=None):
@@ -7870,6 +7905,7 @@ class ScheduleSource:
 
     def attach_pending(self, store, target):
         self._pending, self._pending_target = store, target
+        self._laps_target = LAPS_TARGET if target == "schedule" else None
 
     def _apply_pending_locked(self):
         if self._pending is None:
@@ -7877,6 +7913,11 @@ class ScheduleSource:
         for row, fields in self._pending.overlay(self._pending_target).items():
             self._merge_row_locked(row, fields.get("url"), fields.get("name"),
                                    fields.get("stint"))
+        for row, fields in (self._pending.overlay(self._laps_target) if self._laps_target else {}).items():
+            if fields.get("laps"):
+                self.laps[row] = int(fields["laps"])
+            else:
+                self.laps.pop(row, None)
 
     def apply_pending(self):
         with self.lock:
@@ -8448,9 +8489,9 @@ class SetupControl(PushHealth):
         # each logged once per transition.
         self._was_local = set()
         self._save_sources = {"schedule": schedule_source, "qualifying": qual_source,
-                              "pov": pov_source}
+                              "pov": pov_source, LAPS_TARGET: schedule_source}
         for target, src in self._save_sources.items():
-            if src is not None and hasattr(src, "attach_pending"):
+            if src is not None and hasattr(src, "attach_pending") and target != LAPS_TARGET:
                 src.attach_pending(self.saves, target)
 
     # -- shared blocking push -> (ok, error); diagnostics like TimerStore ----
@@ -8474,10 +8515,15 @@ class SetupControl(PushHealth):
 
     def _save_push(self, payload, expected_action):
         """One async-save push: the long attempt, NOT the panel lock's 30 s."""
-        ok, err, _body = push_webhook_retrying(
+        ok, err, body = push_webhook_retrying(
             self.push_url, payload, expected_action,
             timeout=WEBHOOK_ASYNC_SAVE_TIMEOUT_S, attempts=WEBHOOK_ASYNC_SAVE_ATTEMPTS,
             budget_s=WEBHOOK_ASYNC_SAVE_BUDGET_S)
+        if "laps" in payload:
+            if ok and _webhook_version(body) < WEBHOOK_LAPS_VERSION:
+                return False, WEBHOOK_LAPS_OUTDATED_ERROR
+            if not ok and "no Laps column" in (err or ""):
+                return False, WEBHOOK_LAPS_NO_COLUMN_ERROR
         return ok, err
 
     def _queue_save(self, target, row, fields):
@@ -8539,7 +8585,8 @@ class SetupControl(PushHealth):
             outdated = webhook_error_permanent(err)
             if outdated:
                 self._mark_push_failed(err)
-            state = self.saves.done(target, row, rev, ok=False, err=err, hold=outdated)
+            hold = outdated or err in (WEBHOOK_LAPS_OUTDATED_ERROR, WEBHOOK_LAPS_NO_COLUMN_ERROR)
+            state = self.saves.done(target, row, rev, ok=False, err=err, hold=hold)
             if state == pending_saves.LOCAL and key not in self._was_local:
                 self._was_local.add(key)
                 LOG.warning("sheet save %s kept in relay, not in the sheet yet: %s",
@@ -8705,6 +8752,20 @@ class SetupControl(PushHealth):
     def schedule_set(self, row, url=None, name=None, stint=None):
         """Write a race Schedule row (the default tab)."""
         return self._schedule_write(row, url, name, stint, tab=None)
+
+    def schedule_laps(self, row, laps):
+        """Set the lap count of a race Schedule row's stint lobby, or clear it with None:
+        live in the relay at once, written to the `Laps` cell in the background."""
+        if not self.push_url:
+            return {"error": "webhook not configured: set RACECAST_SHEET_PUSH_URL "
+                             "in the active profile or .env (wiki: Sheet-Webhook)"}
+        if laps is not None and (type(laps) is not int or not 0 < laps <= 999):
+            return {"error": "laps is a whole number from 1 to 999, or null"}
+        src = self._save_sources.get(LAPS_TARGET)
+        if type(row) is not int or src is None or row not in {r[3] for r in src.get_rows()}:
+            return {"error": "row is not a stint of the Schedule"}
+        self._queue_save(LAPS_TARGET, row, {"laps": "" if laps is None else str(laps)})
+        return {"ok": True, "row": row, "pending": True}
 
     def qualifying_set(self, row, url=None, name=None, stint=None):
         """Write the qualifying row. Same payload, but targeting the Qualifying
@@ -14933,6 +14994,12 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     out["start_timer"] = timer_store is not None and out.get("start_timer") is not False
                     auto = getattr(relay, "timer_autostart", None)
                     out["start_pending"] = bool(auto and auto.pending())
+                    sched = getattr(relay, "race_source", None)
+                    if not relay.solo and sched is not None and hasattr(sched, "stint_laps"):
+                        out["stints"] = sched.stint_laps()
+                        rows = sched.get_rows()
+                        idx = relay.on_air_row_idx() if relay.mode == "race" else None
+                        out["stint_row"] = rows[idx][3] if idx is not None and 0 <= idx < len(rows) else None
                     return self._send(out, no_store=True)
                 if len(p) == 3 and p[:2] == ["drivers", "brand"]:
                     return self._send_brand(p[2])
@@ -15739,6 +15806,18 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     lock = race_start_lock(driver_race_svc, timer_store) if action == "start" else None
                     if lock:
                         return self._send({"ok": False, "error": lock}, 409)
+                    if action == "stint-laps":
+                        sched = getattr(relay, "race_source", None)
+                        if relay.solo or setup_ctl is None or not hasattr(sched, "stint_laps"):
+                            return self._send({"ok": False, "error": "stint lap counts need an endurance "
+                                                                    "Schedule"}, 409)
+                        if "laps" not in body:
+                            return self._send({"ok": False, "error": "laps is a number or null"}, 400)
+                        res = setup_ctl.schedule_laps(body.get("row"), body.get("laps"))
+                        if "error" in res:
+                            return self._send({"ok": False, "error": res["error"]}, 400)
+                        race = driver_race_svc.log(who, "stint_laps", row=res["row"], laps=body.get("laps"))
+                        return self._send({"ok": True, "race": race})
                     if action == "class-laps" and "laps" not in body:
                         return self._send({"ok": False, "error": "laps is a number or null"}, 400)
                     if action in actions:
@@ -16391,6 +16470,15 @@ def _on_air_watch_kwargs(runtime, invite_cache):
             "invite_active": lambda: invite_cache.get() is not None}
 
 
+def _stint_plan(relay):
+    """(sheet row, lap count) of the race stint on air, for the red flag's restart plan."""
+    src = getattr(relay, "race_source", None)
+    if src is None or not hasattr(src, "laps_at") or relay.mode != "race":
+        return None, None
+    idx, rows = relay.on_air_row_idx(), src.get_rows()
+    return (rows[idx][3], src.laps_at(idx)) if 0 <= idx < len(rows) else (None, None)
+
+
 def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0, on_air_path=None,
                        clock=time.time, invite_active=lambda: True):
     """Tell the driver race when the broadcast switches stints: that opens the driver
@@ -16399,7 +16487,7 @@ def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0, o
     cells pre-fill the class lap counts, at a switch and at a start. Endurance only.
     `on_air_path` keeps the race stint on air and a last-alive stamp, which a plain
     `event start` resumes from, while `invite_active()` says an event is unstopped."""
-    last = None
+    last, sent = None, None
     record = {"stint": _read_on_air_stint(on_air_path) if on_air_path else None, "at": None}
     while not stop_evt.wait(interval):
         if on_air_path and invite_active():
@@ -16418,12 +16506,19 @@ def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0, o
                 if last_row:
                     final = relay.race_source.final_laps() or settings_laps()
                 class_laps = relay.race_source.class_laps_at(idx) if rows else {}
+                sent = final
                 if switched or last_row or class_laps:
                     race_svc.stint_switch(final_laps=final, window=switched, final_row=last_row,
                                           class_laps=class_laps)
                     LOG.info("driver race: %s row %d%s", "stint switch to" if switched
                              else "on air at start:", idx + 1,
                              f", final lobby over {final} laps" if final else "")
+            elif relay.mode == "race" and rows and idx == len(rows) - 1:
+                final = relay.race_source.final_laps() or settings_laps()
+                if final != sent:
+                    sent = final
+                    race_svc.final_lobby_laps(final)
+                    LOG.info("driver race: final lobby now over %s laps", final)
             last = idx
             relay._tick_ok("driver race stint watch")
         except Exception as e:  # noqa: BLE001  a watcher error must never touch the broadcast
@@ -17392,7 +17487,8 @@ def main():
                      if args.overlay_dir else None),
         trace_for=lambda pick_id: track_pick.store.tracks.reference_trace(pick_id)
         if track_pick.store.tracks else None,
-        multi_lobby=lambda: not relay.solo, recording_dir=runtime)
+        multi_lobby=lambda: not relay.solo, recording_dir=runtime,
+        stint_plan=lambda: _stint_plan(relay))
     _hub_invite = driver_invite.Cache(driver_invite.path_in(runtime))
     driver_hub = driver_ingest.Hub(multi_lobby=lambda: not relay.solo, on_sample=race_svc.update,
                                    invite_id=lambda: (_hub_invite.get() or {}).get("id"))

@@ -2006,6 +2006,37 @@ def t_a_lap_time_that_disagrees_with_the_relays_clock_is_ignored():
     assert race.standings(t)["fastest"] is None, race.standings(t)["fastest"]
 
 
+def t_a_red_flag_keeps_the_leaders_lobby_lap_and_pace_for_the_restart_plan():
+    race = rd.Race(TRACE, formation=False)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 40)
+    t = _drive(race, [a, b], [50, 40], 0.0, 4 * L / 50 + 5)
+    assert race.standings(t)["red_flag"] is None
+    lap_at_flag = a._lap
+    race.red_flag(t, "keep", planned_laps=14, planned_row=3)
+    red = race.standings(t + 300)["red_flag"]
+    assert (red["planned_laps"], red["planned_row"]) == (14, 3), f"the stint and its count when the flag came: {red}"
+    assert red["lobby_lap"] == lap_at_flag, f"the leader's lap on the counter when the flag came: {red}"
+    assert abs(red["avg_lap_ms"] - L / 50 * 1000) < 150, f"the leader's laps after lap 1: {red}"
+    assert red["held_s"] == 300, red
+    race.red_flag(t + 10, "neutralise", planned_laps=3)
+    again = race.standings(t + 300)["red_flag"]
+    assert (again["lobby_lap"], again["avg_lap_ms"], again["held_s"], again["planned_laps"]) == \
+        (red["lobby_lap"], red["avg_lap_ms"], 300, 14), f"a second press keeps the first flag's plan: {again}"
+
+
+def t_the_restart_plan_follows_a_quiet_leader_and_a_restart_starts_its_pace_over():
+    race = rd.Race(TRACE, formation=False)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 40)
+    t = _drive(race, [a, b], [50, 40], 0.0, 3 * L / 50 + 5)
+    lap_a = a._lap
+    t = _drive(race, [b], [40], t, 8)                       # A stopped sending: the lobby crashed on it
+    race.red_flag(t, "keep")
+    red = race.standings(t)["red_flag"]
+    assert red["lobby_lap"] == lap_a and red["avg_lap_ms"] is not None, f"the quiet leader still leads the plan: {red}"
+    race.release(t + 60)
+    assert all(not e.lobby_ms for e in race._entries.values()), "the restart lobby's pace starts over"
+
+
 def t_a_lap_faster_than_the_line_allows_never_counts():
     race = rd.Race(TRACE, formation=False)
     a = Car(race, "A", "a", L - 15, "Mallory")

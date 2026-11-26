@@ -2,9 +2,11 @@
 line and one `race_distance.Race`, behind a lock.
 
 Event settings live in `runtime/<profile>/driver-race.json`: `formation` (default
-on), `finish_mode` (`laps` or `time`) and `lap_count`. In endurance the lap count
-applies to the final stint lobby only; the relay passes it with the stint switch
-that puts the last schedule row on air. A changed layout pick starts a new race,
+on), `finish_mode` (`laps` or `time`) and `lap_count`. In endurance each stint has
+its count in the Schedule's `Laps` cell and the race finishes by the last row's; the
+relay passes it with the stint switch that puts the last schedule row on air, and
+again when it changes while that row runs. `lap_count` is the fallback for an empty
+last row. A changed layout pick starts a new race,
 because distances along another line mean nothing.
 
 Race Control actions (#1113): red flag, restart mode and release, rejoin marks,
@@ -654,14 +656,17 @@ class Service:
     """Thread-safe holder of the live race."""
 
     def __init__(self, settings_path, pick, trace_for, multi_lobby, clock=time.monotonic,
-                 enabled=lambda: True, league_path=None, wall=time.time, context=None, recording_dir=None):
+                 enabled=lambda: True, league_path=None, wall=time.time, context=None, recording_dir=None,
+                 stint_plan=None):
         """`enabled()` False (the relay in qualifying mode) ignores samples.
         `league_path` holds the profile's restart default; `wall` dates the audit log.
         `context()` gives the dashboard {roster, stint, remaining, mode, segment,
         connections}; every key optional. `recording_dir` holds the per-event
         race recording; nothing opens it before open_recording(), which the relay
-        calls once it owns its control port."""
+        calls once it owns its control port. `stint_plan()` is the schedule row on air
+        and its lap count, which a red flag keeps for the restart plan."""
         self._path = settings_path
+        self._stint_plan = stint_plan or (lambda: (None, None))
         self._pick, self._trace_for = pick, trace_for
         self._multi_lobby = multi_lobby
         self._clock = clock
@@ -1340,9 +1345,18 @@ class Service:
         with self._lock:
             race = self._current()
             mode = mode or (race.restart_mode if race.red_flagged else league)
-            race.red_flag(self._clock(), mode)
+            row, laps = (None, None) if race.red_flagged else self._planned()
+            race.red_flag(self._clock(), mode, planned_laps=laps, planned_row=row)
             self._log(who, "red_flag", mode=mode)
         return self.standings()
+
+    def _planned(self):
+        """(row, laps) of the stint on air for the restart plan; a schedule error never stops a red flag."""
+        try:
+            row, laps = self._stint_plan()
+        except Exception:  # noqa: BLE001
+            return None, None
+        return (row if type(row) is int else None), (laps if type(laps) is int else None)
 
     def set_restart_mode(self, who, mode):
         mode = _mode(mode)
@@ -1558,8 +1572,6 @@ class Service:
             race.finish_mode = saved["finish_mode"]
             if not race.multi_lobby:
                 race.lap_count = saved["lap_count"]
-            elif self._final_on_air and "lap_count" in changes:
-                self._final_lobby_laps = race.lap_count = saved["lap_count"]
         return saved
 
     def class_laps(self, stint=None):
@@ -1628,6 +1640,13 @@ class Service:
                 race.final_lobby(final_laps, self._clock())
             elif race.multi_lobby:
                 self._final_on_air, self._final_lobby_laps = False, None
+
+    def final_lobby_laps(self, laps):
+        """The final lobby's lap count changed while it runs: it applies at once."""
+        with self._lock:
+            race = self._current()
+            if self._final_on_air and race.multi_lobby:
+                self._final_lobby_laps = race.lap_count = laps
 
     def final_lap(self, who="tailnet"):
         with self._lock:

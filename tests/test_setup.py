@@ -1893,6 +1893,86 @@ def t_save_answers_pending_before_the_webhook():
     assert s.sync_state(2) == (None, None)                   # confirmed
 
 
+_TWO_STINTS = [("https://www.youtube.com/watch?v=a", "JeGr", "Stint 1", 2),
+               ("https://www.youtube.com/watch?v=b", "GT45", "Stint 2", 3)]
+
+
+def _laps_ctl(post=None, sheet_laps=None):
+    ctl, s, calls = _async_ctl(post=post, rows=_TWO_STINTS)
+    s._fetched_laps = dict(sheet_laps or {})
+    s.refresh()
+    return ctl, s, calls
+
+
+def t_a_stint_lap_count_is_live_at_once_and_reaches_the_sheet():
+    ctl, s, calls = _laps_ctl(post=lambda p: (True, None), sheet_laps={2: 14, 3: 14})
+    assert ctl.schedule_laps(3, 12) == {"ok": True, "row": 3, "pending": True}
+    assert calls == [], "the count does not wait for the sheet"
+    assert s.stint_laps() == [{"row": 2, "stint": "Stint 1", "laps": 14, "sync": None},
+                              {"row": 3, "stint": "Stint 2", "laps": 12, "sync": "saving"}], s.stint_laps()
+    assert s.final_laps() == 12, "the last row's count is the final lobby's"
+    s.refresh()
+    assert s.laps_at(1) == 12, "a refresh before the sheet shows it keeps the desk's count"
+    assert ctl.drain_saves() == 1
+    assert calls[-1] == {"action": "schedule", "row": 3, "laps": "12"}, calls
+    s.fetch = lambda timeout=15: list(_TWO_STINTS)
+    s.refresh()
+    assert s.laps_at(1) == 12, "a confirmed count stays while the sheet still shows the old one"
+    assert ctl.schedule_laps(3, None)["ok"] and s.laps_at(1) is None, "None clears the count"
+    ctl.drain_saves()
+    assert calls[-1] == {"action": "schedule", "row": 3, "laps": ""}, calls
+
+
+def t_a_stint_lap_count_is_a_whole_number_from_1_to_999():
+    ctl, s, calls = _laps_ctl()
+    for bad in (0, 1000, "12", True, 1.5):
+        assert "error" in ctl.schedule_laps(3, bad), bad
+    for row in (0, 1, 4, "3"):
+        assert "error" in ctl.schedule_laps(row, 12), f"row {row!r} is no stint of the Schedule"
+    assert len(ctl.saves) == 0
+
+
+def t_a_script_without_the_laps_write_keeps_the_count_in_the_relay():
+    ctl, s, calls = _laps_ctl()
+    ctl._save_push = m.SetupControl._save_push.__get__(ctl)
+    orig = m.push_webhook_retrying
+    m.push_webhook_retrying = lambda *a, **k: (True, None, b'{"ok": true, "action": "schedule", "v": 7}')
+    try:
+        ctl.schedule_laps(3, 12)
+        ctl.drain_saves()
+    finally:
+        m.push_webhook_retrying = orig
+    assert s.laps_at(1) == 12, "the relay keeps the count"
+    assert ctl.saves.state(m.LAPS_TARGET, 3) == ("local", m.WEBHOOK_LAPS_OUTDATED_ERROR), ctl.saves.state(m.LAPS_TARGET, 3)
+    assert ctl.saves.retryable() == 0, "no retry against a script that cannot write it"
+    assert ctl.push_status != "failed", "the other saves still reach the sheet, so the webhook stays green"
+    ctl.schedule_set(3, url="https://www.youtube.com/watch?v=c")
+    m.push_webhook_retrying = lambda *a, **k: (True, None, b'{"ok": true, "action": "schedule", "v": 7}')
+    try:
+        ctl.drain_saves()
+    finally:
+        m.push_webhook_retrying = orig
+    assert s.sync_state(3) == (None, None), "a URL save of the same row reaches the sheet"
+    assert s.laps_at(1) == 12 and s.stint_laps()[1]["sync"] == "local"
+
+
+def t_a_tab_without_a_laps_column_holds_only_the_count():
+    ctl, s, calls = _laps_ctl()
+    ctl._save_push = m.SetupControl._save_push.__get__(ctl)
+    orig = m.push_webhook_retrying
+    m.push_webhook_retrying = lambda url, payload, *a, **k: (
+        (False, "webhook did not confirm: 'no Laps column in the Schedule tab'", b"") if "laps" in payload
+        else (True, None, b'{"ok": true, "action": "schedule", "v": 8}'))
+    try:
+        ctl.schedule_laps(3, 12)
+        ctl.schedule_set(3, url="https://www.youtube.com/watch?v=c")
+        ctl.drain_saves()
+    finally:
+        m.push_webhook_retrying = orig
+    assert s.stint_laps()[1]["sync"] == "local" and ctl.saves.retryable() == 0, "the count waits for a Laps column"
+    assert s.sync_state(3) == (None, None), "the URL of the same row reaches the sheet"
+
+
 def t_validation_errors_create_no_pending_entry():
     ctl, s, calls = _async_ctl()
     assert "error" in ctl.schedule_set(2, name="Nobody")

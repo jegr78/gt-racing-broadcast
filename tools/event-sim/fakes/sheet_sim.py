@@ -49,7 +49,7 @@ SHEET_PATH = "/spreadsheets/d/sim"
 EXEC_PATH = "/macros/s/sim/exec"
 ECHO_PATH = "/macros/echo"
 DEFAULT_KEY = "sim"
-SCRIPT_VERSION = 7
+SCRIPT_VERSION = 8
 SETUP_FIELDS = ("Stint", "Streamer", "Session", "Race Control", "Flag")
 TIMER_ROWS = {"Race End (UTC)": 1, "Duration": 2, "Visible": 3, "Updated (UTC)": 4,
               "Remaining": 5}
@@ -384,12 +384,17 @@ class Sheet:
         url_col = self._col_of(header, "url") or 1
         name_col = self._col_of(header, "streamer") or 2
         stint_col = self._col_of(header, "stint")
+        laps_col = self._col_of(header, "laps")
+        if "laps" in p and not laps_col:
+            raise ScriptError(f"no Laps column in the {'Qualifying' if p.get('tab') == 'Qualifying' else 'Schedule'} tab")
         if "url" in p:
             self._set(rows, row, url_col, p["url"])
         if "name" in p:
             self._set(rows, row, name_col, p["name"])
         if "stint" in p and stint_col:
             self._set(rows, row, stint_col, p["stint"])
+        if "laps" in p:
+            self._set(rows, row, laps_col, p["laps"])
 
     def _write_pov(self, p):
         rows = self._sheet("POV")

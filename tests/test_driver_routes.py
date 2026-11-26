@@ -1514,6 +1514,107 @@ def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
         f"the last row on air is passed without a count, so a later count reaches it: {calls} {rows_seen}"
 
 
+def t_a_changed_final_lap_count_reaches_the_final_lobby_at_once():
+    import threading, time
+    laps = {"n": 24}
+
+    class Source:
+        def get_rows(self):
+            return [("u", "A", "S1", 2), ("u", "B", "S2", 3)]
+
+        def final_laps(self):
+            return laps["n"]
+
+        def class_laps_at(self, idx):
+            return {}
+
+    class Relay:
+        solo, mode, race_source, idx = False, "race", Source(), 1
+        _warn_tick_error, _tick_ok = g.m.Relay._warn_tick_error, g.m.Relay._tick_ok
+
+        def on_air_row_idx(self):
+            return self.idx
+
+    got = []
+
+    class Svc:
+        def stint_switch(self, final_laps=None, **_kw):
+            got.append(("switch", final_laps))
+
+        def final_lobby_laps(self, n):
+            got.append(("laps", n))
+
+    stop = threading.Event()
+    worker = threading.Thread(target=g.m.stint_switch_watch,
+                              args=(Relay(), Svc(), stop, lambda: 30, 0.01), daemon=True)
+    worker.start()
+    try:
+        deadline = time.monotonic() + 2
+        while not got and time.monotonic() < deadline:
+            time.sleep(0.01)
+        laps["n"] = 20
+        while got[-1] != ("laps", 20) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        laps["n"] = None
+        while got[-1] != ("laps", 30) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        time.sleep(0.05)
+    finally:
+        stop.set()
+        worker.join(2)
+    assert got == [("switch", 24), ("laps", 20), ("laps", 30)], \
+        f"each change of the last row's count reaches the race once, a cleared one falls back to the setting: {got}"
+
+
+def _stint_schedule():
+    sched = g.m.ScheduleSource("http://sched", os.path.join(tempfile.mkdtemp(), "c.txt"), None)
+    sched.fetch = lambda timeout=15: [("https://youtu.be/a", "A", "Stint 1", 2),
+                                      ("https://youtu.be/b", "B", "Stint 2", 3)]
+    sched._fetched_laps = {2: 14, 3: 14}
+    sched.refresh()
+    ctl = g.m.SetupControl("http://push", None, schedule_source=sched)
+    ctl.autostart_worker = False
+    return sched, ctl
+
+
+def t_race_control_sets_a_stint_lap_count_that_the_race_shows_at_once():
+    sched, ctl = _stint_schedule()
+    srv, port, _path, _hub = _serve(solo=False, setup_ctl=ctl)
+    srv.relay.race_source = sched
+    rc, alice = g._tok("dave"), g._tok("alice")
+    try:
+        st, text, _h = _post(port, f"/console/race-control/drivers/race/stint-laps?t={rc}", {"row": 3, "laps": 11})
+        assert st == 200 and json.loads(text)["ok"] is True, (st, text)
+        race = json.loads(_req(port, f"/console/race-control/drivers/race?t={rc}")[1])
+        assert race["stints"] == [{"row": 2, "stint": "Stint 1", "laps": 14, "sync": None},
+                                  {"row": 3, "stint": "Stint 2", "laps": 11, "sync": "saving"}], race["stints"]
+        assert race["stint_row"] == 2, "the row on air"
+        assert ctl.saves.next_job() == (g.m.LAPS_TARGET, 3, {"laps": "11"}, 1), "the sheet gets the count after"
+        st, text, _h = _post(port, f"/console/race-control/drivers/race/stint-laps?t={rc}", {"row": 3, "laps": 0})
+        assert st == 400 and "1 to 999" in json.loads(text)["error"], (st, text)
+        st, text, _h = _post(port, f"/console/race-control/drivers/race/stint-laps?t={rc}", {"row": 3})
+        assert st == 400, "a missing count is no clear"
+        st, _t, _h = _post(port, f"/console/race-control/drivers/race/stint-laps?t={alice}", {"row": 3, "laps": 9})
+        assert st == 403, "a commentator sets no lap count"
+        with open(driver_race.audit_path_for(srv.race_svc._path), encoding="utf-8") as fh:
+            assert '"stint_laps"' in fh.read(), "the change is logged with its author"
+    finally:
+        srv.shutdown()
+
+
+def t_a_solo_race_has_no_stint_list():
+    sched, ctl = _stint_schedule()
+    srv, port, _path, _hub = _serve(solo=True, setup_ctl=ctl)
+    srv.relay.race_source = sched
+    try:
+        race = json.loads(_req(port, "/drivers/race")[1])
+        assert "stints" not in race, "a single lobby keeps its own lap count"
+        st, _t, _h = _post(port, "/drivers/race/stint-laps", {"row": 2, "laps": 9})
+        assert st == 409, st
+    finally:
+        srv.shutdown()
+
+
 def t_race_control_times_an_entry_whose_driver_never_sent_in_qualifying():
     import json as _json
     ctx = {"roster": {e: {"number": str(i + 1), "cupTeam": "Cup " + str(i)} for i, e in enumerate(ENTRIES)},

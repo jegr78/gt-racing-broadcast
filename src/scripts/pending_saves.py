@@ -14,7 +14,7 @@ CONFIRMED = "confirmed"
 # wait, so a row cannot stay pinned when the sheet stores a value differently.
 CONFIRM_GRACE_S = 120.0
 
-_FIELDS = ("url", "name", "stint")
+_FIELDS = ("url", "name", "stint", "laps")
 
 
 class _Entry:
@@ -110,7 +110,7 @@ class PendingSaves:
             for (t, row), e in list(self._entries.items()):
                 if t != target or e.state != CONFIRMED:
                     continue
-                shown = dict(zip(_FIELDS, sheet_rows.get(row, ("", "", "")), strict=True))
+                shown = dict(zip(_FIELDS, sheet_rows.get(row, ()), strict=False))
                 matches = all(shown.get(k, "") == v for k, v in e.fields.items())
                 if matches or now - e.confirmed_at >= CONFIRM_GRACE_S:
                     del self._entries[(t, row)]

@@ -84,9 +84,15 @@ so the race controls never scroll away:
   **Chat** tab by itself; the dot on **Quali** marks the session. A reload shows the area
   you last picked, never one the desk opened by itself.
 - **Live column**: a small program preview with **Hide** (hidden, the race controls move
-  up), what is on air, and the race controls: the finish mode and lap count, **Final
-  lap**, **Finish**, **RED FLAG**, and while the red flag is out the restart mode and
-  **Restart released**. The desk's status line and its last change sit below them.
+  up), what is on air, and the race controls: the finish mode (in a single lobby also
+  its lap count), **Final lap**, **Finish**, **RED FLAG**, and while the red flag is out
+  the restart mode, **Restart released** and in endurance the
+  [restart plan](Driver-Telemetry#red-flag-rejoin-and-corrections) with its buffer and
+  **Take**. The lap line shows the lobby on air against its stint's lap count. The
+  desk's status line and its last change sit below them.
+- **Stint laps** in the Race area, in endurance: each stint's lap count from the
+  Schedule's `Laps` cell. A change applies at once and reaches the Sheet in the
+  background; a row the Sheet has not taken yet says so.
 - **Track map** on top of the right column, above the crew chat: each car as a numbered
   dot on the layout's racing line, from the race table's own live data without the
   dashboard delay; in qualifying only the line. It stays hidden until the relay has the
