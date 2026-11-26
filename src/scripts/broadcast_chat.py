@@ -434,14 +434,17 @@ def channel_streams_url(entry):
     return f"https://www.youtube.com/channel/{e}/streams"
 
 
-def live_chat_page_url(video_id):
+YOUTUBE_ORIGIN = "https://www.youtube.com"
+
+
+def live_chat_page_url(video_id, origin=YOUTUBE_ORIGIN):
     """The popout live-chat page for a videoId; it carries the bootstrap."""
-    return f"https://www.youtube.com/live_chat?is_popout=1&v={video_id}"
+    return f"{origin}/live_chat?is_popout=1&v={video_id}"
 
 
-def get_live_chat_api_url(api_key):
+def get_live_chat_api_url(api_key, origin=YOUTUBE_ORIGIN):
     """The Innertube get_live_chat endpoint for a given API key."""
-    return ("https://www.youtube.com/youtubei/v1/live_chat/get_live_chat"
+    return (f"{origin}/youtubei/v1/live_chat/get_live_chat"
             f"?key={api_key}&prettyPrint=false")
 
 
@@ -457,13 +460,14 @@ def twitch_popout_chat_url(login):
     return f"https://www.twitch.tv/popout/{login}/chat"
 
 
-def primary_chat_target(keys):
+def primary_chat_target(keys, origin=YOUTUBE_ORIGIN):
     """The first compose target from an ordered list of supervisor reader keys, a
     YouTube videoId or "twitch:<login>", as {"platform", "url"}, or None.
 
     A broadcast stays on one channel, and during an A to B producer handover two
     YouTube videoIds are briefly live, where the FIRST is used. It follows the key
-    convention of BroadcastChatSupervisor._desired()."""
+    convention of BroadcastChatSupervisor._desired(). `origin` is the YouTube chat's
+    origin; "" names no YouTube target."""
     for key in keys or []:
         if not isinstance(key, str):
             continue
@@ -473,8 +477,8 @@ def primary_chat_target(keys):
                 return {"platform": "twitch", "url": twitch_popout_chat_url(login)}
         else:
             vid = youtube_video_id(key)
-            if vid:
-                return {"platform": "youtube", "url": live_chat_page_url(vid)}
+            if vid and origin:
+                return {"platform": "youtube", "url": live_chat_page_url(vid, origin)}
     return None
 
 

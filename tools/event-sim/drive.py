@@ -4,7 +4,7 @@
 every packet. It knows mechanisms only: start, pit, box, lobby, release, drop, rejoin,
 stop. `send(code, body)` is the transport (`Client.ingest` against a relay); `Runner`
 steps a field on real time in a thread. `write_track_data` gives an app home a racing
-line without downloaded GT7 data. Used by the event simulation's drivers role and by
+line: the host's downloaded one when it fits, else a simulated lap. Used by the event simulation's drivers role and by
 `tools/driver-replay.py`."""
 import bisect
 import http.client
@@ -12,6 +12,7 @@ import json
 import math
 import os
 import random
+import shutil
 import struct
 import sys
 import threading
@@ -27,6 +28,7 @@ if _SCRIPTS not in sys.path:
 import gt7_crypto  # noqa: E402
 import gt7_data  # noqa: E402
 import gt7_telemetry  # noqa: E402
+import gt7_tracks  # noqa: E402
 import telemetry_probe  # noqa: E402
 
 TICK_S = 0.2
@@ -48,6 +50,11 @@ TEAMS = ("Apex Works #11", "Blue Harbor Racing #22", "Cedar Motorsport #33", "De
          "Echo Racing #55", "Falcon Engineering #66", "Granite GP #77", "Harbor Lights #88",
          "Ion Racing #9", "Juniper Motorsport #10", "Kestrel Sim Racing #12", "Lakeside Racing #14",
          "Meridian Team #16", "Northwind Racing #18", "Orbit Motorsport #20")
+# Per team: a brand of src/assets/brands and a tile colour (Configuration Brand, BG Color).
+TEAM_LOOKS = (("Porsche", "#c8102e"), ("BMW", "#1c69d4"), ("Ferrari", "#e8b70a"), ("Audi", "#5c6670"),
+              ("Aston Martin", "#00665e"), ("Lamborghini", "#7ab800"), ("McLaren", "#ff8000"), ("AMG", "#00a19c"),
+              ("Ford", "#003478"), ("Nissan", "#8a1538"), ("Toyota", "#eb0a1e"), ("Honda", "#6d2077"),
+              ("Lexus", "#d9d9d6"), ("Mazda", "#101820"), ("Chevy", "#cd9834"))
 
 
 class DriveError(Exception):
@@ -59,6 +66,12 @@ def roster(cars):
     if type(cars) is not int or not 1 <= cars <= MAX_CARS:
         raise ValueError(f"cars is a whole number 1-{MAX_CARS}, not {cars!r}")
     return list(TEAMS[:cars])
+
+
+def text_colour(bg):
+    """A readable text colour on the tile colour `bg` (#rrggbb)."""
+    r, g, b = (int(bg[i:i + 2], 16) for i in (1, 3, 5))
+    return "#12161c" if 0.299 * r + 0.587 * g + 0.114 * b > 150 else "#ffffff"
 
 
 def driver_name(entry, stint):
@@ -169,14 +182,50 @@ def signatures_doc(track_id, path):
     return {"format": "gt7-datalogger-track-signatures", "version": 1, "signatures": [row] + pad}
 
 
-def write_track_data(runtime_base, track_id, length_m):
-    """Write the simulated line of `track_id` into `runtime_base`/gt7; returns its path."""
-    path = synthetic_path(length_m)
+def home_trace(runtime_base, track_id):
+    """The d/x/z line of `track_id` the relay reads from `runtime_base`, or None."""
+    return gt7_tracks.TrackDB.load(runtime_base, gt7_data.bundled_dir()).reference_trace(track_id)
+
+
+def line_note(runtime_base, track_id):
+    """Where the line of `track_id` in `runtime_base` came from, for the run's output."""
+    line = home_trace(runtime_base, track_id)
+    if not line:
+        return "none"
+    with open(os.path.join(gt7_data.data_dir(runtime_base), "signatures.json"), encoding="utf-8") as fh:
+        rows = json.load(fh)["signatures"]
+    if any(r.get("official_id") == track_id and r.get("provenance") == "simulation" for r in rows):
+        return f"simulated lap ({line[-1]['d']:.0f} m)"
+    db = gt7_tracks.TrackDB.load(runtime_base, gt7_data.bundled_dir())
+    name = (db.name(track_id) or {}).get("official_name") or track_id
+    return f"host signatures.json ({name}, {line[-1]['d']:.0f} m)"
+
+
+def _host_signatures(host, track_id, length_m):
+    """The host's downloaded signatures.json when it holds a line of `track_id` within the
+    relay's length tolerance of `length_m` (a scenario times its laps by that length), else None."""
+    if not host:
+        return None
+    path = os.path.join(gt7_data.data_dir(host), "signatures.json")
+    if gt7_data.resolve("signatures.json", host) != path:
+        return None
+    line = home_trace(host, track_id)
+    if not line or abs(line[-1]["d"] - length_m) > gt7_tracks.LENGTH_TOL * length_m:
+        return None
+    return path
+
+
+def write_track_data(runtime_base, track_id, length_m, host=None):
+    """Give `runtime_base`/gt7 a line of `track_id`: a copy of the `host` runtime's
+    downloaded signatures.json when it fits (`_host_signatures`), else the simulated lap."""
     target = gt7_data.data_dir(runtime_base)
     os.makedirs(target, exist_ok=True)
+    source = _host_signatures(host, track_id, length_m)
+    if source:
+        shutil.copyfile(source, os.path.join(target, "signatures.json"))
+        return
     with open(os.path.join(target, "signatures.json"), "w", encoding="utf-8") as fh:
-        json.dump(signatures_doc(track_id, path), fh)
-    return path
+        json.dump(signatures_doc(track_id, synthetic_path(length_m)), fh)
 
 
 class Sender:

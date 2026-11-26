@@ -371,13 +371,63 @@ def t_identity_strip_round_trips_through_a_frame():
     assert stream_stub.decode_identity(bytes(px), w, h) is None, "a grey cell is not read as a bit"
 
 
-def t_the_identity_strip_is_a_thin_band_at_the_bottom_edge():
+def t_the_identity_strip_is_a_thin_band_with_readable_cells():
     for w, h in ((640, 360), (426, 240)):
         boxes = stream_stub.identity_boxes(w, h, 173, 3)
         tops = {y for _x, y, _w, bh, _white in boxes}
         heights = {bh for _x, _y, _w, bh, _white in boxes}
-        assert tops == {h - max(heights)} and max(heights) <= max(stream_stub.STRIP_MIN, h // 30), \
-            f"the strip is a band of at most a thirtieth of the picture at its bottom edge: {heights} of {h}"
+        widths = {bw for _x, _y, bw, _bh, _white in boxes}
+        assert len(tops) == 1 and max(heights) <= max(stream_stub.STRIP_MIN, h // 30), \
+            f"the strip is one band of at most a thirtieth of the picture: {tops}, {heights} of {h}"
+        assert min(widths) >= stream_stub.STRIP_MIN, f"each cell is wide enough for the decoder's patch: {widths}"
+
+
+def _program_rects():
+    """{name: (x, y, w, h)} on the 1920x1080 program: the demo HUD's slots, its league logo
+    and the driver dashboard's track map."""
+    import re
+    with open(os.path.join(ROOT, "profiles", "demo", "overlay", "layout-hud.json"), encoding="utf-8") as fh:
+        slots = json.load(fh)["slots"]
+    rects = {k: (v["left"], v["top"], v["width"], v["height"]) for k, v in slots.items()}
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as fh:
+        m = re.search(r"#league-logo \{ left: (\d+)px; top: (\d+)px; width: (\d+)px; height: (\d+)px", fh.read())
+    rects["league-logo"] = tuple(int(g) for g in m.groups())
+    with open(os.path.join(ROOT, "src", "obs", "drivers.html"), encoding="utf-8") as fh:
+        m = re.search(r"#drivers-map \{ position: absolute; right: (\d+)px; top: (\d+)px; width: (\d+)px; "
+                      r"height: (\d+)px", fh.read())
+    right, top, w, h = (int(g) for g in m.groups())
+    rects["drivers-map"] = (1920 - right - w, top, w, h)
+    return rects
+
+
+def _overlaps(a, b):
+    return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
+
+
+def t_the_cards_clock_and_strip_stay_clear_of_the_hud():
+    rects = _program_rects()
+    width, height = stream_stub.width_for(360), 360
+    scale = 1920 / width
+    x, y, side = stream_stub.card_clock(width, height)
+    clock = tuple(round(v * scale) for v in (x, y, side, side))
+    hits = [k for k, r in rects.items() if _overlaps(clock, r)]
+    assert not hits, f"the card's clock {clock} on program sits under the HUD's {hits}"
+    for w, h in ((640, 360), (426, 240)):
+        s = 1920 / w
+        for bx, by, bw, bh, _white in stream_stub.identity_boxes(w, h, 173, 3):
+            cell = (bx * s, by * s, bw * s, bh * s)
+            assert any(px <= cell[0] and py <= cell[1] and cell[0] + cell[2] <= px + pw and cell[1] + cell[3] <= py + ph
+                       for px, py, pw, ph in stream_stub.OVERLAY_PANELS), \
+                f"the identity strip's cell {cell} lies under an opaque panel of the demo Overlay ({w}x{h})"
+            hits = [k for k, r in rects.items() if _overlaps(cell, r) and not k.startswith(("session", "streamer",
+                                                                                          "round", "race-control"))]
+            assert not hits, f"the strip's cell {cell} sits under the HUD's {hits}"
+    team = [r for k, r in rects.items() if k.startswith("team")]
+    row = (min(r[0] for r in team), min(r[1] for r in team), 0, 0)
+    row = (row[0], row[1], max(r[0] + r[2] for r in team) - row[0], 1080 - row[1])
+    for bx, by, bw, bh, _white in stream_stub.identity_boxes(width, height, 173, 3):
+        cell = tuple(round(v * scale) for v in (bx, by, bw, bh))
+        assert not _overlaps(cell, row), f"the identity strip's cell {cell} shows in the HUD's team row {row}"
 
 
 def t_ffmpeg_argv_is_conservative():
@@ -517,8 +567,13 @@ def t_ytdlp_stand_in_answers_the_relay_resolve():
         assert hls is None and relay.classify_source_state(err) == "not_live_yet", err
         hls, err, _q = relay.resolve_hls("https://www.youtube.com/watch?v=abc", None, LOG)
         assert hls is None and "sim://" in err, "a real URL is never resolved"
-        assert relay.yt_live_video_lookup("sim://comms1", None) is None, "the chat lookup wraps the name: refused"
+        assert relay.yt_live_video_lookup("sim://comms1", None) == [], "an ended channel is definitely not live"
         stub.channel("comms1", status="live")
+        ids = relay.yt_live_video_lookup("sim://comms1", None)
+        assert ids == [stream_stub.video_id("comms1")], f"the broadcast chat finds the live stream: {ids}"
+        for name in ("comms1", "abcdefghijk"):
+            assert relay.broadcast_chat.youtube_video_id(stream_stub.video_id(name)) is None, \
+                f"a simulated stream id never passes for a YouTube one: {stream_stub.video_id(name)}"
         jar = os.path.join(stub.directory, "jar.txt")
         r = subprocess.run(["yt-dlp", "--cookies-from-browser", "firefox", "--cookies", jar, "--skip-download",
                             "--no-warnings", "sim://comms1"], capture_output=True, text=True,

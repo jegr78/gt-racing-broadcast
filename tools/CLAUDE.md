@@ -490,9 +490,10 @@ every other address; they open no connection. `StreamStub(dir).install()` writes
 The picture comes from ffmpeg: `testsrc2` at 640x360 and 25 fps, mpeg2video and mp2 in
 MPEG-TS. It carries stint, commentator and channel as drawtext from `label.txt` in
 fontconfig's default font; if drawtext fails, the pull logs it and goes on without text.
-An 18-cell strip, a band of a thirtieth of the picture (at least `STRIP_MIN` = 8 px) at
-the bottom edge, holds the channel's `code` and stint, and the audio is a
-sine at `tone_hz(code)`.
+An 18-cell strip, a band of a thirtieth of the picture (at least `STRIP_MIN` = 8 px) under
+the demo Overlay's opaque lower panel (`OVERLAY_PANELS`) and above the HUD's team row, holds
+the channel's `code` and stint, and the audio is a sine at `tone_hz(code)`. A stream's id is
+`sim:<name>` (`video_id`), never one a YouTube id check accepts.
 `decode_identity(rgb, w, h)` reads `(code, stint)` back from a grabbed frame. The stand-in
 copies ffmpeg's output itself, so killing it leaves ffmpeg on a broken pipe. A freeze,
 a stall's end or a text fallback starts a new ffmpeg; `TsSplicer` forwards whole 188-byte
@@ -506,7 +507,8 @@ the stand-in processes read it) is what a record run's feeds show: the demo over
 colours (`profiles/demo/overlay/hud.css`) with a slowly moving `gradients` source, and
 overlaid the images in `DIR/cards/` (`card_paths`): `<channel>.png` with the stint and the
 commentator's name, and a clock whose `hand.png` turns once a minute over `dial.png` from the
-pull's offset, so a restarted ffmpeg does not reset it. A record run renders those images
+pull's offset, so a restarted ffmpeg does not reset it. The clock sits centred under the
+title (`card_clock`), clear of the HUD's logo and lower third and the dashboard's map. A record run renders those images
 with Playwright's Chromium before the relay starts; ffmpeg draws no text, because stock
 builds such as Homebrew's lack `drawtext`. A channel the `stream` role creates during the
 run, or whose stint or commentator it changes, gets its card rendered in the run's browser
@@ -857,10 +859,16 @@ Event data a scenario sets for the roles (`[event]`): `track` (a GT7 layout id),
 (default 1200, at least 860), `cars` (1-15, the roster in the Configuration tab's Teams
 column, `drive.TEAMS`), `seed`, `parts` (0-9), `qualifying_part` and `probe` (the relay's
 telemetry probe ingest on). The stack then gives the temporary app home a racing
-line (`drive.write_track_data`: a stadium-shaped lap as the layout's `signatures.json`
-row, since the relay's race needs a downloaded line and the network guard blocks
-`gt7-data update`), one placeholder graphic (Start event refuses a machine without any)
-and the RED FLAG banner in the Race Control vocabulary. `ctx.event_link("invite" |
+line (`drive.write_track_data`, since the relay's race needs a downloaded line and the
+network guard blocks `gt7-data update`): a copy of the checkout's own `runtime/gt7/signatures.json`
+when it holds the layout's line within 3 % of `track_length_m` (never committed), else a
+stadium-shaped lap as the layout's row; the drivers drive the same line (`ctx.track_trace`).
+It also gives one placeholder graphic (Start event refuses a machine without any), the RED
+FLAG banner in the Race Control vocabulary, each team a brand of `src/assets/brands` and a
+tile colour (`drive.TEAM_LOOKS`), the Setup tab's Team 1-3 and the Overlay tab's round
+title and the layout's country. The Channel tab's `sim://broadcast` is a live stub
+channel, and `fakes/chat_sim.py` stands in for its YouTube live chat
+(`RACECAST_SIM_BROADCAST_CHAT_URL`): the relay's own reader shows a viewer message every 20 s. The run prints, and the report's `setup.track_line` keeps, which line the cars drive. `ctx.event_link("invite" |
 "timing")` reads the ids Start event wrote into the app home. They are credentials.
 `redaction.py` is the one filter for them: `Engine.data` passes everything the run writes
 (step errors, results, check details, findings, and so the printed lines and both report
@@ -984,7 +992,8 @@ python3 tools/event-sim/event_sim.py --restore-obs   # macOS: put back the OBS c
   start. It goes through the run's redaction.
 - Feeds and clips: the stream stub runs the `card` look, and before the relay starts the
   run renders every title in one Chromium session (the cards of the scenario's
-  commentators, and the clip titles) and draws `intro.mp4`, `trailer.mp4` and `outro.mp4`
+  commentators, the clip titles and a demo stand-in for every graphic the collection reads,
+  into the app home's `runtime/demo/graphics`) and draws `intro.mp4`, `trailer.mp4` and `outro.mp4`
   (9 s, the title image over the card colours, silent audio) into the app home's
   `runtime/demo/media`, where the localized collection reads them.
 - Limits: `record.py` states `RECORD_MEMORY` (6 GiB: on macOS `full` with page videos

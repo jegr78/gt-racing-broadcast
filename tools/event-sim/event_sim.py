@@ -41,6 +41,11 @@ WORK_NOTE = "work-dir.txt"   # names the run's own work dir while it exists
 TRACES = ("off", "fail", "all")
 
 
+def setup_meta(load, trace, st):
+    """The report's run setup: CPU load, tracing and where the drivers' line came from."""
+    return {"load": load, "trace": trace, "track_line": st.track_line}
+
+
 def _repeat_count(text):
     n = int(text)
     if not 1 <= n <= MAX_REPEAT:
@@ -160,11 +165,13 @@ def _run(scn, out, work, headed=False, no_skips=False, trace="off", load=None, r
         except Exception as exc:
             print(f"event-sim: the stack did not start: {exc}", file=sys.stderr)
             return 2
+        print(f"event-sim: track line: {st.track_line}")
         if busy:
             busy.start(work, stack.lifetime(scn))
         ctx = engine.RunContext(urls=st.urls, token=st.token, stub=st.stub, obs=st.obs,
                                 browser=br, out_dir=out, event=scn.event, event_link=st.event_link,
-                                secrets=st.run_secrets(), kill_relay=st.kill_relay, trace=trace, recorder=rec)
+                                secrets=st.run_secrets(), kill_relay=st.kill_relay, trace=trace, recorder=rec,
+                                track_trace=st.track_trace)
         eng = engine.Engine(scn, ctx, st.probes(), registry=roles.default_registry(),
                             shots_dir=os.path.join(out, "shots"), final_checks=[st.log_checks],
                             no_skips=no_skips, traces_dir=os.path.join(out, "traces"))
@@ -210,7 +217,7 @@ def _run(scn, out, work, headed=False, no_skips=False, trace="off", load=None, r
             if "--restore-obs" in p:
                 print(f"event-sim: {p}", file=sys.stderr)
         if data is not None:
-            data["setup"] = {"load": load, "trace": trace}
+            data["setup"] = setup_meta(load, trace, st)
             for p in problems:
                 data["findings"].append({"severity": "soft", "role": "", "step": "", "message": ctx.scrub(p)})
             report.write(out, data)

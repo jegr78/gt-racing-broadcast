@@ -176,7 +176,10 @@ never the real one.
   falling back; `RACECAST_SIM_SHEET_PUSH_URL` and `RACECAST_SIM_DISCORD_WEBHOOK_URL` replace the
   league values in `config.resolve_config` (`config_overrides`), which also blanks Discord
   OAuth/voice and the timing host keys; `RACECAST_SIM_LEAGUE_SERVICE_URL` (loopback http)
-  and `_KEY` replace `LEAGUE_SERVICE_URL`/`_KEY`, off when unset; `env_overrides` does the same for the env vars
+  and `_KEY` replace `LEAGUE_SERVICE_URL`/`_KEY`, off when unset; `RACECAST_SIM_BROADCAST_CHAT_URL`
+  (loopback http, `youtube_origin`) replaces `https://www.youtube.com` for the relay's broadcast
+  chat reader, off when unset, and a `sim://` Channel row reaches the yt-dlp stand-in as it is;
+  `env_overrides` does the same for the env vars
   (`_apply_profile_env`, `_bootstrap`, the relay's `simulation_startup`), so a value from
   the shell or the machine `.env` cannot leak through.
   `RACECAST_SIM_RELAY_PORT` (required, a port) moves the relay control port:

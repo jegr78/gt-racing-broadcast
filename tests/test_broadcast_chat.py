@@ -292,11 +292,22 @@ def t_channel_streams_url_from_id():
 
 
 def t_live_chat_page_url():
-    assert "v=vid9" in bc.live_chat_page_url("vid9")
+    assert bc.live_chat_page_url("vid9") == "https://www.youtube.com/live_chat?is_popout=1&v=vid9"
+    assert bc.live_chat_page_url("vid9", "http://127.0.0.1:7") == "http://127.0.0.1:7/live_chat?is_popout=1&v=vid9", \
+        "a simulation names its own origin"
+
+
+def t_the_chat_target_follows_the_chat_origin():
+    assert bc.primary_chat_target(["dQw4w9WgXcQ"])["url"].startswith("https://www.youtube.com/live_chat")
+    assert bc.primary_chat_target(["dQw4w9WgXcQ"], "") is None, "a simulation without a chat names no target"
+    assert bc.primary_chat_target(["dQw4w9WgXcQ"], "http://127.0.0.1:7")["url"].startswith("http://127.0.0.1:7/"), \
+        "a simulation never builds a youtube.com URL"
 
 
 def t_api_url_includes_key():
-    assert "key=AIzaX" in bc.get_live_chat_api_url("AIzaX")
+    assert bc.get_live_chat_api_url("AIzaX") == \
+        "https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=AIzaX&prettyPrint=false"
+    assert bc.get_live_chat_api_url("k", "http://127.0.0.1:7").startswith("http://127.0.0.1:7/youtubei/v1/")
 
 
 # compose targets (popup)

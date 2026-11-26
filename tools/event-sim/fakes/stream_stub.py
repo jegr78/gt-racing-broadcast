@@ -61,6 +61,9 @@ STRIP_MIN = 8            # px; the decoder reads a 5x5 patch in each cell's midd
 LOOKS = ("pattern", "card")
 # The card look's colours: the demo profile's overlay (profiles/demo/overlay/hud.css).
 CARD_BG, CARD_PANEL, CARD_TEXT, CARD_MUTED = "0x12161c", "0x243039", "0xeef0f2", "0x9aa6b2"
+# The demo Overlay graphic's opaque panels on the 1920x1080 program (x, y, w, h): behind the
+# HUD's stint and clock, and its lower third. The identity strip lies under the lower one.
+OVERLAY_PANELS = ((700, 28, 534, 68), (300, 910, 1310, 170))
 CARDS = "cards"         # <dir>/cards/: the images a record run renders for the card look
 CardImages = namedtuple("CardImages", "title dial hand")
 YTDLP_VERSION = "2026.01.01"
@@ -130,6 +133,11 @@ def channel_name(name):
 
 def _valid_name(name):
     return channel_name(name) is not None
+
+
+def video_id(name):
+    """A channel's stream id: never 11 id characters, so nothing takes it for a YouTube video."""
+    return "sim:" + name
 
 
 def channel_path(directory, name):
@@ -553,9 +561,11 @@ def _bits(code, stint):
 
 
 def identity_boxes(width, height, code, stint):
-    """(x, y, w, h, white) per cell of the identity strip at the bottom of the picture."""
-    cw, bh = width // CELLS, max(STRIP_MIN, height // 30)
-    return [(i * cw, height - bh, cw, bh, bool(bit)) for i, bit in enumerate(_bits(code, stint or 0))]
+    """(x, y, w, h, white) per cell of the identity strip: under the demo Overlay's lower panel
+    (OVERLAY_PANELS), above the HUD's team row."""
+    cw, bh = width // 28, max(STRIP_MIN, height // 30)
+    x0, y0 = width // 6, height * 31 // 36
+    return [(x0 + i * cw, y0, cw, bh, bool(bit)) for i, bit in enumerate(_bits(code, stint or 0))]
 
 
 def decode_identity(rgb, width, height):
@@ -602,6 +612,14 @@ def card_images(directory, name):
     return paths if all(os.path.isfile(p) for p in paths) else None
 
 
+def card_clock(width, height):
+    """(x, y, side) of the card's clock in a picture of width x height: centred under the
+    title, where the HUD's lower third, the dashboard's tower and map and the logo leave the
+    program free."""
+    side = height // 8 // 2 * 2
+    return (width - side) // 2, height * 2 // 3, side
+
+
 def _card(width, height, mode, card, offset):
     """(sources, graph) of the card look: the demo colours with a slow moving gradient, the
     channel's title image and a clock whose hand turns once a minute from `offset`; `freeze`
@@ -612,14 +630,14 @@ def _card(width, height, mode, card, offset):
         sources = [("lavfi", f"gradients=size={width}x{height}:rate={FPS}:c0={CARD_BG}:c1={CARD_PANEL}:n=2:speed=0.002")]
     if card is None:
         return sources, "[0:v]null"
-    side = height // 5 // 2 * 2
+    x, y, side = card_clock(width, height)
     sources.append(("image", card.title))
     graph = f"[2:v]scale={width}:{height},format=rgba[title];[0:v][title]overlay=0:0"
     if mode != "freeze":
         sources += [("image", card.dial), ("image", card.hand)]
         graph = (f"[2:v]scale={width}:{height},format=rgba[title];[3:v]scale={side}:{side},format=rgba[dial];"
                  f"[4:v]scale={side}:{side},format=rgba,rotate=a=(t+{offset:.3f})*PI/30:c=none[hand];"
-                 f"[dial][hand]overlay=0:0[clock];[0:v][title]overlay=0:0[bg];[bg][clock]overlay=W-w-16:16")
+                 f"[dial][hand]overlay=0:0[clock];[0:v][title]overlay=0:0[bg];[bg][clock]overlay={x}:{y}")
     return sources, graph
 
 
@@ -892,21 +910,23 @@ def ytdlp_main(directory, argv, out, err):
         err.write(f"ERROR: [sim] {url}: channel state unreadable: {e}\n")
         return 1
     status = ch["status"] if ch else "offline"
+    if ch and o["dump_json"] and o["flat"]:
+        # A channel's streams tab answers even when nothing on it is live.
+        entries = [{"id": video_id(name), "live_status": _LIVE_STATUS[status], "is_live": True}] \
+            if status == "live" else []
+        out.write(json.dumps({"_type": "playlist", "id": name, "channel_id": None, "entries": entries}) + "\n")
+        return 0
     if status != "live" and not (o["ignore_no_formats"] and status in _LIVE_STATUS):
         note = "" if ch else " (no such simulated channel)"
         err.write(f"ERROR: [youtube] {name}: {_YTDLP_ERRORS[status]}{note}\n")
         return 1
     live = status == "live"
     height = height_for(o["format"])
-    fields = {"id": name, "title": label_text(ch).replace("\n", " - "), "channel": ch.get("commentator") or name,
+    fields = {"id": video_id(name), "title": label_text(ch).replace("\n", " - "), "channel": ch.get("commentator") or name,
               "live_status": _LIVE_STATUS[status], "is_live": live, "height": height if live else None,
               "fps": FPS if live else None, "url": resolved_url(name, height) if live else None}
     if o["dump_json"]:
-        if o["flat"]:
-            entries = [{"id": name, "live_status": fields["live_status"], "is_live": live}]
-            out.write(json.dumps({"_type": "playlist", "id": name, "channel_id": None, "entries": entries}) + "\n")
-        else:
-            out.write(json.dumps(fields) + "\n")
+        out.write(json.dumps(fields) + "\n")
         return 0
     for template in o["prints"]:
         out.write(_render(template, fields) + "\n")

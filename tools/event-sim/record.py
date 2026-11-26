@@ -262,6 +262,73 @@ def clip_jobs(directory, subtitle):
     return images, jobs
 
 
+GRAPHICS_TOKEN = "__RACECAST_GRAPHICS__/"
+# Light plates behind the demo HUD's team logos (profiles/demo/overlay/layout-hud.json), so a
+# dark brand stays legible on the dark lower panel.
+TEAM_LOGOS = ((324, 1013, 54, 50), (768, 1013, 54, 50), (1212, 1013, 54, 50))
+PLATE_MARGIN = 4
+PLATE_COLOUR = "#eef0f2"
+FLAG_COLOURS = {"Green": "#1f8a3b", "Yellow": "#f2c014", "Red": "#c62121", "Safety Car": "#f2c014",
+                "Virtual Safety Car": "#f2c014"}    # the HUD's flag colours (src/obs/hud.html)
+
+
+def collection_graphics(collection):
+    """The graphic labels a collection's image sources read (`__RACECAST_GRAPHICS__/<Label>.png`)."""
+    found = set()
+
+    def walk(value):
+        if isinstance(value, dict):
+            for v in value.values():
+                walk(v)
+        elif isinstance(value, list):
+            for v in value:
+                walk(v)
+        elif isinstance(value, str) and value.startswith(GRAPHICS_TOKEN) and value.endswith(".png"):
+            found.add(value[len(GRAPHICS_TOKEN):-len(".png")])
+    walk(collection)
+    return sorted(found)
+
+
+def graphic_html(label, subtitle, size=CLIP_SIZE):
+    """A demo stand-in for the league graphic `label`. Overlay, the flags, the grid rows and the
+    interview frame lie over a live picture and stay transparent outside their own frame or band; every other
+    graphic is a full page in the card colours with its name and the league's."""
+    w, h = size
+    body = f'<html><body style="margin:0;width:{w}px;height:{h}px;background:transparent;position:relative">'
+    box = "position:absolute;box-sizing:border-box;"
+    if label == "Overlay":
+        return body + "".join(f'<div style="{box}background:{_css(stream_stub.CARD_BG)};left:{x}px;top:{y}px;'
+                              f'width:{w}px;height:{h}px;border-radius:10px"></div>'
+                              for x, y, w, h in stream_stub.OVERLAY_PANELS) + \
+            "".join(f'<div style="{box}background:{PLATE_COLOUR};left:{x - PLATE_MARGIN}px;top:{y - PLATE_MARGIN}px;'
+                    f'width:{w + 2 * PLATE_MARGIN}px;height:{h + 2 * PLATE_MARGIN}px;border-radius:6px"></div>'
+                    for x, y, w, h in TEAM_LOGOS) + "</body></html>"
+    if label.startswith("Flag "):
+        kind = label[len("Flag "):]
+        paint = FLAG_COLOURS.get(kind, "repeating-conic-gradient(#111 0 25%,#fff 0 50%) 0 0/28px 28px")
+        edges = ("left:0;top:0;width:100%;height:14px", "left:0;bottom:0;width:100%;height:14px",
+                 "left:0;top:0;width:14px;height:100%", "right:0;top:0;width:14px;height:100%")
+        return body + "".join(f'<div style="{box}{e};background:{paint}"></div>' for e in edges) + "</body></html>"
+    if label == "Post Race Interviews":
+        return (body + f'<div style="{box}left:0;top:0;width:100%;height:110px;background:{_css(stream_stub.CARD_BG)};'
+                f"color:{_css(stream_stub.CARD_TEXT)};font:600 48px Helvetica,Arial,sans-serif;display:flex;"
+                f'align-items:center;justify-content:center">{html.escape(label)}</div></body></html>')
+    if label.startswith("Grid Row "):
+        n = int(label.rsplit(" ", 1)[1]) if label.rsplit(" ", 1)[1].isdigit() else 1
+        return (body + f'<div style="{box}left:260px;top:{150 + (n - 1) * 92}px;width:1400px;height:80px;'
+                f"background:{_css(stream_stub.CARD_PANEL)};color:{_css(stream_stub.CARD_TEXT)};"
+                "font:600 36px Helvetica,Arial,sans-serif;display:flex;align-items:center;padding-left:32px"
+                f'">Row {n}</div></body></html>')
+    title = title_html([(label, stream_stub.CARD_TEXT, 1 / 10), (subtitle, stream_stub.CARD_MUTED, 1 / 22)], size)
+    return title.replace("background:transparent", f"background:linear-gradient(135deg,"
+                         f"{_css(stream_stub.CARD_BG)},{_css(stream_stub.CARD_PANEL)})", 1)
+
+
+def graphic_jobs(directory, labels, subtitle):
+    """Render jobs of the demo graphics `labels` as `directory`/<Label>.png."""
+    return [(graphic_html(label, subtitle), os.path.join(directory, label + ".png"), CLIP_SIZE) for label in labels]
+
+
 def clip_argv(ffmpeg, out, image, seconds=CLIP_SECONDS, size=CLIP_SIZE):
     """ffmpeg writing a title clip to `out` (mp4, silent audio track): the card look's
     colours under the rendered title `image`, a fade in and out."""
