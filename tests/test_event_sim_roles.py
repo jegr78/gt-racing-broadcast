@@ -173,6 +173,7 @@ class Page:
         self.fit = {}            # live column selector -> what FIT_SCRIPT measured there
         self.size = (1440, 900)
         self.focused = None
+        self.closed = False
 
     def add(self, selector, **kw):
         self.els[selector] = El(**kw)
@@ -190,15 +191,38 @@ class Page:
     def once(self, event, fn):
         self.handlers["once:" + event] = fn
 
+    def remove_listener(self, event, fn):
+        for key in (event, "once:" + event):
+            if self.handlers.get(key) is fn:
+                del self.handlers[key]
+
+    def _dialog_handler(self):
+        return self.handlers.pop("once:dialog", None) or self.handlers.get("dialog")
+
     def confirm(self):
         """The page's native confirm(): True when a handler accepted it, as Playwright
         dismisses a dialog nobody handles."""
-        fn = self.handlers.pop("once:dialog", None)
+        fn = self._dialog_handler()
         if fn is None:
             return False
         answer = []
-        fn(type("Dialog", (), {"accept": lambda self: answer.append(True)})())
+        fn(type("Dialog", (), {"accept": lambda self, text=None: answer.append(True)})())
         return bool(answer)
+
+    def prompt(self):
+        """The page's native prompt(): the text a handler accepted it with, else None."""
+        fn = self._dialog_handler()
+        if fn is None:
+            return None
+        answer = []
+        fn(type("Dialog", (), {"accept": lambda self, text=None: answer.append(text)})())
+        return answer[0] if answer else None
+
+    def close(self):
+        self.closed = True
+
+    def wait_for_load_state(self, state="load", timeout=None):
+        pass
 
     def goto(self, url, timeout=None):
         self.url = url
@@ -237,9 +261,28 @@ class Page:
         self.shots.append((path, "", [m.selector for m in mask]))
 
 
+class PageWait:
+    def __init__(self, context):
+        self.context = context
+
+    def __enter__(self):
+        self.mark = len(self.context.opened)
+        return self
+
+    def __exit__(self, kind, exc, tb):
+        if kind is None:
+            if len(self.context.opened) <= self.mark:
+                raise TimeoutError("Timeout exceeded while waiting for event \"page\"")
+            self.value = self.context.opened[self.mark]
+        return False
+
+
 class Context:
     def __init__(self, page):
-        self.page, self.closed = page, False
+        self.page, self.closed, self.opened = page, False, []
+
+    def expect_page(self, timeout=None):
+        return PageWait(self)
 
     def new_page(self):
         return self.page
@@ -294,17 +337,18 @@ def fails(fn, *needles):
 
 # -- every role, every selector ---------------------------------------------------
 def t_the_registry_has_every_party_and_its_actions():
-    want = {"producer": {"open", "pick_track", "race_settings", "start_event", "stop_event", "relay_restart"},
-            "director": {"open", "approve_link", "next", "scene", "red_flag",
+    want = {"producer": {"open", "hold", "pick_track", "race_settings", "start_event", "stop_event", "relay_restart"},
+            "director": {"open", "hold", "approve_link", "next", "scene", "red_flag",
                          "show_dashboard", "cue", "chat", "graphic", "pov", "hud", "mode", "start_part",
-                         "end_part", "fit", "view", "play"},
-            "race_control": {"open", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
+                         "end_part", "fit", "view", "play", "timer"},
+            "race_control": {"open", "hold", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
                              "release", "retire", "rejoin", "estimate", "add_lap", "set_time", "correction",
                              "note", "fit", "confirm_dc", "class_laps", "view", "reject_driver",
-                             "correct_driver", "compound"},
-            "commentator": {"open", "submit_link", "chat", "fit", "view"},
-            "viewer": {"open", "read"},
-            "driver": {"open", "register"},
+                             "correct_driver", "compound", "compounds", "race_start", "approve_all",
+                             "show_standings"},
+            "commentator": {"open", "hold", "submit_link", "chat", "fit", "view"},
+            "viewer": {"open", "hold", "read"},
+            "driver": {"open", "hold", "register"},
             "drivers": {"register", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop"},
             "probe": {"watch", "mark", "kit", "race_reset", "spectator", "stop_spectator", "check", "report"}}
     for kind, actions in want.items():
@@ -722,6 +766,21 @@ def t_mode_accepts_the_pages_confirm_dialog():
         "a dialog nobody accepts is dismissed and the switch does nothing"
 
 
+def t_a_dialog_answer_never_outlives_its_action():
+    role, page, _ = make(party.DirectorRole)
+    for area in ("hud", "schedule"):
+        page.add(f'.navbtn[data-area="{area}"]')
+    page.add("#timerInfo", text="Timer: READY · duration 6:00:00")
+    fails(lambda: role.do("timer", {"duration": "0:38:00"}), "Timer SET")
+    assert page.prompt() is None, "a SET that never clicked leaves no answer for the next dialog"
+    page.add('#timerBus button.k:has-text("SET…")', on_click=lambda: None)
+    fails(lambda: role.do("timer", {"duration": "0:38:00"}), "/timer/set/0:38:00")
+    assert page.prompt() is None, "a SET that opened no prompt leaves no answer for the next dialog"
+    page.add("#modeChip", text="RACE")
+    page.add("#modeSwitch", text="switch → QUALIFYING", on_click=lambda: None)
+    fails(lambda: role.do("mode", {"mode": "qualifying"}), "/mode/qualifying")
+    assert page.confirm() is False, "nor a mode switch that opened no confirm"
+
 def t_a_part_is_started_and_ended_with_the_typed_phrase():
     role, page, _ = make(party.DirectorRole)
     page.add('.navbtn[data-area="broadcast"]')
@@ -1020,6 +1079,37 @@ def t_cue_and_chat_send_what_was_typed():
     assert role.do("chat", {"text": "go"}) == {"text": "go"} and page.els["#chatName"].value == "Director"
 
 
+def t_hold_keeps_the_page_in_view_for_its_seconds():
+    role, page, _ = make(party.DirectorRole)
+    start = page.clock.t
+    assert role.do("hold", {"seconds": 15}) == {"seconds": 15}
+    assert page.clock.t - start >= 15, "the action itself lasts the hold, so the film plays it in real time"
+    for bad in (0, -1, "15", True, 301):
+        fails(lambda bad=bad: role.do("hold", {"seconds": bad}), "hold: seconds")
+
+
+def t_the_director_sets_the_race_duration_through_the_set_prompt():
+    role, page, _ = make(party.DirectorRole)
+    page.add('.navbtn[data-area="hud"]')
+    info = page.add("#timerInfo", text="Timer: READY · duration 6:00:00 · sheet ok")
+    answers = []
+
+    def click():
+        text = page.prompt()
+        answers.append(text)
+        if text:
+            page.respond("/timer/set/" + text)
+            info.text = f"Timer: READY · duration {text} · sheet ok"
+    page.add('#timerBus button.k:has-text("SET…")', on_click=click)
+    assert role.do("timer", {"duration": "0:30:00"}) == {"duration": "0:30:00"}
+    assert answers == ["0:30:00"], "the prompt is answered with the duration, not its 6:00:00 default"
+    assert '.navbtn[data-area="hud"]' in page.clicks, "the timer keys are in the HUD area"
+    for bad in ("30:00", "0:3:00", "", "0:30:00/x"):
+        fails(lambda bad=bad: role.do("timer", {"duration": bad}), "timer: duration")
+    info.text = "Timer: RUNNING · 0:29:00 left · sheet ok"
+    page.add('#timerBus button.k:has-text("SET…")', on_click=lambda: page.respond("/timer/set/" + page.prompt()))
+    fails(lambda: role.do("timer", {"duration": "0:45:00"}), "duration 0:45:00")
+
 # -- race control ---------------------------------------------------------------------
 RC_AREAS = ("race", "drivers", "corrections", "qualifying", "dashboard", "note")
 
@@ -1306,6 +1396,76 @@ def t_race_control_sets_a_tyre_compound_in_the_dashboard_area():
     box.on_change = lambda: page.respond("/console/race-control/drivers/race/compound", status=400)
     fails(lambda: role.do("compound", {"entry": "B #2", "code": "RS"}), "HTTP 400")
 
+
+def t_race_start_is_armed_then_confirmed_in_the_race_area():
+    role, page, _ = desk()
+    key = desk_button(page, "Race start", "/drivers/race/start", "Race start armed: the lobby laps are cleared")
+    assert role.do("race_start", {}) == {"status": "Race start armed: the lobby laps are cleared"}
+    assert page.clicks[-3:] == ['.navbtn[data-area="race"]', key, key], "the Race area, arm, then confirm"
+    desk_button(page, "Race start", "/drivers/race/start", "Race start refused", cls="msg err")
+    fails(lambda: role.do("race_start", {}), "Race start refused")
+
+
+def t_approve_all_takes_every_waiting_request_with_one_confirmed_press():
+    role, page, _ = desk()
+    page.add(".dd .req.waiting", count=3)
+    key = '.dd button[data-label="Approve all waiting"]'
+    button = page.add(key, text="Approve all waiting")
+    status = page.els['.dd .msg.cur[role="status"]']
+    answer = {"ok": True, "approved": [{"name": "Ann"}, {"name": "Bo"}], "skipped": [{"name": "Cy", "reason": "x"}]}
+
+    def click():
+        if button.text == "Approve all waiting":
+            button.text = "Confirm Approve all waiting"
+            return
+        button.text = "Approve all waiting"
+        page.responses.append(Response(BASE + "/console/race-control/drivers/requests/approve-pending", 200, answer))
+        status.text, status.attrs["class"] = "2 drivers approved; 1 still waiting: Cy (x)", "msg"
+        page.els[".dd .req.waiting"].count = 1
+    button.on_click = click
+    out = role.do("approve_all", {})
+    assert out == {"approved": 2, "skipped": 1, "names": ["Ann", "Bo"],
+                   "status": "2 drivers approved; 1 still waiting: Cy (x)"}, out
+    assert page.clicks[-3:] == ['.navbtn[data-area="drivers"]', key, key], "the Drivers area, arm, then confirm"
+    page.els[".dd .req.waiting"].count = 0
+    fails(lambda: role.do("approve_all", {}), "no waiting driver request")
+
+
+def t_show_standings_opens_the_frozen_standings_of_the_entry_in_a_new_tab():
+    role, page, _ = desk()
+    key = '.dd tr:has(div:text-is("B #2")) button[data-label="Show standings"]'
+    popup = Page(page.clock)
+    popup.add("#rows tr", count=14)
+
+    def click():
+        popup.url = BASE + "/console/race-control/drivers/snapshot?time=1790000000.0&t=secret"
+        role.context.opened.append(popup)
+    page.add(key, on_click=click)
+    out = role.do("show_standings", {"entry": "B #2"})
+    assert out == {"entry": "B #2", "rows": 14}, f"the tab's rows, never its tokened URL: {out}"
+    assert page.clicks[-2:] == ['.navbtn[data-area="race"]', key], "the events list is in the Race area"
+    assert popup.closed, "the tab is closed again, the desk stays the role's page"
+    fails(lambda: role.do("show_standings", {"entry": "A #1"}), "no event of 'A #1'")
+    popup.closed, popup.els["#rows tr"].count = False, 0
+    fails(lambda: role.do("show_standings", {"entry": "B #2"}), "the frozen standings")
+    assert popup.closed, "a tab that shows nothing is closed too"
+
+
+def t_compounds_enters_every_entrys_compound_and_keeps_one_already_set():
+    role, page, _ = desk()
+    entries = ["A #1", "B #2", "C #3", "D #4"]
+    page.add('.dd tr:has(select[aria-label^="Tyre compound of "]) > td:first-child', texts=entries)
+    boxes = {e: _desk_change(page, f'.dd select[aria-label="Tyre compound of {e}"]', "/drivers/race/compound",
+                             "Compound set", options=["", "RS", "RM", "RH"]) for e in entries}
+    boxes["B #2"].value = "RM"
+    out = role.do("compounds", {"code": "RM", "skip": ["D #4"]})
+    assert out == {"code": "RM", "changed": ["A #1", "C #3"], "kept": ["B #2"]}, out
+    assert [b.value for b in boxes.values()] == ["RM", "RM", "RM", ""], "a skipped entry is left as it was"
+    assert '.navbtn[data-area="dashboard"]' in page.clicks, "the tyre table is in the Dashboard area"
+    fails(lambda: role.do("compounds", {"code": "RM", "skip": ["Z #9"]}), "skip: no entry 'Z #9'")
+    fails(lambda: role.do("compounds", {"code": "XX"}), "no option")
+    page.els['.dd tr:has(select[aria-label^="Tyre compound of "]) > td:first-child'].texts = []
+    fails(lambda: role.do("compounds", {"code": "RS"}), "the tyre table lists no entry")
 
 class MediaObs:
     """The run's OBS as `play` reads it: one clip's GetMediaInputStatus."""
@@ -2279,6 +2439,81 @@ def t_every_focus_of_the_full_scenario_shows_an_open_page():
     assert blind == [], f"a captioned step of a role without a page names the views to enlarge: {blind}"
 
 
+def _chain(by, step_id):
+    """The steps `step_id` waits for through its `at = "after:..."` refs, nearest first."""
+    out, at = [], by[step_id].at
+    while at.kind == "after":
+        out.append(by[at.ref])
+        at = by[at.ref].at
+    return out
+
+
+def _after(by, later, earlier):
+    return earlier in [s.id for s in _chain(by, later)]
+
+
+def t_the_full_scenario_holds_the_splitscreen_and_starts_the_race_timer_from_race_start():
+    steps = _full().steps
+    by = {s.id: s for s in steps}
+    for warm, split, nxt, (out, inn) in (("warm2", "split2", "next2", ("comms1", "comms2")),
+                                         ("warm3", "split3", "next3", ("comms2", "comms3"))):
+        assert "relay.status.feeds[relay.status.handover_next.feed].state == 'serving'" in by[warm].expect, \
+            f"{warm}: the incoming feed serves before the splitscreen"
+        holds = [s for s in steps if by[split].index < s.index < by[nxt].index and s.do == "hold"]
+        assert len(holds) == 1 and holds[0].role == "director" and holds[0].caption, \
+            f"one captioned hold on the splitscreen between {split} and {nxt}: {[s.id for s in holds]}"
+        hold = holds[0]
+        assert (hold.at.ref, by[nxt].at.ref) == (split, hold.id), "split, hold, then NEXT in a row"
+        assert hold.args.get("seconds", 0) >= 10, f"{hold.id}: long enough to see both feeds"
+        for channel in (out, inn):
+            assert f"'{channel}' in obs.program_channels" in hold.expect, f"{hold.id}: {channel} on the splitscreen"
+    timers = [s for s in steps if s.do == "timer"]
+    starts = [s for s in steps if s.do == "race_start"]
+    formation = [s for s in steps if s.role == "drivers" and s.do == "start"][0]
+    assert len(timers) == len(starts) == 1, (timers, starts)
+    timer, start = timers[0], starts[0]
+    assert timer.role == "director" and start.role == "race_control" and timer.caption and start.caption
+    assert _after(by, timer.id, "race_mode") and _after(by, start.id, timer.id) and _after(by, formation.id, start.id), \
+        "the director sets the duration, Race Control presses Race start with the cars on the grid"
+    assert timer.args["duration"] != "6:00:00", "the simulated race's length, not the panel's default"
+    h, m, sec = (int(x) for x in timer.args["duration"].split(":"))
+    assert f"relay.get('/timer/data').duration_s == {h * 3600 + m * 60 + sec}" in timer.expect, timer.expect
+    assert "race.start_armed" in start.expect, start.expect
+    assert "relay.get('/timer/data').mode == 'running'" in by["racing"].expect, \
+        "the timer runs from the first race lap after Race start"
+
+
+def t_the_full_scenario_shows_the_dc_snapshot_the_stint_compounds_crew_chat_and_approve_all():
+    steps = _full().steps
+    by = {s.id: s for s in steps}
+    dc = by["dc_drop"].args["entry"]
+    standings = [s for s in steps if s.do == "show_standings"]
+    assert len(standings) == 1 and standings[0].args.get("entry") == dc, standings
+    snap = standings[0]
+    assert _after(by, snap.id, "dc_event") and _after(by, "dc_confirm", snap.id) and snap.caption and snap.focus, \
+        "Race Control opens the standings of before the drop while the disconnect is suspected"
+    between = [s.id for s in _chain(by, snap.id)]
+    suspected = [by[i] for i in reversed(between[:between.index("dc_event")]) if by[i].caption]
+    assert suspected and suspected[0].do == "hold" and suspected[0].role == "race_control", \
+        f"the suspected phase plays in real time under a caption: {[s.id for s in suspected]}"
+    sets = [s for s in steps if s.do == "compounds"]
+    bounds = (("race_start", "formation"), ("release2", "red_flag"), ("release3", "final_lap"))
+    assert len(sets) == len(bounds), [s.id for s in sets]
+    for step, (lo, hi) in zip(sets, bounds, strict=True):
+        assert _after(by, step.id, lo) and _after(by, hi, step.id) and step.caption, f"{step.id}: at the start of a stint"
+        after = [s for s in steps if s.at.kind == "after" and s.at.ref == step.id]
+        assert len(after) == 1 and after[0].role == "race_control" and after[0].do == "view" \
+            and after[0].args.get("area") == "race", \
+            f"{step.id} leaves the desk on Dashboard: the race area comes back before its next shot"
+    codes = [s.args["code"] for s in sets]
+    assert len(set(codes)) == len(codes), f"each stint starts on its own compound: {codes}"
+    assert by["approve_drivers"].do == "approve_all" and \
+        "result('approve_drivers').approved == 40" in by["approve_drivers"].expect, by["approve_drivers"]
+    chats = [s for s in steps if s.do == "chat"]
+    assert len(chats) >= 3 and all(s.caption for s in chats), [s.id for s in chats]
+    assert {s.role.split(":")[0] for s in chats} == {"director", "commentator"}, [s.role for s in chats]
+
+
 def t_the_full_scenarios_driver_page_seats_drive_with_an_approved_code():
     steps = _full().steps
     field = [s for s in steps if s.role == "drivers" and s.do == "register"][0]
@@ -2299,7 +2534,7 @@ def t_the_full_scenarios_driver_page_seats_drive_with_an_approved_code():
         need = [s for s in steps if s.role == "drivers" and
                 (s.do == "start" if stint == 1 else s.do == "lobby" and s.args.get("stint") == stint)][0]
         approved = [s for s in steps if reg.index < s.index < need.index and s.role == "race_control" and
-                    (s.do == "approve_drivers" or s.do == "approve_driver" and s.args.get("name") == name)]
+                    (s.do in ("approve_drivers", "approve_all") or s.do == "approve_driver" and s.args.get("name") == name)]
         assert approved, f"{name} is approved before {need.id} hands the car its code"
     for name, step in decided.items():
         reg = [s for s in page if s.args["name"] == name]

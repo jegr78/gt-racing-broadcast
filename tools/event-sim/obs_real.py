@@ -28,6 +28,7 @@ import secrets
 import shutil
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -54,6 +55,7 @@ QUIT_TIMEOUT_S = 30
 CONNECT_S = 5
 POLL_S = 0.5
 SNAPSHOT_S = 0.5           # a check polls every 0.25 s; the mirror asks OBS at most this often
+FEED_SHOT_WIDTH = 640      # the stub's feed width: its identity strip reads at full size
 SIGNAL_QUIT_FROM = (32, 1)
 LINUX_BINARY = "obs"
 MAC_BINARY = "/Applications/OBS.app/Contents/MacOS/OBS"
@@ -322,6 +324,41 @@ def restore_obs(home=None, run=subprocess.run, platform=None):
     return 0, f"{cfg.root} restored from the backup, every file verified; the backup is removed"
 
 
+def bmp_rgb(data):
+    """(rgb24 bytes top down, width, height) of an uncompressed 24 or 32 bit BMP, or a 32
+    bit one whose bit fields give each channel a whole byte, as OBS writes a screenshot in
+    that format; ValueError for anything else."""
+    if len(data) < 54 or data[:2] != b"BM":
+        raise ValueError("not a BMP")
+    offset = struct.unpack_from("<I", data, 10)[0]
+    w, h, _planes, bpp, compression = struct.unpack_from("<iiHHI", data, 18)
+    step = bpp // 8
+    if bpp not in (24, 32) or compression not in (0, 3) or (compression == 3 and bpp != 32) \
+            or w <= 0 or h == 0:
+        raise ValueError(f"an unsupported BMP: {bpp} bpp, compression {compression}")
+    channels = (2, 1, 0)             # byte of red, green, blue in a pixel: BGR(A)
+    if compression == 3:
+        if len(data) < 66:
+            raise ValueError("a cut BMP")
+        masks = struct.unpack_from("<III", data, 54)   # after the 40 byte header, or inside a longer one
+        lows = [(m & -m).bit_length() - 1 for m in masks]
+        if any(m == 0 or m >> low != 0xFF or low % 8 for m, low in zip(masks, lows, strict=True)) \
+                or len(set(lows)) != 3:
+            raise ValueError(f"unsupported BMP bit fields {[hex(m) for m in masks]}")
+        channels = tuple(low // 8 for low in lows)
+    stride = (w * step + 3) // 4 * 4
+    if len(data) < offset + stride * abs(h):
+        raise ValueError("a cut BMP")
+    out = bytearray(w * abs(h) * 3)
+    for y in range(abs(h)):
+        src = offset + (y if h < 0 else abs(h) - 1 - y) * stride
+        row = data[src:src + w * step]
+        dst = y * w * 3
+        for c, byte in enumerate(channels):
+            out[dst + c:dst + w * 3:3] = row[byte::step]
+    return bytes(out), w, abs(h)
+
+
 class ObsMirror:
     """What the probes and the `obs` role read of the real OBS, with the simulated OBS's
     surface: an ObsState of the same collection mirrors the program and preview scene,
@@ -334,6 +371,7 @@ class ObsMirror:
         self.grabber = grabber
         self.session, self.clock = session, clock
         self._synced = None
+        self._frames = {}                # source -> (asked at, frame or None)
 
     def _ask(self, kind, data=None):
         try:
@@ -384,6 +422,21 @@ class ObsMirror:
         got = self._ask("GetSourceScreenshot", {"sourceName": source, "imageFormat": fmt, "imageWidth": width})
         data = got.get("imageData") or ""
         return base64.b64decode(data.split(",", 1)[1] if "," in data else data), fmt
+
+    def source_frame(self, source):
+        """(rgb, width, height) of the picture OBS renders for `source` alone, None when OBS
+        gives none. The program check reads a feed here: on program the Overlay covers the
+        identity strip, and the relay's own port shows what it serves, not what OBS plays."""
+        now = self.clock()
+        asked = self._frames.get(source)
+        if asked is not None and now - asked[0] < SNAPSHOT_S:
+            return asked[1]
+        try:
+            frame = bmp_rgb(self.screenshot(source, FEED_SHOT_WIDTH, "bmp")[0])
+        except (obs_state.ObsError, ValueError, OSError):
+            frame = None
+        self._frames[source] = (now, frame)
+        return frame
 
 
 class RealObs:

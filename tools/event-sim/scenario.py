@@ -318,8 +318,13 @@ def _focus(raw, where):
 
 
 def _check_focus(steps, registry):
-    """Refuse a focus on a view the run never records: a page role of a step, or program."""
-    views = {PROGRAM_VIEW} | {s.role for s in steps if getattr(registry[role_kind(s.role)], "recorded", False)}
+    """Refuse a focus on a view the run never records: a page role of a step, a tab such a
+    role opens (`<role>:<tab>`), or program."""
+    views = {PROGRAM_VIEW}
+    for s in steps:
+        cls = registry[role_kind(s.role)]
+        if getattr(cls, "recorded", False):
+            views |= {s.role} | {f"{s.role}:{tab}" for tab in getattr(cls, "tabs", ())}
     for step in steps:
         for view in step.focus or ():
             if view not in views:
