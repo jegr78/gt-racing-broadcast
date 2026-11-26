@@ -492,6 +492,88 @@ def t_a_failed_search_tells_the_driver_to_name_the_console():
     assert "--console" not in said[-1], f"a sender that has --console needs no hint: {said}"
 
 
+class _NoBroadcast:
+    """A socket on a network that refuses the broadcast, as iOS does, and takes unicast."""
+
+    def __init__(self, refuse=("255.255.255.255",)):
+        self.sent, self.refused, self.refuse = [], [], refuse
+
+    def sendto(self, data, addr):
+        if addr[0] in self.refuse or "*" in self.refuse:
+            self.refused.append(addr[0])
+            raise OSError(65, "No route to host")
+        self.sent.append(addr)
+
+    def close(self):
+        pass
+
+
+def t_without_a_broadcast_the_search_heartbeats_every_address_of_the_network():
+    up = snd.Uploader("http://x/ingest", "K", "L", opener=lambda r, timeout: _Reply(b"{}"))
+    said = []
+    sender = snd.Sender(up, bind="127.0.0.1", receive_port=0, say=said.append)
+    sender.sock.close()
+    sender.bind_addr = "192.168.178.129"
+    sender.sock = _NoBroadcast()
+    sender.heartbeat()
+    targets = [a for a, _port in sender.sock.sent]
+    assert len(targets) == 253 and "192.168.178.129" not in targets and "192.168.178.58" in targets, \
+        f"one heartbeat to each other address of the /24: {len(targets)}"
+    assert {p for _a, p in sender.sock.sent} == {snd.CONSOLE_PORT}
+    assert sender.stats["heartbeats"] == 1 and sender.heartbeat_failed == 0, sender.stats
+    assert "address by address" in said[-1] and "--console" not in " ".join(said), said
+    sender.sock.sent.clear()
+    sender.heartbeat()
+    assert len(sender.sock.sent) == 253 and sender.sock.refused == ["255.255.255.255"] * 2, \
+        f"each round tries the broadcast first, so a short network drop never ends it: {sender.sock.refused}"
+    assert sum("address by address" in line for line in said) == 1, f"the search is announced once: {said}"
+    sender.console = "192.168.178.58"
+    sender.sock.sent.clear()
+    sender.heartbeat()
+    assert sender.sock.sent == [("192.168.178.58", snd.CONSOLE_PORT)], "a found console gets the only heartbeat"
+    sender.sock.refuse = ()
+    sender.console = None
+    sender.sock.sent.clear()
+    sender.heartbeat()
+    assert sender.sock.sent == [("255.255.255.255", snd.CONSOLE_PORT)], \
+        "a search after the network came back uses the broadcast again"
+    sender.sock.refuse = ("255.255.255.255",)
+    clock = [0.0]
+    sender.clock = lambda: clock[0]
+    sender.console, sender._last_rx = "192.168.178.58", 0.0
+    clock[0] = snd.RELATCH_S
+    sender.check_relatch()
+    sender.sock.sent.clear()
+    sender.heartbeat()
+    assert len(sender.sock.sent) == 253, "a console silent for RELATCH_S is searched again address by address"
+
+
+def t_a_sender_bound_to_no_network_address_names_the_console_option():
+    up = snd.Uploader("http://x/ingest", "K", "L", opener=lambda r, timeout: _Reply(b"{}"))
+    for bind in ("0.0.0.0", "127.0.0.1"):
+        said = []
+        sender = snd.Sender(up, bind="127.0.0.1", receive_port=0, say=said.append)
+        sender.sock.close()
+        sender.bind_addr = bind
+        sender.sock = _NoBroadcast()
+        sender.heartbeat()
+        assert sender.sock.sent == [] and sender.heartbeat_failed == 1, (bind, sender.sock.sent)
+        assert "--console <PlayStation IP>" in said[-1], f"{bind}: the fix is named: {said}"
+
+
+def t_a_search_that_reaches_no_address_names_the_console_option_once():
+    up = snd.Uploader("http://x/ingest", "K", "L", opener=lambda r, timeout: _Reply(b"{}"))
+    said = []
+    sender = snd.Sender(up, bind="127.0.0.1", receive_port=0, say=said.append)
+    sender.sock.close()
+    sender.bind_addr = "10.0.0.7"
+    sender.sock = _NoBroadcast(refuse=("*",))
+    sender.heartbeat()
+    sender.heartbeat()
+    assert sender.heartbeat_failed == 2 and sender.stats["heartbeats"] == 0, sender.stats
+    assert sum("--console <PlayStation IP>" in line for line in said) == 1, f"the fix is named once: {said}"
+
+
 def t_a_discovered_console_is_searched_again_after_silence():
     said, clock = [], [0.0]
     up = snd.Uploader("http://x/ingest", "K", "L", opener=lambda r, timeout: _Reply(b"{}"))
@@ -1105,7 +1187,7 @@ def t_a_check_whose_heartbeats_all_fail_names_the_console_option():
         sender.sock.close()
     text = "\n".join(said)
     assert code == 1 and "heartbeat: FAIL 1 failed: pass --console" in text, text
-    assert "On an iPhone the search fails" in text, f"the check names the iPhone case like a run: {text}"
+    assert "Connection status" in text, f"the check says where the PlayStation shows its address: {text}"
 
 
 def t_a_check_that_receives_too_few_packets_fails():

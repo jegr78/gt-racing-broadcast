@@ -5,7 +5,6 @@ pointer and click mark and the console links masked in the page before a frame i
 painted. DIR/timeline.json says when each step ran and when each recording started,
 both in seconds since the engine started, so the renderer can line them up."""
 import contextlib
-import functools
 import html
 import json
 import os
@@ -419,43 +418,15 @@ def in_unit(limits=LIMITS):
         return False
 
 
-@functools.lru_cache(maxsize=1)
-def _libproc():
-    import ctypes
-    import ctypes.util
-    try:
-        return ctypes.CDLL(ctypes.util.find_library("proc") or "/usr/lib/libproc.dylib")
-    except OSError:
-        return None
-
-
-def phys_footprint(pid):
-    """The bytes macOS charges `pid` with, compressed and swapped memory included; None
-    elsewhere or for a process it cannot read."""
-    if sys.platform != "darwin":
-        return None
-    import ctypes
-    lib = _libproc()
-    if lib is None:
-        return None
-    buf = ctypes.create_string_buffer(16 + 10 * 8)    # rusage_info_v0
-    if lib.proc_pid_rusage(ctypes.c_int(pid), ctypes.c_int(0), buf) != 0:
-        return None
-    return int.from_bytes(buf.raw[16 + 7 * 8:16 + 8 * 8], "little")    # ri_phys_footprint
-
-
-def ps_rows(run=subprocess.run, footprint=phys_footprint):
-    """Every process as (pid, ppid, bytes, start): `ps -A` on Linux and macOS. The bytes
-    are the footprint where `footprint` knows it, else the resident size: on macOS the
-    resident size leaves out what was compressed or swapped."""
+def ps_rows(run=subprocess.run):
+    """Every process as (pid, ppid, rss in bytes, start): `ps -A` on Linux and macOS."""
     done = run(["ps", "-A", "-o", "pid=,ppid=,rss=,lstart="], capture_output=True, text=True,
                errors="replace", timeout=20)
     rows = []
     for line in done.stdout.splitlines():
         parts = line.split(None, 3)
         if len(parts) == 4 and parts[0].isdigit() and parts[1].isdigit() and parts[2].isdigit():
-            pid = int(parts[0])
-            rows.append((pid, int(parts[1]), footprint(pid) or int(parts[2]) * 1024, parts[3].strip()))
+            rows.append((int(parts[0]), int(parts[1]), int(parts[2]) * 1024, parts[3].strip()))
     return rows
 
 
@@ -522,7 +493,7 @@ class Watchdog:
         self._stop, self._thread = threading.Event(), None
 
     def check(self):
-        """One sample; returns the tree's bytes (`ps_rows`)."""
+        """One sample; returns the tree's resident bytes."""
         rows = self.ps()
         tree = descendants(rows, self.root, self.known) | {self.root}
         rss = sum(r for pid, _ppid, r, _start in rows if pid in tree)
