@@ -210,12 +210,13 @@ def resolve_args(value, results):
 class Engine:
     def __init__(self, scenario, ctx, probes, registry=None, clock=time.monotonic,
                  sleep=time.sleep, poll=POLL_S, shots_dir=None, final_checks=(), no_skips=False,
-                 traces_dir=None, host=hoststate.sample, processes=hoststate.processes):
+                 traces_dir=None, host=hoststate.sample, processes=hoststate.processes, interrupted=None):
         self.scenario = scenario
         self.ctx = ctx
         self.probes = dict(probes)
         self.registry = registry if registry is not None else roles.default_registry()
         self.clock, self.sleep, self.poll = clock, sleep, poll
+        self.interrupted = interrupted or (lambda: None)   # raises once the run must stop
         self.shots_dir = shots_dir
         self.final_checks = list(final_checks)
         self.no_skips = no_skips
@@ -282,6 +283,7 @@ class Engine:
             elapsed = self.clock() - begin
             if elapsed >= timeout:
                 return False, elapsed, detail
+            self.interrupted()
             self.sleep(min(self.poll, timeout - elapsed))
 
     # -- triggers -----------------------------------------------------------
@@ -543,6 +545,7 @@ class Engine:
         pending, out = list(self.scenario.steps), []
         try:
             while pending:
+                self.interrupted()
                 for step in pending:
                     state, why = self._trigger_state(step)
                     if state == "wait":

@@ -5,8 +5,10 @@ import math
 import os
 from pathlib import Path
 import select
+import signal
 import subprocess
 import sys
+import threading
 import time
 
 UNIT='racecast-e2e.service'
@@ -24,6 +26,17 @@ PSI_SOME_AVG10_MAX=20.0          # % of the last 10 s some task waited for memor
 PSI_FULL_AVG10_MAX=5.0           # % of the last 10 s every task waited for memory
 PRESSURE_WAIT_SECONDS=120
 PRESSURE_POLL_SECONDS=5
+# A stop signal to the owner closes the contained run's stdin; it then has this long to tear down.
+STOP_PIPE_ENV='RACECAST_E2E_STOP_PIPE'
+STOP_GRACE_SECONDS=120
+
+
+class Stopped(KeyboardInterrupt):
+    """A stop signal ends the run as Ctrl+C does."""
+
+    def __init__(self,signum):
+        super().__init__(signal.Signals(signum).name)
+        self.signum=signum
 
 
 def current_group():
@@ -158,11 +171,46 @@ def owner_watchdog(pid,start,seconds=None,limits=None):
         if kill_fd is not None:os.close(kill_fd)
 
 
-def enter(script,argv,seconds=None,long=False,limits=None):
+def run_forwarding(start,grace=STOP_GRACE_SECONDS,clock=time.monotonic):
+    """Wait for `start()`, a Popen whose stdin is the contained run's stop pipe, to end.
+    SIGTERM, SIGHUP (unless ignored, as under nohup) or SIGINT meanwhile close that pipe
+    and wait up to `grace` s (no longer after a second signal) for the run's teardown, then
+    raise Stopped. A run still alive
+    then is left to the owner watcher, which kills the unit once this owner exits."""
+    got=[];old={}
+    def stop(signum,_frame):got.append(signum)
+    if threading.current_thread() is threading.main_thread():
+        for name in ('SIGTERM','SIGHUP','SIGINT'):
+            num=getattr(signal,name,None)
+            if num is not None and (name!='SIGHUP' or signal.getsignal(num) is not signal.SIG_IGN):
+                old[num]=signal.signal(num,stop)
+    try:
+        proc=start();deadline=None
+        while True:
+            try:
+                code=proc.wait(timeout=.2);break
+            except subprocess.TimeoutExpired:pass  # still running: look for a stop
+            if got and deadline is None:
+                deadline=clock()+grace
+                try:print(f"e2e: stopping: waiting up to {grace:g} s for the run's teardown",file=sys.stderr,flush=True)
+                except OSError:pass  # a hung-up terminal
+                try:proc.stdin.close()
+                except OSError:pass  # the run's side is already gone
+            elif deadline is not None and (len(got)>1 or clock()>=deadline):
+                proc.kill();code=proc.wait();break
+    finally:
+        for num,handler in old.items():signal.signal(num,handler)
+    if got:raise Stopped(got[0])
+    return code
+
+
+def enter(script,argv,seconds=None,long=False,limits=None,stop_pipe=False):
     """Return the contained run's exit code, or None inside an admitted worker.
     `seconds` (default MAX_SECONDS, read now) bounds the unit and the owner watcher;
     more than 900 s only with `long` (the event simulation). `limits` (default
-    default_limits()) are the unit's own, for a caller that states larger ones."""
+    default_limits()) are the unit's own, for a caller that states larger ones. With
+    `stop_pipe` the run's stdin stays open as its stop pipe (run_forwarding), for a run
+    that tears down on its EOF; a stop signal then raises Stopped."""
     seconds=lifetime(MAX_SECONDS if seconds is None else seconds,long)
     own=limits is not None;limits=limits or default_limits()
     if sys.platform!='linux':return None
@@ -180,13 +228,21 @@ def enter(script,argv,seconds=None,long=False,limits=None):
              '--property=KillMode=control-group','--property=CPUWeight=10',
              '--working-directory='+str(Path(script).resolve().parents[1]),
              sys.executable,str(Path(__file__).resolve()),'--exec',str(pid),start,str(seconds),
-             *([limits_arg(limits)] if own else []),str(Path(script).resolve()),*argv]
+             *([limits_arg(limits)] if own else []),*(['--stop-pipe'] if stop_pipe else []),
+             str(Path(script).resolve()),*argv]
     # Forward the environment through stdin, never argv (which can expose secrets).
+    environment=json.dumps(dict(os.environ))+'\n'
     try:
-        result=subprocess.run(command,input=json.dumps(dict(os.environ))+'\n',text=True)
+        if not stop_pipe:return subprocess.run(command,input=environment,text=True).returncode
+        def start():
+            # Its own session: a terminal Ctrl+C reaches only the owner, which forwards it.
+            proc=subprocess.Popen(command,stdin=subprocess.PIPE,text=True,start_new_session=True)
+            try:proc.stdin.write(environment);proc.stdin.flush()
+            except OSError:pass  # systemd-run already ended; its exit code says why
+            return proc
+        return run_forwarding(start)
     except OSError as error:
         raise RuntimeError('E2E containment unavailable; no unbounded fallback was started') from error
-    return result.returncode
 
 
 def keep_seconds(value):
@@ -216,6 +272,7 @@ def main(argv):
     if rest and rest[0].startswith('--limits='):
         owner_watchdog(int(argv[2]),argv[3],lifetime(int(argv[4]),long=True),limits=parse_limits(rest[0]));rest=rest[1:]
     else:owner_watchdog(int(argv[2]),argv[3],lifetime(int(argv[4]),long=True))
+    if rest and rest[0]=='--stop-pipe':environment[STOP_PIPE_ENV]='1';rest=rest[1:]
     os.execve(sys.executable,[sys.executable,*rest],environment)
 
 
