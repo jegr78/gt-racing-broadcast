@@ -1619,6 +1619,17 @@ def t_drivers_leave_out_the_seat_the_driver_page_registers_and_take_its_code():
         fails(lambda bad=bad: drivers_role().do("register", {"stints": 3, "skip": bad}), needle)
 
 
+def t_drivers_drive_the_line_the_stack_gave_the_relay():
+    line = drive.trace([[x + 500.0, z] for x, z in drive.synthetic_path(2000.0)])
+    role = drivers_role()
+    role.ctx.track_trace = line
+    role.do("register", {"stints": 1})
+    assert role.field.line.trace is line, "the cars drive the app home's line, not a stadium of track_length_m"
+    plain = drivers_role()
+    plain.do("register", {"stints": 1})
+    assert abs(plain.field.line.length - 1200) < 30, "without a line from the stack: the synthetic lap"
+
+
 def t_drivers_need_the_invite_and_a_track():
     fails(lambda: drivers_role(links=False).do("register", {}), "no invite link yet")
     fails(lambda: drivers_role(event={"seed": 1}).do("register", {}), "[event] track")
@@ -1776,6 +1787,37 @@ def t_the_sheet_carries_the_roster_and_the_red_flag_banner():
         raise AssertionError("more cars than the grid holds must be refused")
 
 
+def _hud(event):
+    """/hud/data as the relay builds it from the Sheet the stack serves for `event`."""
+    import sheet_sim
+    relay = scenario._relay()
+    sheet = sheet_sim.Sheet(tabs=stack.sheet_tabs(scn(event)))
+    return relay.build_hud_data(relay.parse_overlay(sheet.csv("Overlay")),
+                                relay.parse_config_roster(sheet.csv("Configuration")))
+
+
+def t_the_hud_shows_its_round_block_and_team_tiles():
+    hud = _hud({"stints": 3, "cars": 4, "track": "6e378b"})
+    assert hud["round"]["top"], f"the round block has its title: {hud['round']}"
+    assert hud["round"]["country"] == "Japan", f"the country is the picked layout's: {hud['round']}"
+    assert os.path.isfile(os.path.join(ROOT, "src", "assets", "flags", hud["round"]["flagKey"] + ".svg")), \
+        f"the round flag is a bundled one: {hud['round']}"
+    assert [t["label"] for t in hud["teams"]] == drive.roster(3), f"the three team tiles: {hud['teams']}"
+    assert _hud({"stints": 3})["round"]["country"] == "", "no track, no country"
+
+
+def t_the_roster_has_team_colours_and_bundled_brands():
+    hud = _hud({"stints": 3, "cars": 15})
+    roster = scenario._relay().parse_config_roster(scenario._csv(stack.sheet_tabs(scn({"cars": 15}))["Configuration"]))
+    assert sorted(roster) == sorted(drive.roster(15)), roster
+    for team, info in roster.items():
+        assert os.path.isfile(os.path.join(ROOT, "src", "assets", "brands", info["brandKey"] + ".png")), \
+            f"{team}: a brand of src/assets/brands, not {info['brandKey']!r}"
+        assert info["bgColor"] and info["textColor"], f"{team}: a tile colour the relay accepts: {info}"
+    assert len({i["bgColor"] for i in roster.values()}) == 15, "every team its own colour"
+    assert all(t["brandName"] for t in hud["teams"]), f"the HUD tiles name the brand: {hud['teams']}"
+
+
 def t_the_sheet_carries_every_hud_text_the_panel_macros_set():
     with open(os.path.join(ROOT, "src", "director", "director-panel.html"), encoding="utf-8") as fh:
         texts = {t for t in re.findall(r'\brc:"([^"]*)"', fh.read()) if t}
@@ -1805,6 +1847,9 @@ def t_parts_seed_the_producer_and_channel_tabs():
     assert all(row[3] == stack.PART_KEY_REF.format(row[0]) and row[1] and row[2] for row in tabs["Producer"][1:]), \
         "each Part names a producer, a host and a stream key reference"
     assert tabs["Channel"][1][0] == "youtube", "starting a Part needs the event's platform"
+    assert stack.broadcast_channels(tabs) == ["broadcast"], "the broadcast chat follows the Channel tab's channel"
+    assert stack.broadcast_channels(stack.sheet_tabs(scn({}))) == ["broadcast"], \
+        "the chat stand-in serves a run without parts too (desk-fit)"
     for bad in (-1, 10, "2", True):
         try:
             stack.event_parts({"parts": bad})
@@ -1837,6 +1882,16 @@ def t_the_app_home_has_a_graphic_and_the_tracks_line():
             assert fh.read(8) == b"\x89PNG\r\n\x1a\n", "Start event needs one graphic on the machine"
         db = gt7_tracks.TrackDB.load(os.path.join(home, "runtime"), os.path.join(ROOT, "src", "assets", "gt7"))
         assert db.reference_trace("6e378b"), "the relay finds the picked layout's line"
+        host = os.path.join(tmp, "host")
+        os.makedirs(os.path.join(host, "gt7"))
+        with open(os.path.join(host, "gt7", "signatures.json"), "w", encoding="utf-8") as fh:
+            json.dump(drive.signatures_doc("6e378b", [[x + 500.0, z] for x, z in drive.synthetic_path(2000.0)]), fh)
+        hosted = os.path.join(tmp, "hosted")
+        stack.make_home(hosted, src=src, profile=profile, track=("6e378b", 2000.0), host=host)
+        with open(os.path.join(host, "gt7", "signatures.json"), "rb") as a, \
+                open(os.path.join(hosted, "runtime", "gt7", "signatures.json"), "rb") as b:
+            assert a.read() == b.read(), "the stack hands the host's line to the app home"
+        assert stack.HOST_RUNTIME == os.path.join(ROOT, "runtime"), "the host's line comes from the checkout's runtime"
         bare = os.path.join(tmp, "bare")
         stack.make_home(bare, src=src, profile=profile)
         assert not os.path.exists(os.path.join(bare, "runtime", "gt7")), "no track, no track data"

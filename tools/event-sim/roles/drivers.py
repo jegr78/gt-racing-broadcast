@@ -72,7 +72,8 @@ class DriversRole(Role):
             stints = int(args.get("stints") or len(segments) or 1)
             skip = self._skips(args.get("skip", []), entries, stints)
             length = float(event.get("track_length_m", drive.DEFAULT_TRACK_M))
-            field = drive.Field(drive.trace(drive.synthetic_path(length)), self.client.ingest,
+            line = self.ctx.track_trace or drive.trace(drive.synthetic_path(length))
+            field = drive.Field(line, self.client.ingest,
                                 seed=int(event.get("seed", 7)), positions=bool(args.get("positions")))
             for k, entry in enumerate(entries):
                 field.add(entry, [drive.driver_name(entry, s) for s in range(stints)])

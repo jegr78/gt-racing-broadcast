@@ -52,6 +52,74 @@ def t_sheet_base_swaps_only_the_origin():
         "a RACECAST_SIM_* value outside simulation mode must change nothing"
 
 
+def t_the_youtube_chat_origin_is_youtube_or_the_simulated_chat():
+    assert sim.BROADCAST_CHAT_URL == "RACECAST_SIM_BROADCAST_CHAT_URL"
+    chat = "http://127.0.0.1:5002"
+    assert sim.youtube_origin({}) == "https://www.youtube.com"
+    assert sim.youtube_origin({sim.BROADCAST_CHAT_URL: chat}) == "https://www.youtube.com", \
+        "a RACECAST_SIM_* value outside simulation mode must change nothing"
+    assert sim.youtube_origin(dict(ON, RACECAST_SIM_BROADCAST_CHAT_URL=chat + "/")) == chat
+    assert sim.youtube_origin(dict(ON)) == "", "an unset chat must never fall back to YouTube"
+    assert sim.youtube_origin(dict(ON, RACECAST_SIM_BROADCAST_CHAT_URL="https://www.youtube.com")) == "", \
+        "a non-loopback chat is off, never YouTube"
+
+
+def t_the_broadcast_chat_reader_reads_youtube_or_the_simulated_chat_only():
+    m = _relay()
+    asked = []
+    real = m._yt_chat_get
+    m._yt_chat_get = lambda url, timeout=15: asked.append(url)
+    saved = {k: os.environ.pop(k, None) for k in (sim.FLAG, sim.BROADCAST_CHAT_URL)}
+    try:
+        m._BroadcastReader("abcdefghijk", None)._poll()
+        assert asked == ["https://www.youtube.com/live_chat?is_popout=1&v=abcdefghijk"], asked
+        os.environ[sim.FLAG] = "1"
+        m._BroadcastReader("broadcast", None)._poll()
+        assert len(asked) == 1, f"without a simulated chat the reader asks nobody: {asked}"
+        os.environ[sim.BROADCAST_CHAT_URL] = "http://127.0.0.1:5002"
+        m._BroadcastReader("broadcast", None)._poll()
+        assert asked[1] == "http://127.0.0.1:5002/live_chat?is_popout=1&v=broadcast", asked
+    finally:
+        m._yt_chat_get = real
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def t_the_broadcast_chat_target_never_names_youtube_in_simulation():
+    m = _relay()
+
+    class Channels:
+        def refresh(self):
+            return True
+
+        def get(self):
+            return [("youtube", "sim://broadcast")]
+
+    class Tracker:
+        def lookup(self, channel):
+            return ["dQw4w9WgXcQ"]
+    store = m.BroadcastChatStore()
+    sup = m.BroadcastChatSupervisor(store, Channels(), None, tracker=Tracker())
+    sup._readers = {"dQw4w9WgXcQ": type("R", (), {"alive": lambda s: True, "ended": False, "stop": lambda s: None})()}
+    saved = {k: os.environ.pop(k, None) for k in (sim.FLAG, sim.BROADCAST_CHAT_URL)}
+    try:
+        os.environ[sim.FLAG] = "1"
+        sup._cycle()
+        assert store.data()["target"] is None, f"no simulated chat, no target: {store.data()['target']}"
+        os.environ[sim.BROADCAST_CHAT_URL] = "http://127.0.0.1:5002"
+        sup._cycle()
+        assert store.data()["target"]["url"].startswith("http://127.0.0.1:5002/"), store.data()["target"]
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 def t_sheet_csv_url_keeps_the_gviz_contract():
     env = dict(ON, RACECAST_SIM_SHEET_URL="http://127.0.0.1:5001/s")
     assert sim.sheet_csv_url("ID", "Quali Times", env) == \

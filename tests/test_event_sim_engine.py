@@ -854,6 +854,14 @@ def t_a_link_step_names_a_stint_of_the_configuration_vocabulary():
     _scn([dict(approve, args={"stint": "Qualifying", "area": "schedule"})], event=event, sheet={"tabs": quali})
 
 
+def t_the_report_says_which_track_line_the_run_drove():
+    st = stack.Stack(scenario.from_dict({"event": {}, "step": [{"role": "rec", "do": "go"}]}, _reg()), "unused")
+    st.track_line = "simulated lap (1200 m)"
+    assert event_sim.setup_meta("cpu:1", "off", st) == {"load": "cpu:1", "trace": "off",
+                                                       "track_line": "simulated lap (1200 m)"}, \
+        "the report keeps which line the cars drove, so a run without the host's line is obvious"
+
+
 def t_make_home_copies_into_the_temp_dir():
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "s")

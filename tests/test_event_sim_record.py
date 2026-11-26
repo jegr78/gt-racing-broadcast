@@ -7,6 +7,7 @@ import atexit
 import copy
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -284,6 +285,32 @@ def t_a_record_stack_renders_its_titles_once_and_makes_its_clips_in_the_app_home
         "each clip gets its rendered title"
     intro = html[made[0][1]["intro"]]
     assert "Intro" in intro and "GT Demo League" in intro, "the intro shows its title and the league name"
+    graphics = os.path.join(home, "runtime", "demo", "graphics")
+    with open(stack.COLLECTION, encoding="utf-8") as fh:
+        labels = set(re.findall(r"__RACECAST_GRAPHICS__/([^\"/]+)\.png", fh.read()))
+    assert {"Overlay", "Standby", "Standby Cover", "Flag Red", "Grid Row 8"} <= labels, labels
+    sizes = {p: size for _h, p, size in rendered[0]}
+    for label in labels:
+        path = os.path.join(graphics, label + ".png")
+        assert sizes.get(path) == record.CLIP_SIZE, f"the collection's {label} graphic is rendered full canvas"
+    over = [lab for lab in labels if lab in ("Overlay", "Post Race Interviews") or lab.startswith(("Flag ", "Grid Row "))]
+    for label in labels:
+        page = html[os.path.join(graphics, label + ".png")]
+        opaque = "background:transparent" not in page.split(">", 2)[1]
+        assert opaque == (label not in over), \
+            f"{label}: over the live picture it stays transparent, a full page covers it"
+    overlay = html[os.path.join(graphics, "Overlay.png")]
+    assert "opacity" not in overlay and "rgba" not in overlay, "the Overlay's panels are opaque: they hide the strip"
+    with open(os.path.join(ROOT, "profiles", "demo", "overlay", "layout-hud.json"), encoding="utf-8") as fh:
+        slots = json.load(fh)["slots"]
+    for n in (1, 2, 3):
+        s = slots[f"team{n}-logo"]
+        plate = (f"left:{s['left'] - record.PLATE_MARGIN}px;top:{s['top'] - record.PLATE_MARGIN}px;"
+                 f"width:{s['width'] + 2 * record.PLATE_MARGIN}px;height:{s['height'] + 2 * record.PLATE_MARGIN}px")
+        assert plate in overlay and record.PLATE_COLOUR in overlay, \
+            f"a light plate behind team {n}'s logo keeps a dark brand legible on the dark panel"
+    standby = html[os.path.join(graphics, "Standby.png")]
+    assert "Standby" in standby and "GT Demo League" in standby, "a full page names itself and the league"
 
 
 # -- limits and the watchdog -----------------------------------------------------------------

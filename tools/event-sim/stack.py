@@ -32,6 +32,7 @@ import console_auth  # noqa: E402
 import drive  # noqa: E402
 import obs_real  # noqa: E402
 import e2e_safety  # noqa: E402
+import gt7_tracks  # noqa: E402
 import obs_grab  # noqa: E402
 import obs_sim  # noqa: E402
 import ports  # noqa: E402
@@ -39,6 +40,7 @@ import probes  # noqa: E402
 import record  # noqa: E402
 import rtmp_sink  # noqa: E402
 import simulation  # noqa: E402
+import chat_sim  # noqa: E402
 import league_sim  # noqa: E402
 import sheet_sim  # noqa: E402
 import stream_stub  # noqa: E402
@@ -151,18 +153,23 @@ def sheet_tabs(scn):
             labels.append(label)
     vocab_rows = max(len(labels), len(names), len(teams), len(RACE_CONTROL))
     classes = event_classes(scn.event, teams)
-    config = [["Teams", "Stints", "Streamers", "Session", "Race Control", "Flag"] + (["Class"] if classes else [])]
+    config = [["Teams", "Stints", "Streamers", "Session", "Race Control", "Flag"] + (["Class"] if classes else [])
+              + ["Brand", "BG Color", "Text Color"]]
     for i in range(vocab_rows):
+        brand, bg = drive.TEAM_LOOKS[i] if i < len(teams) else ("", "")
         config.append([teams[i] if i < len(teams) else "",
                        labels[i] if i < len(labels) else "", names[i] if i < len(names) else "",
                        "Race" if i == 0 else "", RACE_CONTROL[i] if i < len(RACE_CONTROL) else "",
-                       "Green Flag" if i == 0 else ""] + ([classes[i] if i < len(teams) else ""] if classes else []))
+                       "Green Flag" if i == 0 else ""] + ([classes[i] if i < len(teams) else ""] if classes else [])
+                      + [brand, bg, drive.text_colour(bg) if bg else ""])
     first = comms[0].name if comms else ""
+    podium = (teams + ["", "", ""])[:3]
     tabs = {
         "Schedule": schedule,
         "Qualifying": [["URL", "Streamer", "Stint"]],
-        "Setup": [["Stint", "Streamer", "Session", "Race Control", "Flag"],
-                  ["Stint 1", first, "Race", "", ""]],
+        "Setup": [["Stint", "Streamer", "Session", "Race Control", "Flag", "Team 1", "Team 2", "Team 3"],
+                  ["Stint 1", first, "Race", "", ""] + podium],
+        "Overlay": overlay_rows(scn.event),
         "Configuration": config,
         "Crew": [["Name", "Commentator", "Director", "Producer", "Race Control", "Discord"],
                  ["Sim Director", "FALSE", "TRUE", "FALSE", "FALSE", ""],
@@ -174,9 +181,29 @@ def sheet_tabs(scn):
     if parts:
         tabs["Producer"] = [["Part", "Producer", "MagicDNS", "Stream Key"]] + \
             [[label, "Sim Producer", "sim-producer.invalid", PART_KEY_REF.format(label)] for label in parts]
-        tabs["Channel"] = [["Platform", "Channel"], ["youtube", "sim://broadcast"]]
+    # The event's platform for a Part, and the broadcast whose chat the chat stand-in serves.
+    tabs["Channel"] = [["Platform", "Channel"], ["youtube", "sim://broadcast"]]
     tabs.update(scn.tabs)
     return tabs
+
+
+ROUND_TITLE = "Demo Series — Round 1"     # the Sheet template's (src/docs/sheet-template/Overlay.csv)
+
+
+def overlay_rows(event):
+    """The Overlay tab: the rows that mirror the Setup tab, and the round block's title and
+    country (the picked layout's, which also names the flag)."""
+    track = event.get("track")
+    info = gt7_tracks.TrackDB.load(None).name(track) if isinstance(track, str) else None
+    rows = [["", label, ""] for label in sheet_sim.OVERLAY_MIRROR]
+    return rows + [["", "Round Top", ROUND_TITLE], ["", "Round Bottom", (info or {}).get("country", "")]]
+
+
+def broadcast_channels(tabs):
+    """The stub channels of the Channel tab: the broadcast whose chat the relay reads."""
+    rows = tabs.get("Channel") or []
+    return [stream_stub.channel_name(r[1][len("sim://"):]) for r in rows[1:]
+            if len(r) > 1 and simulation.CHANNEL_RE.match(r[1].strip())]
 
 
 def placeholder_png():
@@ -242,11 +269,13 @@ def child_env(base, extra):
 
 SRC = os.path.join(ROOT, "src")
 PROFILE_DIR = os.path.join(ROOT, "profiles", PROFILE)
+HOST_RUNTIME = os.path.join(ROOT, "runtime")     # its gt7/signatures.json is downloaded, never committed
 
 
-def make_home(home, src=SRC, profile=PROFILE_DIR, track=None):
+def make_home(home, src=SRC, profile=PROFILE_DIR, track=None, host=None):
     """A throwaway app home: src/, profiles/demo, an empty YouTube cookie jar, one
-    placeholder graphic and, for `track` (id, length), that layout's simulated line."""
+    placeholder graphic and, for `track` (id, length), that layout's line: the `host`
+    runtime's downloaded one when it fits (`drive.write_track_data`), else a simulated lap."""
     shutil.copytree(src, os.path.join(home, "src"), ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(profile, os.path.join(home, "profiles", PROFILE))
     runtime = os.path.join(home, "runtime")
@@ -258,7 +287,7 @@ def make_home(home, src=SRC, profile=PROFILE_DIR, track=None):
     with open(os.path.join(graphics, "sim-placeholder.png"), "wb") as fh:
         fh.write(placeholder_png())
     if track:
-        drive.write_track_data(runtime, *track)
+        drive.write_track_data(runtime, *track, host=host)
     return os.path.join(home, "src", "racecast.py")
 
 
@@ -280,13 +309,17 @@ def media_dir(home):
 
 
 def prepare_record(home, stub_dir, channels, render=record.render_pngs, make=record.make_clips):
-    """A record run's pictures: the card look's images for `channels` in the stub dir and
-    the intro, trailer and outro clips in the app home's media dir, every title rendered
-    in one browser session."""
+    """A record run's pictures: the card look's images for `channels` in the stub dir, the
+    collection's graphics as demo stand-ins in the app home's graphics dir and the intro,
+    trailer and outro clips in its media dir, every image rendered in one browser session."""
     titles = os.path.join(home, "runtime", "record-titles")
-    images, jobs = record.clip_jobs(titles, profile_value("NAME") or PROFILE)
+    league = profile_value("NAME") or PROFILE
+    images, jobs = record.clip_jobs(titles, league)
+    with open(COLLECTION, encoding="utf-8") as fh:
+        labels = record.collection_graphics(json.load(fh))
+    graphics = record.graphic_jobs(os.path.join(home, "runtime", PROFILE, "graphics"), labels, league)
     try:
-        render(record.card_jobs(stub_dir, channels) + jobs)
+        render(record.card_jobs(stub_dir, channels) + graphics + jobs)
         return make(media_dir(home), images)
     finally:
         shutil.rmtree(titles, ignore_errors=True)
@@ -394,15 +427,21 @@ class Stack:
         self.python = python
         self.ready_timeout = ready_timeout
         self.secret = secrets.token_hex(24)
-        self.sheet = self.sink = self.stub = self.obs = self.league = self.rtmp = None
+        self.sheet = self.sink = self.stub = self.obs = self.league = self.rtmp = self.chat = None
         self.children = []
         self.urls = {}
         self.racecast = self.env = self.home = None
+        self.track_trace = None
+        self.track_line = "none"       # where the drivers' line came from, for the run's output
 
     def start(self):
         os.makedirs(self.work, exist_ok=True)
         os.chmod(self.work, 0o700)
-        racecast = make_home(os.path.join(self.work, "app"), track=event_track(self.scn.event))
+        track = event_track(self.scn.event)
+        racecast = make_home(os.path.join(self.work, "app"), track=track, host=HOST_RUNTIME)
+        if track:
+            self.track_trace = drive.home_trace(os.path.join(self.work, "app", "runtime"), track[0])
+            self.track_line = drive.line_note(os.path.join(self.work, "app", "runtime"), track[0])
         taken = set()
 
         def port():
@@ -412,13 +451,17 @@ class Stack:
         feed_a, feed_b, pov, http_port, ui_port = (port() for _ in range(5))
 
         keys = {PART_KEY_REF.format(label): secrets.token_hex(8) for label in event_parts(self.scn.event)}
-        self.sheet = sheet_sim.SheetSim(tabs=sheet_tabs(self.scn), stream_keys=keys).start()
+        tabs = sheet_tabs(self.scn)
+        self.sheet = sheet_sim.SheetSim(tabs=tabs, stream_keys=keys).start()
+        self.chat = chat_sim.ChatSim().start()
         self.sink = webhook_sink.WebhookSink().start()
         self.league = league_sim.LeagueSim(key=secrets.token_hex(16)).start()
         self.stub = stream_stub.StreamStub(os.path.join(self.work, "streams"),
                                            look="card" if self.record else "pattern").install()
         for c in self.scn.commentators:
             self.stub.channel(c.channel, stint=c.stint, commentator=c.name)
+        for name in broadcast_channels(tabs):
+            self.stub.channel(name)
         if self.record:
             prepare_record(os.path.dirname(os.path.dirname(racecast)), self.stub.directory, self.scn.commentators)
         collection = run_collection((feed_a, feed_b, pov), http_port)
@@ -435,7 +478,7 @@ class Stack:
             self.obs = obs_sim.ObsSim(collection=collection, grabber=grabber).start()
 
         fakes = {}
-        for fake in (self.sheet, self.sink, self.stub, self.obs, self.league):
+        for fake in (self.sheet, self.sink, self.stub, self.obs, self.league, self.chat):
             fakes.update(fake.env())
         env = child_env(os.environ, {**fakes, **port_env((feed_a, feed_b, pov), http_port, ui_port),
                                      "RACECAST_PROFILE": PROFILE,
@@ -567,7 +610,7 @@ class Stack:
             problem = child.stop()
             if problem:
                 problems.append(problem)
-        for fake in (self.obs, self.sink, self.sheet, self.league):
+        for fake in (self.obs, self.sink, self.sheet, self.league, self.chat):
             if fake is not None:
                 try:
                     problems += fake.stop() or []      # the real OBS names what its quit and restore met

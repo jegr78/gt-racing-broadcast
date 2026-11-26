@@ -94,8 +94,9 @@ class RunContext:
 
     def __init__(self, urls=None, token=None, stub=None, obs=None, browser=None, out_dir="",
                  event=None, event_link=None, secrets=(), clock=time.monotonic, kill_relay=None,
-                 trace="off", recorder=None):
+                 trace="off", recorder=None, track_trace=None):
         self.urls = dict(urls or {})
+        self.track_trace = track_trace   # the line the relay reads (d/x/z), None: the drivers' synthetic lap
         self.recorder = recorder         # record.Recorder in a record run, else None
         self.trace = trace               # Playwright tracing: "off", "fail" (keep failed steps) or "all"
         self._token = token

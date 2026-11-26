@@ -100,6 +100,59 @@ def t_the_synthetic_track_is_data_the_relay_accepts():
     assert (mine[0]["x"], mine[0]["z"]) == (mine[-1]["x"], mine[-1]["z"]), "the line is closed"
 
 
+def _host(tmp, track, line, raw=None):
+    """A host runtime whose downloaded signatures.json holds `line` for `track`."""
+    host = os.path.join(tmp, "host-" + track + str(len(line)))
+    os.makedirs(gt7_data.data_dir(host))
+    with open(os.path.join(gt7_data.data_dir(host), "signatures.json"), "w", encoding="utf-8") as fh:
+        doc = drive.signatures_doc(track, line)
+        doc["signatures"][0]["provenance"] = "survey"     # as a downloaded file names it
+        fh.write(raw if raw is not None else json.dumps(doc))
+    return host
+
+
+def t_the_hosts_line_is_driven_when_it_fits_the_scenarios_lap():
+    tmp = tempfile.mkdtemp(prefix="racecast-drive-test-")
+    try:
+        line = [[x + 500.0, z - 300.0] for x, z in drive.synthetic_path(2000.0)]   # away from the stadium's spot
+        host = _host(tmp, TRACK, line)
+        home = os.path.join(tmp, "home")
+        drive.write_track_data(home, TRACK, 2000.0, host=host)
+        with open(os.path.join(gt7_data.data_dir(home), "signatures.json"), "rb") as fh, \
+                open(os.path.join(gt7_data.data_dir(host), "signatures.json"), "rb") as src:
+            assert fh.read() == src.read(), "the host's file is copied, so the relay reads the same line"
+        ref = drive.home_trace(home, TRACK)
+        assert (ref[0]["x"], ref[0]["z"]) == tuple(line[0]), f"the drivers drive the host's line, not {ref[0]}"
+
+        def stadium(length, host_dir):
+            target = os.path.join(tmp, f"home-{length}-{os.path.basename(host_dir)}")
+            drive.write_track_data(target, TRACK, length, host=host_dir)
+            first = drive.home_trace(target, TRACK)[0]
+            return (first["x"], first["z"]) == tuple(drive.synthetic_path(length)[0])
+        assert stadium(1200.0, host), "a host line of another lap length keeps the scenario's synthetic lap"
+        assert stadium(2000.0, _host(tmp, "aaaaaa", line)), "a host without the layout's line: the synthetic lap"
+        assert stadium(2000.0, _host(tmp, TRACK, line[:3], raw="{broken")), "an invalid host file: the synthetic lap"
+        assert stadium(2000.0, os.path.join(tmp, "nothing")), "no host file: the synthetic lap"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def t_the_line_note_says_where_the_line_came_from():
+    tmp = tempfile.mkdtemp(prefix="racecast-drive-test-")
+    try:
+        line = [[x + 500.0, z] for x, z in drive.synthetic_path(2000.0)]
+        hosted = os.path.join(tmp, "hosted")
+        drive.write_track_data(hosted, TRACK, 2000.0, host=_host(tmp, TRACK, line))
+        note = drive.line_note(hosted, TRACK)
+        assert note.startswith("host signatures.json (") and note.endswith(" m)"), note
+        plain = os.path.join(tmp, "plain")
+        drive.write_track_data(plain, TRACK, 1200.0)
+        assert drive.line_note(plain, TRACK).startswith("simulated lap ("), drive.line_note(plain, TRACK)
+        assert drive.line_note(os.path.join(tmp, "none"), TRACK) == "none", "no line, no note"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def t_a_track_must_be_long_enough_for_its_pit_lane():
     try:
         drive.synthetic_path(300.0)

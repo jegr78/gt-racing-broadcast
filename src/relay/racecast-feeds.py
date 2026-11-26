@@ -3616,11 +3616,12 @@ def yt_live_video_lookup(channel, cookies, timeout=25, logger=None):
     ID or yt-dlp's "not currently live" style error); `None` when it failed
     (the JSON was unreadable and `/live` failed too)."""
     ids = []
+    sim_channel = simulation.is_channel(channel)     # the stand-in serves sim:// as it is
     streams_cmd = [simulation.tool("yt-dlp"), "--flat-playlist", "--no-warnings",
                    "--playlist-items", "1-15", "-J"]
     if cookies:
         streams_cmd += ["--cookies", cookies]
-    streams_cmd += ["--", broadcast_chat.channel_streams_url(channel)]
+    streams_cmd += ["--", channel if sim_channel else broadcast_chat.channel_streams_url(channel)]
     data = _yt_run_json(streams_cmd, timeout=timeout)
     for entry in (data or {}).get("entries", []) or []:
         if not isinstance(entry, dict):
@@ -3634,7 +3635,7 @@ def yt_live_video_lookup(channel, cookies, timeout=25, logger=None):
     one_cmd = [simulation.tool("yt-dlp"), "--print", "id", "--no-warnings", "--no-playlist"]
     if cookies:
         one_cmd += ["--cookies", cookies]
-    one_cmd += ["--", broadcast_chat.channel_live_url(channel)]
+    one_cmd += ["--", channel if sim_channel else broadcast_chat.channel_live_url(channel)]
     not_live = False
     try:
         r = subprocess.run(one_cmd, capture_output=True, text=True, errors="replace",
@@ -4091,12 +4092,15 @@ class _BroadcastReader:
                                     self.video_id, type(e).__name__, e)
 
     def _poll(self):
-        page = _yt_chat_get(broadcast_chat.live_chat_page_url(self.video_id))
+        origin = simulation.youtube_origin()
+        if not origin:
+            return                       # simulation without a simulated chat
+        page = _yt_chat_get(broadcast_chat.live_chat_page_url(self.video_id, origin))
         bs = broadcast_chat.parse_bootstrap(page or "")
         api_key, cont = bs["api_key"], bs["continuation"]
         if not api_key or not cont:
             return                       # not live yet / blocked: transient, no tombstone
-        api_url = broadcast_chat.get_live_chat_api_url(api_key)
+        api_url = broadcast_chat.get_live_chat_api_url(api_key, origin)
         client_version = bs["client_version"]
         misses = 0
         while not self.stop_evt.is_set():
@@ -4297,7 +4301,7 @@ class BroadcastChatSupervisor:
         self.channel_source.refresh()
         desired = self._desired()        # network (yt-dlp resolve); kept off the lock
         # Publish the primary compose-popup target (KISS: first live source).
-        self.store.set_target(broadcast_chat.primary_chat_target(list(desired)))
+        self.store.set_target(broadcast_chat.primary_chat_target(list(desired), simulation.youtube_origin()))
         with self._lock:                 # rearm() mutates _readers from a request thread
             # Stop readers that are no longer desired (stream gone / channel removed).
             for key in list(self._readers):
