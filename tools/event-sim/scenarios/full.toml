@@ -682,7 +682,7 @@ args = { entry = "Falcon Engineering #66", seconds = 8 }
 soft = ["result('dc_standings').rows == 14"]
 timeout = "20s"
 caption = "Race Control opens the standings of 10 s before the last packet of Falcon Engineering #66"
-focus = ["race_control"]
+focus = ["race_control:standings"]
 
 [[step]]
 id = "dc_confirm"

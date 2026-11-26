@@ -49,14 +49,32 @@ in the normal CI, real league data or real race footage.
 
 - The canvas is 2560x1440 at 30 fps.
 - At most two views are large. The others sit in a rail as live previews with the role
-  name and a highlight ring while something happens there.
+  name and a highlight ring while the step on them acts and holds its result.
+- A view takes a place on the stage only once its recording has started. Before that it
+  is not there at all, and when its page opens it fades in where it will stand.
+- When a step's layout has a single large view, that view comes forward. It stands in the
+  centre at 80 % of the canvas height, clear of the chapter bar and the caption line, and
+  lies over the rest of the stage, which stays visible behind it at 35 % opacity. The views
+  large before stay large behind it. Steps with two views keep the side-by-side layout.
+  Consecutive steps of the same role keep the same layout.
+- A commentator cockpit is on the stage only around its own stint. It comes on with the
+  chapter of the first caption that names it, which is its link submission or the swap that
+  puts it on air. At a four-view switch the cockpit on air before it hands over and leaves
+  with the next caption. At the first switch that is the cockpit named first. A cockpit
+  named again later comes back with that chapter. The one on air at the end stays, and a
+  cockpit that no caption names stays on the stage.
+- A tab a page opens, such as Race Control's Show standings (`race_control:standings`), is
+  a view of its own next to its page. It is on the stage only with the captions that name
+  it and only once it opened, so the click that opens it stays visible on its page. Its
+  video counts from its own start.
 - The one exception is the switch at a driver swap: Director, Program and both
   commentator cockpits share the canvas as four equal quarters, so the change of the
   On Air banner in both cockpits is readable at the moment the program switches.
-- The stage follows the scenario: the role of the running step takes the large slot. A
-  step can name its own focus, for example Director and Program together at a driver
-  swap.
-- Changes of size and position are animated (about 600 ms), never cut.
+- The stage follows the scenario: a captioned step without a focus brings its own role
+  forward alone. A step can name its own focus, for example Director and Program together
+  at a driver swap. A step whose role is not on the stage keeps the previous layout.
+- Changes of size, position and opacity are animated (about 600 ms), never cut. A view
+  that comes on or leaves fades where it stands.
 - A visible pointer and a click mark show what was operated. The simulation clicks
   without a pointer today.
 - A caption line names the role and the action ("Race Control confirms the disconnect of
@@ -66,12 +84,25 @@ in the normal CI, real league data or real race footage.
 ### Pace
 
 - A step with a caption plays its action in real time, from `start` to `acted` in the
-  timeline, with a lead-in and a hold after it so the result is readable on every view
-  it changes. From `acted` to `end` the step only waits for its checks, and that part is
-  waiting time like any other.
+  timeline, with a lead-in of 2.5 s and a hold of 3 s after it, so the result is readable
+  on every view it changes. From `acted` to `end` the step only waits for its checks, and that
+  part is waiting time like any other.
+- Where the next step follows at once, the source has no time for the lead-in or the hold.
+  The picture then stands still for the missing part, so every caption is on screen for at
+  least 6 s and its layout has settled before the click.
+- An action longer than 8 s plays its first 8 s in real time and the rest sped up like a
+  wait, for example Race Control approving one request after another. A step in a
+  chapter with a four-view switch is exempt and always plays its action in real time.
+  Of a run of captioned steps with the same role and action, the first three play as usual.
+  The later ones are sped up under one caption, the first of them, which stays at least
+  6 s. A run in a chapter with a four-view switch plays in full.
+- In a chapter with a four-view switch, a driver swap, every captioned step holds 6 s. The
+  switch itself also plays its wait for the checks in real time, since its checks wait for
+  the On Air change in the cockpits, and holds 3 s after it.
 - Stretches where the scenario only waits (for a lap, a pit exit, a lobby) are sped up
   by a factor chosen so that the timing still moves continuously. No stretch is cut out:
   positions never jump.
+- The film starts once the views of the first caption have opened, so it opens on them.
 - The film has no length limit.
 
 ### Sound
@@ -241,11 +272,14 @@ user before anything else is built.
 
 - **Scenario:** the new actions get role tests as the existing ones have. `full --check`
   stays valid. The deck shot names are unchanged.
-- **Timeline:** unit tests for the pace rules (a captioned step is never sped up, waiting
-  is, no source time is skipped) and for the focus rules (own role, override, at most two
-  large views, four quarters only for a step that names four).
+- **Timeline:** unit tests for the pace rules (a short captioned action is never sped up,
+  waiting is, no source time is skipped, the picture stands only in a still, lead-in and
+  minimum caption time, long actions and runs, swap holds) and for the focus rules (own
+  role, override, at most two large views, four quarters only for a step that names four,
+  a single view in front, cockpits only around their stint).
 - **Stage:** a rendering test lays out a fixed timeline and checks that no view overlaps
-  a caption and that every view is inside the canvas.
+  a caption and that every view is inside the canvas; the view in front may cover the
+  dimmed views behind it and lies on top.
 - **End to end:** a short scenario (`smoke`) records and renders a few seconds in the
   manual workflow, with the stand-in instead of a real OBS, to keep the pipeline from
   rotting. The full film is a maintainer run.
