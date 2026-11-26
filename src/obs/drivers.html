@@ -23,6 +23,7 @@
   }
   body[data-hidden] #drivers-header, body[data-hidden] #drivers-tower,
   body[data-hidden] #drivers-fastest, body[data-hidden] #drivers-map { display: none !important; }
+  body[data-red-flag] #drivers-map { display: none !important; }
   #drivers-header {
     position: absolute; left: 48px; top: 64px; width: 500px; height: 64px; box-sizing: border-box;
     padding: 8px 16px; background: var(--dd-bg); border-left: 6px solid var(--dd-accent);
@@ -560,6 +561,7 @@
       if (res.ok) {
         const d = await res.json();
         document.body.toggleAttribute("data-hidden", d.visible !== true);
+        document.body.toggleAttribute("data-red-flag", !!d.red_flag);
         document.getElementById("drivers-header").classList.toggle("flag", !!d.red_flag);
         document.getElementById("dd-session").textContent =
           [d.track_name, d.stint, d.red_flag ? "Red flag" : ""].filter(Boolean).join(" · ");

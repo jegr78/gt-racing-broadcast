@@ -330,6 +330,33 @@ def t_the_map_fetches_a_missing_line_again_after_a_while():
     assert got["drawn"], f"the line the retry got is drawn: {got}"
 
 
+def t_a_red_flag_hides_the_map_and_keeps_the_tower():
+    got = _tower_async("""
+      return (async function () {
+        const dash = {visible: true, mode: "race", entries: []};
+        fetch = async () => ({ok: true, json: async () => dash});
+        const attrs = new Set();
+        document.body.toggleAttribute = (k, on) => { if (on) attrs.add(k); else attrs.delete(k); };
+        const seen = [];
+        for (const red of [false, true, false]) {
+          dash.red_flag = red;
+          await poll();
+          seen.push([...attrs].sort());
+        }
+        return seen;
+      })();""")
+    if got is not None:
+        assert got == [[], ["data-red-flag"], []], \
+            f"the page marks the body while the red flag is out and clears it on release: {got}"
+    with open(TOWER, encoding="utf-8") as fh:
+        html = fh.read()
+    rules = re.findall(r"([^{}]*\[data-red-flag\][^{}]*)\{([^}]*)\}", html)
+    assert rules, "drivers.html has a rule for the red flag"
+    hidden = [s.strip() for sel, body in rules if "display: none" in body for s in sel.split(",")]
+    assert hidden == ["body[data-red-flag] #drivers-map"], \
+        f"the red flag hides the track map and nothing else, the tower stays: {hidden}"
+
+
 def t_stale_rows_show_no_fuel():
     got = _tower(f"""
       return ["est", "no_data", "dc"].map(function (s) {{
