@@ -352,7 +352,7 @@ def t_the_registry_has_every_party_and_its_actions():
                          "end_part", "fit", "view", "play", "timer", "timer_key"},
             "race_control": {"open", "hold", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
                              "release", "retire", "rejoin", "estimate", "add_lap", "set_time", "correction",
-                             "note", "fit", "confirm_dc", "class_laps", "view", "reject_driver",
+                             "note", "fit", "confirm_dc", "class_laps", "stint_laps", "take_plan", "view", "reject_driver",
                              "correct_driver", "compound", "compounds", "race_start", "approve_all",
                              "show_standings"},
             "commentator": {"open", "hold", "submit_link", "chat", "fit", "view"},
@@ -1237,6 +1237,45 @@ def t_race_control_confirms_a_dc_and_sets_a_class_lap_count():
     fails(lambda: role.do("class_laps", {"class": "GT3", "laps": 5}), "Lap count of GT3")
 
 
+def t_race_control_sets_each_stints_lap_count_on_the_desk():
+    role, page, _ = desk()
+    one = _desk_change(page, '.dd input[aria-label="Lap count of Stint 1"]', "/drivers/race/stint-laps",
+                       "Stint 1 lap count saved")
+    two = _desk_change(page, '.dd input[aria-label="Lap count of Stint 2"]', "/drivers/race/stint-laps",
+                       "Stint 2 lap count saved")
+    out = role.do("stint_laps", {"laps": {"Stint 1": 7, "Stint 2": 8}})
+    assert out == {"set": {"Stint 1": 7, "Stint 2": 8}}, out
+    assert (one.value, two.value) == ("7", "8"), "each stint's field holds its count"
+    assert page.clicks[0] == '.navbtn[data-area="race"]', "the stint laps are in the Race area"
+    fails(lambda: role.do("stint_laps", {"laps": {"Stint 3": 5}}), "Lap count of Stint 3")
+    fails(lambda: role.do("stint_laps", {"laps": {"Stint 1": 0}}), "a whole number from 1")
+    fails(lambda: role.do("stint_laps", {}), "stint_laps needs args.laps")
+
+
+def t_race_control_takes_the_restart_plan_after_waiting_for_it():
+    role, page, _ = desk()
+    line = page.add(".dd .plan", text="Red flag: no lap time of the leader yet")
+    buffer = page.add('.dd input[aria-label="Buffer until the restart, minutes"]')
+    take = page.els[desk_button(page, "Take", "/drivers/race/stint-laps", "Restart lobby set to 4 laps", armed=False)]
+    take.enabled = False
+    calls = []
+
+    def plan_arrives():
+        calls.append(1)
+        if len(calls) == 3:
+            line.text, take.enabled = "Behind plan 3:20.0 \u00b7 1.9 laps \u00b7 Restart laps 4", True
+    poll = page.wait_for_timeout
+
+    def wait(ms):
+        plan_arrives()
+        poll(ms)
+    page.wait_for_timeout = wait
+    out = role.do("take_plan", {"buffer": 2})
+    assert out == {"laps": 4, "status": "Restart lobby set to 4 laps"}, out
+    assert buffer.value == "2", "the buffer goes in before the plan is taken"
+    assert page.clicks[-1] == '.dd button[data-label="Take"]', page.clicks
+
+
 def t_the_desk_and_the_panel_open_an_area_to_show_it():
     role, page, _ = desk()
     assert role.do("view", {"area": "corrections"}) == {"area": "corrections"}
@@ -1883,6 +1922,12 @@ def t_a_leader_first_box_call_names_the_first_of_the_order():
     assert role.do("box", {"order": order, "leader_first": True}) == {"order": order}
     assert role.field.box_lead == order[0], "no car enters the pit lane before the first of the order"
     fails(lambda: role.do("box", {"order": "grid", "leader_first": "yes"}), "leader_first")
+    role.do("box", {"order": "grid", "laps": 7})
+    assert {r["lap"] for c in role.field.cars for r in c.requests if r.get("lap") is not None} == {6}, \
+        "a lobby of 7 laps boxes the cars at the end of lap 6"
+    out = role.do("box", {"order": "grid", "laps": 7})
+    assert out["laps"] == 7, out
+    fails(lambda: role.do("box", {"order": "grid", "laps": 1}), "laps is a whole number from 2")
 
 
 def t_driver_actions_reach_the_field():
@@ -2644,13 +2689,27 @@ def t_the_full_scenario_sets_the_race_timer_and_calls_the_final_lap_when_it_runs
         "the timer runs from the first race lap after Race start"
     final = by["final_lap"]
     due = by[final.at.ref]
-    assert "relay.status.timer.remaining_s == 0" in due.expect and not any("lap.leader" in e for e in due.expect), \
-        "Race Control calls the final lap when the timer runs out, so the lap under way is the last one"
     swap3 = [s for s in steps if s.role == "drivers" and s.do == "lobby" and s.args.get("stint") == 3][0]
-    assert _after(by, due.id, swap3.id) and due.timeout >= 600, "the timer runs out in stint 3"
-    running = [s for s in _chain(by, due.id) if _after(by, s.id, swap3.id)
-               and "relay.status.timer.remaining_s > 0" in s.expect]
-    assert running, "the timer still runs once stint 3 is under way, so time_up waits for it to run out"
+    assert _after(by, due.id, swap3.id), "the final lap is in stint 3"
+    assert any("relay.status.timer.remaining_s" in e for e in by["flag"].soft), \
+        "the run reports whether the timer ran out during the last lap"
+
+
+def t_the_full_scenario_runs_each_stint_lobby_to_its_lap_count():
+    steps = _full().steps
+    by = {s.id: s for s in steps}
+    assert by["race_settings"].args["finish_mode"] == "laps", "the final lobby finishes by laps"
+    counts = by["stint_laps"].args["laps"]
+    assert by["stint_laps"].role == "race_control" and sorted(counts) == ["Stint 1", "Stint 2", "Stint 3"], counts
+    assert _after(by, by["formation"].id, "stint_laps"), "Race Control sets the counts before the cars leave the grid"
+    boxes = [s for s in steps if s.role == "drivers" and s.do == "box" and s.args.get("leader_first")]
+    assert [b.args.get("laps") for b in boxes] == [counts["Stint 1"], "${take_plan.laps}"], \
+        f"the swaps come at the end of the lobby's second to last lap: {[b.args for b in boxes]}"
+    take = by["take_plan"]
+    assert take.role == "race_control" and _after(by, take.id, "red_flag") \
+        and _after(by, "restart_lobby", take.id), "the plan is taken during the red flag, before the restart lobby"
+    assert f"race.lobby_lap >= {counts['Stint 3']}" in by[by["final_lap"].at.ref].expect, \
+        "Race Control calls the final lap as the leader starts the final lobby's last lap"
 
 
 def t_the_full_scenario_shows_the_dc_snapshot_the_stint_compounds_crew_chat_and_approve_all():

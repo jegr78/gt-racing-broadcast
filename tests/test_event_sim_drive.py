@@ -290,6 +290,22 @@ def t_box_holds_every_car_until_release_and_the_next_lobby_takes_over():
     assert [c.entry for c in order] == TEAMS[:3], "cars leave in the order they arrived, each by its gap"
 
 
+def t_a_lobby_of_n_laps_boxes_each_car_at_the_end_of_its_lap_n_minus_1():
+    wire = Wire()
+    f = field(wire, cars=3)
+    f.start()
+    f.box(laps=3)
+    boxed = {}
+
+    def watch():
+        for c in f.cars:
+            if c.mode == "pit_in" and c.entry not in boxed:
+                boxed[c.entry] = c.lap
+        return all(c.mode == "stand" for c in f.cars)
+    assert run(f, wire, 600.0, watch), "every car boxes"
+    assert boxed == {c.entry: 2 for c in f.cars}, f"each car turns into the pit lane at the end of its lap 2: {boxed}"
+
+
 def _box_entries(leader_first):
     """(order the cars drove into the pit lane, per car the time it stood) for a box call
     made just after the leader passed the pit entry."""

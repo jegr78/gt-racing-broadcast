@@ -1193,8 +1193,8 @@ def t_sheet_tabs_follow_the_event():
         "sheet": {"tabs": {"POV": [["URL", "Name"], ["sim://pov", "Dan"]]}},
         "step": [{"role": "rec", "do": "go"}]}, _reg())
     tabs = stack.sheet_tabs(scn)
-    assert tabs["Schedule"] == [["URL", "Streamer", "Stint"], ["sim://comms1", "Comms 1", "Stint 1"],
-                                ["", "Comms 2", "Stint 2"], ["", "", "Stint 3"]], tabs["Schedule"]
+    assert tabs["Schedule"] == [["URL", "Streamer", "Stint", "Laps"], ["sim://comms1", "Comms 1", "Stint 1", ""],
+                                ["", "Comms 2", "Stint 2", ""], ["", "", "Stint 3", ""]], tabs["Schedule"]
     assert [r[2] for r in tabs["Configuration"][1:3]] == ["Comms 1", "Comms 2"]
     assert tabs["POV"][1] == ["sim://pov", "Dan"], "the scenario's own tabs win"
 
@@ -1204,6 +1204,10 @@ def t_the_schedule_carries_each_stints_lap_count():
                               "step": [{"role": "rec", "do": "go"}]}, _reg())
     assert stack.sheet_tabs(scn)["Schedule"] == [["URL", "Streamer", "Stint", "Laps"], ["", "", "Stint 1", "14"],
                                                  ["", "", "Stint 2", "14"], ["", "", "Stint 3", "12"]]
+    empty = scenario.from_dict({"event": {"stints": 2}, "step": [{"role": "rec", "do": "go"}]}, _reg())
+    assert stack.sheet_tabs(empty)["Schedule"] == [["URL", "Streamer", "Stint", "Laps"], ["", "", "Stint 1", ""],
+                                                   ["", "", "Stint 2", ""]], \
+        "the Laps column is there to write into, empty without the event's counts"
     for bad in ([14, 14], [14, 0, 12], [14, "14", 12], 14, [14, 14, 1000]):
         _refused([{"role": "rec", "do": "go"}], "event.stint_laps", event={"stints": 3, "stint_laps": bad})
 

@@ -337,15 +337,16 @@ class Field:
         """The car stops at its box the next time it reaches the pit entry."""
         self.car(entry).requests.append({"seconds": float(seconds), "stall": 0})
 
-    def box(self, entries=None, leader_first=False):
+    def box(self, entries=None, leader_first=False, laps=None):
         """Each car drives into the box at its next pit entry and waits for `release`;
         `entries` sets the box order, the first one furthest forward. With `leader_first`
-        a car reaching the pit entry before the first of them drives on another lap."""
+        a car reaching the pit entry before the first of them drives on another lap. In a
+        lobby of `laps` laps each car boxes at the end of its lap `laps - 1`."""
         self.released_at, self._release = None, False
         self.box_lead = None
         for i, c in enumerate(self._pick(entries)):
             if c.mode in ("grid", "drive", "pit_out"):
-                c.requests.append({"hold": True, "stall": i})
+                c.requests.append({"hold": True, "stall": i, "lap": laps - 1 if laps else None})
                 if leader_first and self.box_lead is None:
                     self.box_lead = c.entry
 
@@ -480,7 +481,9 @@ class Field:
             car.lat = 0.0
             entry_s = self.box_station - PIT_IN_M
             pos = car.odo % length
-            waits = self.box_lead not in (None, car.entry) and car.requests and car.requests[0].get("hold")
+            waits = car.requests and (
+                (self.box_lead not in (None, car.entry) and car.requests[0].get("hold"))
+                or car.lap < (car.requests[0].get("lap") or 0))
             if car.requests and not waits and entry_s <= pos < entry_s + speed * dt + 1:
                 if self.box_lead == car.entry and car.requests[0].get("hold"):
                     self.box_lead = None

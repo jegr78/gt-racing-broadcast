@@ -407,10 +407,10 @@ id = "race_settings"
 at = "after:start_event"
 role = "producer"
 do = "race_settings"
-args = { formation = true, finish_mode = "time" }
+args = { formation = true, finish_mode = "laps" }
 expect = ["race.settings.formation",
-          "race.settings.finish_mode == 'time'"]
-caption = "The producer sets the race: a formation lap and a timed finish"
+          "race.settings.finish_mode == 'laps'"]
+caption = "The producer sets the race: a formation lap and a finish by laps"
 
 # Stop event ended the qualifying invite: the driver page opens the race event's.
 [[step]]
@@ -580,15 +580,15 @@ timeout = "10s"
 caption = "The director resets the timer that ran in qualifying"
 focus = ["director", "program"]
 
-# The race up to the final lap call at about lap 15, the two swaps and the red flag included.
+# The race's length: 21 laps of about 1:45, the two swaps and the red flag, so the timer runs out in the last lap.
 [[step]]
 id = "timer_set"
 at = "after:timer_reset"
 role = "director"
 do = "timer"
-args = { duration = "0:38:00" }
+args = { duration = "0:46:00" }
 expect = ["relay.get('/timer/data').mode == 'prestart'",
-          "relay.get('/timer/data').duration_s == 2280"]
+          "relay.get('/timer/data').duration_s == 2760"]
 timeout = "10s"
 caption = "The director sets the race timer to the race length"
 focus = ["director", "program"]
@@ -631,8 +631,20 @@ do = "view"
 args = { area = "race" }
 
 [[step]]
-id = "formation"
+id = "stint_laps"
 at = "after:desk_grid"
+role = "race_control"
+do = "stint_laps"
+args = { laps = { "Stint 1" = 7, "Stint 2" = 12, "Stint 3" = 5 } }
+expect = ["row(race.stints, 'stint', 'Stint 2').laps == 12"]
+soft = ["row(sheet.tab('Schedule'), 'stint', 'Stint 2').laps == '12'"]
+timeout = "30s"
+caption = "Race Control sets each stint lobby's lap count"
+focus = ["race_control"]
+
+[[step]]
+id = "formation"
+at = "after:stint_laps"
 role = "drivers"
 do = "start"
 expect = ["page('drivers').driving == 14"]
@@ -1087,7 +1099,7 @@ at = "after:chat_link_reply"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
-expect = ["race.lap.leader >= 6"]
+expect = ["race.lap.leader >= 4"]
 timeout = "12m"
 
 [[step]]
@@ -1136,8 +1148,8 @@ id = "box2"
 at = "after:warm2"
 role = "drivers"
 do = "box"
-args = { leader_first = true }
-caption = "The cars come into the box for the driver swap"
+args = { leader_first = true, laps = 7 }
+caption = "The cars come into the box at the end of lap 6 of the 7-lap lobby"
 focus = ["race_control", "program"]
 
 [[step]]
@@ -1426,8 +1438,19 @@ expect = ["relay.up"]
 shot = { name = "redflag-2", role = "viewer" }
 
 [[step]]
-id = "to_box"
+id = "take_plan"
 at = "after:shot_redflag_2"
+role = "race_control"
+do = "take_plan"
+args = { buffer = 1 }
+expect = ["row(race.stints, 'stint', 'Stint 2').laps == result('take_plan').laps"]
+timeout = "10s"
+caption = "Race Control takes the restart plan: the restart lobby runs the laps left in the stint"
+focus = ["race_control"]
+
+[[step]]
+id = "to_box"
+at = "after:take_plan"
 role = "drivers"
 do = "box"
 expect = ["page('drivers').standing == 14"]
@@ -1608,8 +1631,8 @@ id = "box3"
 at = "after:warm3"
 role = "drivers"
 do = "box"
-args = { leader_first = true }
-caption = "The cars come into the box for the driver swap"
+args = { leader_first = true, laps = "${take_plan.laps}" }
+caption = "The cars come into the box at the end of the restart lobby's second to last lap"
 focus = ["race_control", "program"]
 
 [[step]]
@@ -1717,20 +1740,19 @@ expect = ["row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-3'"
           "relay.status.timer.remaining_s > 0"]
 timeout = "60s"
 
-# Race Control calls the final lap when the race timer runs out, whatever the run's pace:
-# the race ends at the leader's next crossing, so the timer runs out during the last lap.
+# The final lobby runs its 5 laps: Race Control calls the final lap as the leader starts it.
 [[step]]
-id = "time_up"
+id = "last_lap"
 at = "after:stint3"
 role = "api"
 do = "get"
-args = { path = "/status" }
-expect = ["relay.status.timer.remaining_s == 0"]
-timeout = "20m"
+args = { path = "/drivers/race" }
+expect = ["race.lobby_lap >= 5"]
+timeout = "15m"
 
 [[step]]
 id = "final_lap"
-at = "after:time_up"
+at = "after:last_lap"
 role = "race_control"
 do = "final_lap"
 expect = ["race.state in ['final_lap', 'finishing', 'finished']"]
@@ -1763,6 +1785,7 @@ role = "api"
 do = "get"
 args = { path = "/drivers/race" }
 expect = ["race.state == 'finishing' or race.state == 'finished'"]
+soft = ["relay.status.timer.remaining_s == 0"]
 timeout = "5m"
 
 [[step]]

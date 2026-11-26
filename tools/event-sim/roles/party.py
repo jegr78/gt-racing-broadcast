@@ -20,6 +20,7 @@ FEED_S = 120.0
 POLL_MS = 100
 DESK = selectors.DESK
 STALE_S = 1.0
+PLAN_S = 60.0           # the restart plan needs a validated lobby lap of the leader
 DETACHED = "not attached"   # Playwright's text for an element the page replaced
 HUD_FIELDS = ("stint", "streamer", "session", "flag", "racecontrol")
 URI_SAFE = "!'()*~"      # what the page's encodeURIComponent leaves as it is
@@ -982,6 +983,44 @@ class RaceControlRole(LiveColumn, Surface):
             box.press("Tab", timeout=CONTROL_MS)
         self.answered(enter, self.base + "/drivers/race/class-laps", f"Lap count of {cls}")
         return {"status": self._status(f"Lap count of {cls}", f"{cls} lap count saved", before)}
+
+    def act_stint_laps(self, args):
+        """Set the lap count of each stint lobby ({label: laps}) in the Race area's Stint laps."""
+        counts = args.get("laps")
+        if not isinstance(counts, dict) or not counts:
+            raise StepError("stint_laps needs args.laps, e.g. { \"Stint 1\" = 7 }")
+        for label, laps in counts.items():
+            if type(laps) is not int or laps < 1:
+                raise StepError(f"the lap count of {label} is a whole number from 1, not {laps!r}")
+        self.area("race")
+        for label, laps in counts.items():
+            field = self.sel("input", label=DESK["class_laps"] + label)
+            before = self._line()
+
+            def enter(field=field, label=label, laps=laps):
+                box = self.control(field, f"Lap count of {label}")
+                box.fill(str(laps), timeout=CONTROL_MS)
+                box.press("Tab", timeout=CONTROL_MS)
+            self.answered(enter, self.base + "/drivers/race/stint-laps", f"Lap count of {label}")
+            self._status(f"Lap count of {label}", f"{label} lap count saved", before)
+        return {"set": dict(counts)}
+
+    def act_take_plan(self, args):
+        """Wait for the red flag's restart plan, enter the `buffer` minutes, and take the
+        suggested lap count for the restart lobby; returns it as `laps`."""
+        self.area("race")
+        if args.get("buffer") is not None:
+            self.fill(self.sel("input", label=DESK["plan_buffer"]), str(args["buffer"]), "Buffer until the restart")
+        take = self.sel("button", label=DESK["take"])
+        self.until(lambda: self.count(take) and self.pg.locator(take).first.is_enabled(), "the restart plan",
+                   timeout=PLAN_S, slow=None)
+        before = self._line()
+        self.answered(lambda: self.click(take, "Take"), self.base + "/drivers/race/stint-laps", "Take")
+        text = self._status("Take", "Restart lobby set to", before)
+        found = re.search(r"set to (\d+) laps", text)
+        if not found:
+            raise StepError(f"Take: the desk did not name the lap count: {text!r}")
+        return {"laps": int(found.group(1)), "status": text}
 
     def act_estimate(self, args):
         self.area("corrections")

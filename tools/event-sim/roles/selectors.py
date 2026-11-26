@@ -94,7 +94,7 @@ DESK = {
     "retire": "Retire (DNF)",
     "rejoin_entry": "Team to rejoin",
     "rejoin": "Mark rejoin",
-    "class_laps": "Lap count of ",
+    "class_laps": "Lap count of ", "plan_buffer": "Buffer until the restart, minutes", "take": "Take",
     "estimate_entry": "Quiet entry to estimate",
     "estimate_side": "Behind or ahead of the reference",
     "estimate_ref": "Reference entry",
