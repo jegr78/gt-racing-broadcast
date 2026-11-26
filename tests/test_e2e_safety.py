@@ -2,10 +2,14 @@
 """Resource admission is fail-closed and inspection cannot become detached."""
 import atexit
 import json
+import os
 from pathlib import Path
 import shutil
+import signal
+import subprocess
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -399,6 +403,86 @@ def t_stated_limits_reach_the_unit_the_owner_watcher_and_the_admission():
         try:safety.parse_limits(bad)
         except ValueError:continue
         raise AssertionError(f'{bad} accepted')
+
+
+# A contained run: its stdin is the stop pipe; at EOF it tears down, then exits 143.
+STAND_IN='import sys,time,pathlib\nwhile sys.stdin.buffer.read(1):pass\ntime.sleep(.3)\npathlib.Path(sys.argv[1]).write_text("down")\nsys.exit(143)'
+
+
+def signalled_start(argv,signum=signal.SIGTERM):
+    """A start for run_forwarding that receives `signum` once the contained run is up."""
+    def start():
+        proc=subprocess.Popen(argv,stdin=subprocess.PIPE)
+        os.kill(os.getpid(),signum)
+        return proc
+    return start
+
+
+def t_a_stop_signal_reaches_the_contained_run_and_waits_for_its_teardown():
+    if os.name=='nt':return  # no catchable SIGTERM on Windows, and no unit there
+    before=signal.getsignal(signal.SIGTERM)
+    with tempfile.TemporaryDirectory() as root:
+        marker=Path(root)/'down';box=[]
+        def start():
+            box.append(signalled_start([sys.executable,'-c',STAND_IN,str(marker)])());return box[0]
+        try:safety.run_forwarding(start,grace=60)
+        except safety.Stopped as stop:assert stop.signum==signal.SIGTERM,stop
+        else:raise AssertionError('a stop signal must end the wait as a stop')
+        assert marker.exists() and box[0].returncode==143,'the owner waits until the contained run tore down'
+    assert signal.getsignal(signal.SIGTERM)==before,'the owner restores its handlers'
+
+
+def t_a_contained_run_that_ignores_the_stop_is_left_to_the_watcher_after_the_grace():
+    if os.name=='nt':return
+    box=[]
+    def start():
+        box.append(signalled_start([sys.executable,'-c','import time;time.sleep(60)'],signal.SIGINT)());return box[0]
+    begin=time.monotonic()
+    try:safety.run_forwarding(start,grace=.5)
+    except safety.Stopped as stop:assert stop.signum==signal.SIGINT,stop
+    else:raise AssertionError('a stop signal must end the wait as a stop')
+    assert time.monotonic()-begin<10 and box[0].returncode is not None,'past the grace the owner ends its wait and exits'
+
+
+def t_a_second_stop_signal_ends_the_wait_for_the_teardown_at_once():
+    if os.name=='nt':return
+    import contextlib,io
+    box=[]
+    def start():
+        box.append(signalled_start([sys.executable,'-c','import time;time.sleep(60)'])());os.kill(os.getpid(),signal.SIGTERM)
+        return box[0]
+    err=io.StringIO();begin=time.monotonic()
+    with contextlib.redirect_stderr(err):
+        try:safety.run_forwarding(start,grace=60)
+        except safety.Stopped:pass  # the stop ends the wait
+        else:raise AssertionError('a stop signal must end the wait as a stop')
+    assert time.monotonic()-begin<10 and box[0].returncode is not None,'a second stop does not wait out the grace'
+    assert "waiting up to 60 s for the run's teardown" in err.getvalue(),err.getvalue()
+
+
+def t_an_event_simulation_owner_forwards_its_stop_through_the_contained_runs_stdin():
+    calls=[];written=[]
+    class Proc:
+        stdin=SimpleNamespace(write=written.append,flush=lambda:None)
+    def popen(command,**kw):calls.append((command,kw));return Proc()
+    def forward(start):
+        start()
+        return 0
+    with patch.object(safety.sys,'platform','linux'),patch.dict(safety.os.environ,{'GITHUB_ACTIONS':'','SECRET_TEST_VALUE':'x'}), \
+         patch.object(safety,'owner_identity',return_value=(12345,'42')), \
+         patch.object(safety,'current_group',return_value=Path('/outside')),patch.object(safety.subprocess,'Popen',popen), \
+         patch.object(safety,'run_forwarding',side_effect=forward):
+        assert safety.enter(__file__,['--x'],stop_pipe=True)==0
+    command,kw=calls[0]
+    assert kw.get('start_new_session') and kw.get('stdin')==subprocess.PIPE, \
+        'a terminal Ctrl+C must not reach systemd-run; the owner keeps the stop pipe'
+    assert command[command.index('--exec')+4]=='--stop-pipe' and json.loads(written[0])['SECRET_TEST_VALUE']=='x',command
+    stdin=SimpleNamespace(buffer=SimpleNamespace(readline=lambda n:json.dumps({'A':'b'}).encode()+b'\n'))
+    with patch.object(safety,'owner_watchdog'),patch.object(safety.os,'execve') as execve,patch.object(safety.sys,'stdin',stdin):
+        safety.main(['e2e_safety.py','--exec','12345','42','900','--stop-pipe','script.py','--x'])
+    assert execve.call_args.args[1][1:]==['script.py','--x'] and execve.call_args.args[2]=={'A':'b',safety.STOP_PIPE_ENV:'1'}, \
+        'the contained run learns of its stop pipe from its environment, not its argv'
+
 
 if __name__=='__main__':
     for name,fn in sorted(globals().copy().items()):

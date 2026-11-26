@@ -23,7 +23,10 @@ does not depend on the agent connection staying alive. Local admission fails
 closed when this containment is unavailable. A separate watcher inherits a stable
 pidfd for the caller and a write descriptor opened inside the verified test cgroup.
 Caller death terminates that pinned cgroup, including on an uncatchable abort.
-It never resolves a kill target by process or service name. GitHub-hosted Actions
+It never resolves a kill target by process or service name. The event simulation's caller
+also keeps the run's stdin open as a stop pipe in a session of its own: SIGTERM, SIGHUP
+or SIGINT to the caller closes the pipe, the run tears down on its EOF, and the caller
+waits up to two minutes for that before it exits and the watcher kills the cgroup. GitHub-hosted Actions
 uses disposable runners with finite E2E job timeouts; self-hosted Linux runners
 still require kernel containment. Runner identity follows GitHub's documented
 [`RUNNER_ENVIRONMENT`](https://docs.github.com/en/actions/reference/workflows-and-actions/variables)
