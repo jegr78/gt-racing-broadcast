@@ -2432,8 +2432,10 @@ def t_the_full_scenario_shows_each_switch_in_four_quarters_with_both_cockpits_op
 
 def t_every_focus_of_the_full_scenario_shows_an_open_page():
     steps = _full().steps
+    def page(v):
+        return v if v.startswith("commentator:") else v.split(":")[0]   # a tab is open with its role's page
     early = [(s.id, v) for s in steps for v in s.focus or () if v != "program"
-             and not any(o.role == v and o.index <= s.index for o in steps)]
+             and not any(o.role == page(v) and o.index <= s.index for o in steps)]
     assert early == [], f"a focus names a page no step has opened yet: {early}"
     blind = [s.id for s in steps if s.caption and not s.focus and not REG[scenario.role_kind(s.role)].recorded]
     assert blind == [], f"a captioned step of a role without a page names the views to enlarge: {blind}"

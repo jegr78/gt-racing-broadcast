@@ -5,6 +5,7 @@ ffmpeg run; the stage page renders only where Playwright is installed.
 Run: python3 tests/test_event_video.py"""
 import importlib.util
 import json
+import math
 import os
 import re
 import shutil
@@ -25,6 +26,7 @@ _spec.loader.exec_module(cli)
 
 PAGE = {"width": 1440, "height": 900}
 EPS = 1e-6
+ROUNDED = 6e-5     # a source time is rounded to 0.1 ms
 
 
 def _rec(view, start, size=PAGE, kind="page", file=None):
@@ -70,6 +72,42 @@ def plan(**kw):
     return fp.Plan(timeline(), **kw)
 
 
+C1, C2, C3 = "commentator:Comms 1", "commentator:Comms 2", "commentator:Comms 3"
+
+
+def swaps_timeline():
+    """Three stints and two swaps: each commentator submits its link in its own chapter,
+    the swap step's checks wait for the on-air change, the next step follows at once."""
+    def swap(n, start, out, inc):
+        return [
+            _step(f"driver{n}", "driver", start, start + 1.0, start + 1.0, chapter=f"Driver swap {n}",
+                  caption="The next driver registers", focus=["driver", "race_control"]),
+            _step(f"ok{n}", "race_control", start + 1.0, start + 2.0, start + 2.0, caption="Race Control approves",
+                  focus=["race_control", "driver"]),
+            _step(f"next{n}", "director", start + 2.0, start + 3.0, start + 7.0, caption="The director switches",
+                  focus=["director", "program", out, inc]),
+            _step(f"cut{n}", "director", start + 7.0, start + 8.0, start + 8.0, caption="The director cuts back",
+                  focus=["program", "director"]),
+        ]
+    return {"scenario": "swaps", "steps": [
+        _step("pick", "producer", 0.0, 1.0, 1.0, chapter="Start the event", caption="The producer starts"),
+        _step("submit1", C1, 1.0, 2.0, 2.0, chapter="First link", caption="Comms 1 submits", focus=[C1, "director"]),
+        _step("open3", C3, 2.0, 2.5, 2.5),
+        _step("wait1", "api", 2.5, 2.6, 100.0),
+        _step("submit2", C2, 100.0, 100.0, 101.0, chapter="Next commentator", caption="Comms 2 submits",
+              focus=[C2, "director"]),
+        _step("wait2", "api", 101.0, 101.1, 200.0),
+        *swap(1, 200.0, C1, C2),
+        _step("wait3", "api", 208.0, 208.1, 300.0),
+        *swap(2, 300.0, C2, C3),
+        _step("end", "api", 308.0, 308.1, 400.0),
+    ], "recordings": [
+        _rec("program", 0.0, {"width": 1920, "height": 1080}, "program", "program/p.mkv"),
+        _rec("producer", 0.0), _rec("director", 0.0), _rec("race_control", 0.0), _rec(C1, 0.0), _rec(C2, 0.0),
+        _rec(C3, 0.0), _rec("viewer", 0.0), _rec("driver", 0.0, {"width": 390, "height": 844}),
+    ]}
+
+
 def frames(p):
     return [p.frame(i) for i in range(p.frames)]
 
@@ -85,7 +123,8 @@ def t_a_captioned_step_plays_its_action_in_real_time_frame_by_frame():
     p = plan()
     fs = frames(p)
     for s in _captioned(p):
-        inside = [f for f in fs if s["start"] <= f["t"] <= s["acted"]]
+        assert s["acted"] - s["start"] <= fp.MAX_ACTION_S, "the fixture's actions are short"
+        inside = [f for f in fs if s["start"] < f["t"] <= s["acted"]]
         assert inside, f"{s['id']} has frames"
         assert all(f["speed"] == 1 and not f["ff"] for f in inside), f"{s['id']} must never be sped up"
         for a, b in zip(inside, inside[1:], strict=False):
@@ -121,16 +160,167 @@ def t_no_source_time_is_skipped_and_output_time_is_monotonic():
     p = plan()
     fs = frames(p)
     ts = [f["t"] for f in fs]
-    assert abs(ts[0] - p.t0) < EPS and p.t0 == 0.0, "the film starts at the first step"
-    assert all(b > a for a, b in zip(ts, ts[1:], strict=False)), "source time only moves forward"
+    assert abs(ts[0] - p.t0) < EPS and p.t0 == 0.5, "the film starts once the first caption's view has opened"
+    assert all(b > a or (b == a and 0 in (f["speed"], g["speed"]))
+               for a, b, f, g in zip(ts, ts[1:], fs, fs[1:], strict=False)), \
+        "source time only moves forward, and stands only in a still"
+    assert any(f["speed"] == 0 for f in fs), "the fixture has stills"
     step = p.wait_speed / p.fps + 1e-6
     assert all(b - a <= step for a, b in zip(ts, ts[1:], strict=False)), "no frame skips more than one frame of waiting"
     assert ts[-1] >= p.t1 - step, "the film reaches the last step's end"
     segs = p.segments
     assert segs[0].a == p.t0 and segs[-1].b == p.t1, "the segments cover the whole run"
     assert all(abs(x.b - y.a) < EPS for x, y in zip(segs, segs[1:], strict=False)), "the segments are contiguous"
-    outs = [p.out_time(t) for t in ts]
-    assert all(abs(o - i / p.fps) < 1e-6 for i, o in enumerate(outs)), "frame i stands at i/fps in the film"
+    assert all(abs(x.out + x.dur - y.out) < EPS for x, y in zip(segs, segs[1:], strict=False)), "and so is film time"
+    stills = [x.a for x in segs if x.speed == 0]
+    for i, f in enumerate(fs):
+        assert abs(p.src_time(i / p.fps) - f["t"]) < EPS, "frame i stands at i/fps in the film"
+        if f["speed"] and not any(abs(f["t"] - a) < EPS for a in stills):
+            assert abs(p.out_time(f["t"]) - i / p.fps) < 1e-6, f"frame {i} outside a still maps back to i/fps"
+
+
+def _cue(p, sid):
+    step = next(s for s in p.steps if s["id"] == sid)
+    return next(c for c in p.cues() if c[3] == step["caption"])
+
+
+def _first_frame_after(p, s):
+    return next(i for i in range(p.frames) if p.frame(i)["t"] > s + EPS)
+
+
+def t_steps_that_follow_at_once_still_get_a_lead_in_and_a_minimum_time_on_screen():
+    p = fp.Plan(swaps_timeline())
+    assert fp.LEAD_IN_S >= 2.0 and fp.MIN_CAPTION_S >= fp.LEAD_IN_S + fp.HOLD_S, "the opening gives time to follow"
+    for s in _captioned(p):
+        a, b, _who, _text = _cue(p, s["id"])
+        assert b - a >= fp.MIN_CAPTION_S - EPS, f"{s['id']} is on screen {b - a:.2f} s"
+        acts = _first_frame_after(p, s["start"])
+        assert acts / p.fps - a >= fp.LEAD_IN_S - 1.5 / p.fps, f"{s['id']} acts {acts / p.fps - a:.2f} s after its caption"
+        assert not p.frame(acts - 1)["moving"], f"{s['id']} acts only once its layout rests"
+
+
+def t_a_long_action_shows_its_start_and_speeds_up_the_rest():
+    tl = timeline()
+    tl["steps"][4].update(start=65.0, acted=125.0, end=125.0)      # Race Control approves one request after another
+    for st in tl["steps"][5:]:
+        st.update({k: st[k] + 60.0 for k in ("start", "acted", "end")})
+    p = fp.Plan(tl)
+    assert p.speed_at(65.0 + fp.MAX_ACTION_S - 0.1) == 1, "the first approvals play in real time"
+    assert p.speed_at(100.0) == p.wait_speed, "the rest of the action is sped up"
+    assert p.speed_at(125.0 + fp.HOLD_S - 0.1) == 1, "the result holds in real time"
+    assert _at(p, 100.0)["caption"].startswith("Race Control confirms"), "the caption stays on while it speeds"
+
+
+def t_a_long_action_in_a_swap_chapter_plays_in_real_time():
+    tl = swaps_timeline()
+    for st in tl["steps"]:
+        if st["id"] == "ok1":
+            st.update(acted=216.0, end=216.0)                      # a split-like action of 15 s
+        elif st["id"] in ("next1", "cut1"):
+            st.update({k: st[k] + 14.0 for k in ("start", "acted", "end")})
+    p = fp.Plan(tl)
+    assert all(p.speed_at(x) == 1 for x in (202.0, 209.0, 215.9)), "a swap step's long action is never sped up"
+
+
+def _run_timeline(actions, chapter=None, swap=False):
+    steps = [_step("boot", "api", 0.0, 0.1, 1.0)]
+    for n, action in enumerate(actions):
+        extra = {"chapter": chapter} if chapter and n == 0 else {}
+        steps.append(_step(f"lap{n}", "race_control", 1.0 + 6 * n, 6.0 + 6 * n, 7.0 + 6 * n, caption=f"Lap {n}",
+                           focus=["race_control", "viewer"], action=action, **extra))
+    if swap:
+        steps.append(_step("switch", "director", 37.0, 38.0, 39.0, caption="The director switches", focus=QUARTERS))
+    else:
+        steps.append(_step("other", "director", 37.0, 38.0, 39.0, caption="The director acts"))
+    recs = [_rec(v, 0.0) for v in ("race_control", "viewer", "director", "program", "commentator:Comms 1",
+                                   "commentator:Comms 2")]
+    return {"scenario": "run", "steps": steps, "recordings": recs}
+
+
+def t_a_run_of_like_steps_shows_its_first_ones_and_speeds_up_the_rest_under_one_caption():
+    shown = fp.RUN_SHOWN
+    assert 2 <= shown < 6
+    p = fp.Plan(_run_timeline(["add_lap"] * 6))
+    for n in range(6):
+        mid = 3.5 + 6 * n
+        want = 1 if n < shown else p.wait_speed
+        assert p.speed_at(mid) == want, f"lap {n} plays at {p.speed_at(mid)}"
+    cues = p.cues()
+    assert [c[3] for c in cues] == [f"Lap {n}" for n in range(shown + 1)] + ["The director acts"], \
+        f"the sped-up tail of the run shows one caption: {[c[3] for c in cues]}"
+    assert all(b - a >= fp.MIN_CAPTION_S - EPS for a, b, _w, _t in cues), \
+        f"no caption flashes: {[round(b - a, 2) for a, b, _w, _t in cues]}"
+    assert p.speed_at(37.5) == 1, "a different step after the run plays in real time"
+    mixed = fp.Plan(_run_timeline([f"act{n}" for n in range(6)]))
+    assert all(mixed.speed_at(3.5 + 6 * n) == 1 for n in range(6)), "steps of one role with other actions are no run"
+    swap = fp.Plan(_run_timeline(["add_lap"] * 6, chapter="Driver swap 1", swap=True))
+    assert all(swap.speed_at(3.5 + 6 * n) == 1 for n in range(6)), "a run in a swap chapter plays in full"
+
+
+def t_a_swap_holds_its_beats_and_the_quarters_until_both_cockpits_changed():
+    p = fp.Plan(swaps_timeline())
+    for sid in ("driver1", "ok1", "next1", "cut1"):
+        step = next(s for s in p.steps if s["id"] == sid)
+        _a, b, _who, _text = _cue(p, sid)
+        assert b - p.out_time(step["acted"]) >= fp.SWAP_HOLD_S - EPS, f"{sid} holds its result {fp.SWAP_HOLD_S} s"
+    assert p.speed_at(206.9) == 1, "the swap step's wait for the on-air change plays in real time"
+    still = next(x for x in p.segments if x.speed == 0 and x.a == 201.0)
+    f = p.frame(math.ceil(still.out * p.fps))
+    assert f["caption"] == "The next driver registers" and "race_control" not in f["rings"], \
+        "the next step's ring lights only once its action runs"
+    lead = next(x for x in p.segments if x.speed == 0 and x.a == 201.0 and x.out > still.out)
+    g = p.frame(math.ceil(lead.out * p.fps) + 1)
+    assert g["caption"] == "Race Control approves" and not {"driver", "race_control"} & set(g["rings"]), \
+        "during a lead-in no ring lights: the previous step is done, this one has not acted"
+    assert "race_control" in _at(p, 201.5)["rings"], "the step's ring lights while it acts"
+    assert "director" in _at(p, 206.5)["rings"], "a swap step's ring lasts its swap hold"
+    acted = p.out_time(203.0)
+    assert p.frame(round(acted * p.fps))["quarters"]
+    gone = next(i for i in range(round(acted * p.fps), p.frames) if not p.frame(i)["quarters"])
+    assert gone / p.fps - acted >= (207.0 - 203.0) + fp.HOLD_S - 0.1, \
+        "the quarters stay until the cockpits changed, and a hold longer"
+
+
+def _present(f, v):
+    return f["rects"][v][4] > 0
+
+
+def t_a_cockpit_is_on_the_stage_only_around_its_own_stint():
+    p = fp.Plan(swaps_timeline())
+    assert _present(_at(p, 1.5), C1) and not _present(_at(p, 0.5), C1), "Comms 1 comes on with its first chapter"
+    assert not _present(_at(p, 50.0), C2) and not _present(_at(p, 50.0), C3)
+    assert _present(_at(p, 150.0), C2), "Comms 2 comes on with its link, before the swap"
+    assert _present(_at(p, 204.0), C1) and not _present(_at(p, 250.0), C1), "Comms 1 leaves after the swap"
+    assert not _present(_at(p, 250.0), C3) and _present(_at(p, 300.5), C3), "Comms 3 comes on with swap 2"
+    assert not _present(_at(p, 350.0), C2), "Comms 2 leaves after swap 2"
+    assert _present(_at(p, 399.0), C3), "the last commentator stays to the end"
+    fade = [f["rects"][C2][:4] for f in frames(p) if 0 < f["rects"][C2][4] < 1 and f["t"] < 150]
+    assert fade and all(r == fade[0] for r in fade), "a cockpit fades in where it will stand"
+
+
+def t_the_cockpit_on_air_hands_over_and_a_returning_one_stays():
+    tl = swaps_timeline()
+    for st in tl["steps"]:
+        if st["id"] == "next2":
+            st["focus"] = ["director", "program", C1, C2]           # Comms 2 hands back to Comms 1
+    p = fp.Plan(tl)
+    assert not _present(_at(p, 250.0), C1) and _present(_at(p, 250.0), C2), "Comms 1 left after swap 1"
+    assert _present(_at(p, 300.5), C1), "Comms 1 comes back with swap 2"
+    assert _present(_at(p, 304.0), C1) and _present(_at(p, 304.0), C2), "both stand in the quarters"
+    assert not _present(_at(p, 350.0), C2), "Comms 2, on air before swap 2, hands over and leaves"
+    assert _present(_at(p, 399.0), C1), "the returning Comms 1 stays to the end"
+
+
+def t_a_cockpit_never_named_by_a_caption_stays_on_the_stage():
+    p = plan()
+    two = timeline()
+    two["steps"][6]["focus"] = QUARTERS[:2]
+    q = fp.Plan(two)
+    assert all(_present(f, "commentator:Comms 2") for f in frames(q) if f["t"] >= 1.0), \
+        "no caption places it, so it stays from its recording on"
+    assert _present(_at(p, 101.0), "commentator:Comms 2")
+    assert not _present(_at(p, 115.5), "commentator:Comms 1") and _present(_at(p, 115.5), "commentator:Comms 2"), \
+        "of two cockpits that came on together, the one named first hands over"
 
 
 def t_from_and_to_cut_a_partial_render_out_of_the_same_film():
@@ -155,13 +345,22 @@ def _at(p, t):
     return p.frame(next(i for i in range(p.frames) if p.src_time(i / p.fps) >= t - EPS))
 
 
-def t_the_running_step_s_own_role_takes_a_large_slot():
+def t_a_step_without_focus_brings_its_own_role_forward_over_the_previous_views():
     p = plan()
     f = _at(p, 2.0)
     assert f["large"] == ["producer"], f["large"]
     f = _at(p, 66.0)
-    assert f["large"][0] == "race_control", "the own role takes the first large slot"
-    assert f["large"] == ["race_control", "director"], "the second slot keeps the previous first view"
+    assert f["large"] == ["race_control"] and f["front"] == "race_control", "the own role comes forward alone"
+    x, y, w, h = f["rects"]["director"][:4]
+    assert 0 < f["rects"]["director"][4] <= fp.DIM and w > 3 * fp.RAIL_MAX_W, \
+        "the previous large views stay large behind it, dimmed"
+    tl = timeline()
+    tl["steps"].insert(5, _step("desk2", "race_control", 80.0, 81.0, 82.0, caption="Race Control acts again"))
+    tl["steps"][6].update(start=82.0, acted=82.1)
+    q = fp.Plan(tl)
+    span = [i for i in range(q.frames) if 66.0 <= q.frame(i)["t"] <= 81.0]
+    assert all(q.frame(i)["front"] == "race_control" and not q.frame(i)["moving"] for i in span[q.fps:]), \
+        "consecutive steps of the same role keep the same front layout"
 
 
 def t_a_step_s_focus_overrides_its_role():
@@ -206,14 +405,17 @@ def t_an_uncaptioned_step_lights_its_ring_but_keeps_the_layout():
 
 
 def t_layout_changes_animate_and_never_cut():
-    p = plan()
-    fs = frames(p)
-    limit = 0
-    for a, b in zip(fs, fs[1:], strict=False):
-        for v in p.views:
-            ra, rb = a["rects"][v], b["rects"][v]
-            limit = max(limit, max(abs(x - y) for x, y in zip(ra[:4], rb[:4], strict=True)))
-    assert limit < 150, f"a view moved {limit:.0f} px in one frame: a cut"
+    limit = fade = 0
+    for p in (fp.Plan(swaps_timeline()), plan()):
+        fs = frames(p)
+        for a, b in zip(fs, fs[1:], strict=False):
+            for v in p.views:
+                ra, rb = a["rects"][v], b["rects"][v]
+                if ra[4] > 0 and rb[4] > 0:
+                    limit = max(limit, max(abs(x - y) for x, y in zip(ra[:4], rb[:4], strict=True)))
+                fade = max(fade, abs(ra[4] - rb[4]))
+    assert limit < 150, f"a visible view moved {limit:.0f} px in one frame: a cut"
+    assert fade < 0.1, f"a view's opacity changed by {fade:.2f} in one frame: a cut"
     i = next(i for i, f in enumerate(fs) if f["large"] == ["director", "program"])
     mid = fs[i + int(fp.MOVE_S * p.fps / 2)]
     done = fs[i + int(fp.MOVE_S * p.fps) + 1]
@@ -231,12 +433,12 @@ def t_a_view_shows_its_latest_recording_from_its_start_on():
     rec, t = f["sources"]["director"]
     first = p.recordings[rec]
     assert first["file"] == "pages/director/page@1.webm"
-    assert abs(t - (f["t"] - first["start"])) < EPS, "a view's time is the run time minus its start"
+    assert abs(t - (f["t"] - first["start"])) < ROUNDED, "a view's time is the run time minus its start"
     rec2, t2 = _at(p, 61.0)["sources"]["director"]
     assert p.recordings[rec2]["file"] == "pages/director/page@second.webm", "the reopened page takes over"
-    assert abs(t2 - (_at(p, 61.0)["t"] - 50.0)) < EPS
+    assert abs(t2 - (_at(p, 61.0)["t"] - 50.0)) < ROUNDED
     prog = _at(p, 2.0)["sources"]["program"]
-    assert abs(prog[1] - (_at(p, 2.0)["t"] + 2.0)) < EPS, "a recording started before the engine is ahead"
+    assert abs(prog[1] - (_at(p, 2.0)["t"] + 2.0)) < ROUNDED, "a recording started before the engine is ahead"
 
 
 def t_a_recording_s_time_stops_at_its_known_duration():
@@ -254,6 +456,68 @@ def t_a_missing_transcode_of_a_reopened_page_shows_the_earlier_recording():
     assert _at(p, 61.0)["sources"]["driver"] is not None
     none = fp.Plan(tl, available=set())
     assert all(src is None for src in _at(none, 61.0)["sources"].values()), "nothing transcoded, nothing shown"
+
+
+TAB = "race_control:standings"
+
+
+def tab_timeline():
+    """Race Control opens the standings tab for 8 s during one step; it is recorded on its own."""
+    tl = timeline()
+    tl["steps"][4]["focus"] = [TAB]
+    tl["recordings"].append(_rec(TAB, 65.5, file="pages/race_control/tab.webm"))
+    return tl
+
+
+def t_a_tab_is_a_view_of_its_own_with_its_label():
+    p = fp.Plan(tab_timeline())
+    assert TAB in p.views and p.views.index(TAB) == p.views.index("race_control") + 1, p.views
+    assert fp.label(TAB) == "Race Control: standings"
+    assert fp.stage_views([{"view": "race_control:other", "file": "x.webm"}]) == ["race_control:other"]
+
+
+def t_a_tab_is_on_the_stage_only_around_its_step():
+    p = fp.Plan(tab_timeline())
+    assert not _present(_at(p, 61.0), TAB) and not _present(_at(p, 101.0), TAB), "the tab is off the stage"
+    before = _at(p, 65.3)
+    assert not _present(before, TAB) and before["front"] == "race_control", \
+        "until the tab opens, the desk that opens it stays in front"
+    f = _at(p, 66.2)
+    assert f["front"] == TAB, "once open, the tab comes forward"
+    desk = f["rects"]["race_control"]
+    assert 0 < desk[4] <= fp.DIM and desk[2] > 3 * fp.RAIL_MAX_W, "the desk stays large behind it, dimmed"
+
+
+def t_a_recording_that_starts_mid_run_counts_its_time_from_its_start():
+    p = fp.Plan(tab_timeline())
+    f = _at(p, 66.0)
+    rec, t = f["sources"][TAB]
+    assert p.recordings[rec]["file"] == "pages/race_control/tab.webm"
+    assert abs(t - (f["t"] - 65.5)) < ROUNDED, f"the tab's video stands at source minus its start: {t}"
+    assert _at(p, 65.0)["sources"][TAB] is None and not _present(_at(p, 65.0), TAB), "before it opens, no tab"
+
+
+def t_the_film_opens_on_the_first_caption_s_own_view():
+    p = plan()
+    f = p.frame(0)
+    assert f["large"] == ["producer"] and f["sources"]["producer"] is not None, \
+        f"the film opens on the Control Center, not a stand-in: {f['large']}"
+    assert f["caption"] == "The producer picks the track", f["caption"]
+    q = fp.Plan(swaps_timeline())
+    assert q.t0 == 0.0, "a view open from the start moves nothing"
+
+
+def t_a_view_takes_no_place_before_its_recording_starts():
+    p = plan()
+    f = _at(p, 2.0)
+    assert not _present(f, "driver"), "the driver page opens at 5 s"
+    assert _present(_at(p, 30.0), "driver"), "and is on the stage from then on"
+    fade = [g["rects"]["driver"][:4] for g in frames(p) if 0 < g["rects"]["driver"][4] < 1 and g["t"] < 30]
+    assert fade and all(r == fade[0] for r in fade), "it fades in where it will stand"
+    for q in (plan(), fp.Plan(swaps_timeline()), fp.Plan(tab_timeline())):
+        for g in frames(q):
+            bare = [v for v, r in g["rects"].items() if r[4] > 0 and g["sources"][v] is None]
+            assert not bare, f"{bare} on the stage without a picture at {g['t']}"
 
 
 def t_a_recording_without_a_file_is_left_out():
@@ -297,21 +561,20 @@ def t_the_stage_keeps_every_view_inside_the_canvas_and_off_the_caption_line():
             assert not _overlap(r, fp.TOPBAR_RECT), f"{v} covers the chapter and clock bar at {f['t']}"
 
 
-def t_resting_views_never_overlap_each_other():
-    p = plan()
-    for f in frames(p):
-        if f["moving"]:
-            continue
-        shown = [(v, r) for v, r in f["rects"].items() if r[4] > 0]
-        for i, (va, ra) in enumerate(shown):
-            for vb, rb in shown[i + 1:]:
-                assert not _overlap(ra, rb), f"{va} and {vb} overlap at {f['t']}"
+def t_resting_views_never_overlap_each_other_except_the_one_in_front():
+    for p in (plan(), fp.Plan(swaps_timeline())):
+        for f in frames(p):
+            if f["moving"]:
+                continue
+            shown = [(v, r) for v, r in f["rects"].items() if r[4] > 0 and v != f["front"]]
+            for i, (va, ra) in enumerate(shown):
+                for vb, rb in shown[i + 1:]:
+                    assert not _overlap(ra, rb), f"{va} and {vb} overlap at {f['t']}"
 
 
 def t_a_view_s_label_is_a_tab_above_its_picture_and_covers_nothing():
-    p = plan()
     sizes = set()
-    for f in frames(p):
+    for f in frames(plan()) + frames(fp.Plan(swaps_timeline())):
         shown = {v: r for v, r in f["rects"].items() if r[4] > 0}
         for v, r in shown.items():
             tab = fp.label_rect(r)
@@ -323,7 +586,7 @@ def t_a_view_s_label_is_a_tab_above_its_picture_and_covers_nothing():
             if f["moving"]:
                 continue
             for w, o in shown.items():
-                if w != v:
+                if w != v and f["front"] not in (v, w):
                     assert not _overlap(tab, o[:4]) and not _overlap(tab, fp.label_rect(o)), \
                         f"the tab of {v} covers {w} at {f['t']}"
     assert {fp.TAB_RAIL, fp.TAB_LARGE} <= sizes, f"rail and large tabs: {sizes}"
@@ -341,6 +604,34 @@ def t_a_large_view_keeps_its_aspect_and_is_larger_than_a_preview():
     sizes = {round(q["rects"][v][3]) for v in ("director", "commentator:Comms 1")}
     assert len(sizes) == 1, "the quarters are equal"
     assert all(q["rects"][v][4] == 0 for v in p.views if v not in QUARTERS), "the rail gives way to the quarters"
+
+
+def t_a_view_off_the_stage_gets_no_rect_and_leaves_the_layout():
+    prev = fp.Layout(("director",), behind=("program", C1))
+    kept = fp.focus_layout(_step("x", "api", 0, 0, 0, caption="c"), prev, ["director", "program"])
+    assert kept.large == ("director",) and C1 not in kept.behind, f"a departed view leaves the layout: {kept}"
+    sizes = {v: (1440, 900) for v in ("director", "program", C1)}
+    rects = fp.target_rects(["director", "program"], prev, sizes)
+    assert set(rects) == {"director", "program"}, f"no rect for a view off the stage: {set(rects)}"
+    rects = fp.target_rects(["director"], fp.Layout(("director", "program")), sizes)
+    assert set(rects) == {"director"}, set(rects)
+
+
+def t_a_single_view_comes_forward_over_the_dimmed_stage():
+    p = plan()
+    f = _at(p, 2.0)
+    assert f["large"] == ["producer"] and f["front"] == "producer" and not f["moving"]
+    x, y, w, h = f["rects"]["producer"][:4]
+    assert abs(x + w / 2 - fp.CANVAS[0] / 2) < 1, "the view in front stands in the centre"
+    assert h >= 0.78 * fp.CANVAS[1], f"it takes about 80 % of the canvas: {h:.0f} px high"
+    others = [r for v, r in f["rects"].items() if v != "producer" and r[4] > 0]
+    assert others and all(r[4] <= fp.DIM + EPS for r in others), "the rest of the stage stays visible behind it, dimmed"
+    two = _at(p, 61.0)
+    assert two["front"] is None and two["large"] == ["director", "program"], "two views keep the side-by-side layout"
+    assert all(r[4] == 1.0 for v, r in two["rects"].items() if r[4] > 0), "nothing is dimmed beside two views"
+    fs = frames(p)
+    i = next(i for i, f in enumerate(fs) if f["large"] == ["director", "program"])
+    assert fs[i]["moving"] and fs[i]["front"] == "producer", "the view in front stays on top while it eases out"
 
 
 def _playwright():
@@ -366,7 +657,7 @@ def t_the_stage_page_lays_out_a_frame_without_overlap():
     if sync_playwright is None:
         return
     p = fp.Plan(timeline(), available=set())
-    states = [p.frame(0), _at(p, 61.0), _at(p, 101.0), _at(p, 66.0)]
+    states = [p.frame(0), _at(p, 2.0), _at(p, 61.0), _at(p, 101.0), _at(p, 66.0)]
     url = "file://" + os.path.join(VIDEO, "stage.html").replace(os.sep, "/")
     with sync_playwright() as pw:
         browser, page, errors = _stage(pw, url)
@@ -391,7 +682,13 @@ def t_the_stage_page_lays_out_a_frame_without_overlap():
                     assert not _overlap(r, cap), f"{v} covers the caption line"
                 for v, *t in tabs:
                     assert _inside(t) and not _overlap(t, cap), f"the tab of {v}: {t}"
-                    assert not any(_overlap(t, r) for _, *r in boxes), f"the tab of {v} covers a picture: {t}"
+                    assert not any(_overlap(t, r) for w, *r in boxes if state["front"] not in (v, w)), \
+                        f"the tab of {v} covers a picture: {t}"
+                if state["front"]:
+                    x, y, w, h = state["rects"][state["front"]][:4]
+                    top = page.evaluate("([x, y]) => document.elementFromPoint(x, y).closest('.view').dataset.view",
+                                        [x + w / 2, y + h / 2])
+                    assert top == state["front"], f"{state['front']} lies over the stage, not {top}"
                 assert (state["caption"] or "") in text
             assert not errors, errors
         finally:

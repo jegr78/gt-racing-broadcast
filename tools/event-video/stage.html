@@ -13,7 +13,7 @@ html,body{background:#05080c;overflow:hidden}
 #stage{position:relative;width:2560px;height:1440px;overflow:hidden;color:var(--ink);font-family:'Saira Condensed',sans-serif;
   background:radial-gradient(120% 90% at 78% 12%,rgba(53,167,204,.14),transparent 55%),
              linear-gradient(160deg,var(--navy1) 0%,var(--navy0) 60%,#0b1119 100%)}
-#topbar{position:absolute;display:flex;align-items:center;gap:24px;padding:0 32px;
+#topbar{position:absolute;z-index:3;display:flex;align-items:center;gap:24px;padding:0 32px;
   background:linear-gradient(90deg,rgba(53,167,204,.18),transparent 70%);border-bottom:2px solid rgba(53,167,204,.35)}
 #chapterNo{font-family:'IBM Plex Mono',monospace;font-size:28px;color:var(--teal2);letter-spacing:.2em}
 #chapterTitle{font-size:54px;font-weight:800;font-style:italic;text-transform:uppercase;letter-spacing:.01em}
@@ -24,13 +24,11 @@ html,body{background:#05080c;overflow:hidden}
 #ff:empty{display:none}
 #clockLabel{font-family:'IBM Plex Mono',monospace;font-size:20px;color:var(--muted);letter-spacing:.24em}
 #clock{font-family:'IBM Plex Mono',monospace;font-size:48px}
-.view{position:absolute}
+.view{position:absolute;z-index:1}
+.view.front{z-index:2}
 .view .pic{position:absolute;inset:0;overflow:hidden;border-radius:0 10px 10px 10px;background:#000;box-shadow:0 12px 40px rgba(0,0,0,.55)}
 .view video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none}
 .view video.on{display:block}
-.view .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);
-  font-family:'IBM Plex Mono',monospace;font-size:16px;background:var(--navy1)}
-.view.has .ph{display:none}
 /* The role label is a tab above the picture, so it never covers a page's own heading. */
 .view .label{position:absolute;left:0;bottom:100%;padding:0 12px;font-weight:700;letter-spacing:.02em;white-space:nowrap;
   color:var(--ink);background:#1b2a3a;border-radius:8px 8px 0 0}
@@ -38,7 +36,7 @@ html,body{background:#05080c;overflow:hidden}
 .view .ring{position:absolute;inset:0;border:5px solid var(--teal2);border-radius:0 10px 10px 10px;display:none;
   box-shadow:inset 0 0 24px rgba(72,194,230,.55)}
 .view.ring .ring{display:block}
-#caption{position:absolute;display:flex;align-items:center;gap:24px;padding:0 28px;border-radius:12px;
+#caption{position:absolute;z-index:3;display:flex;align-items:center;gap:24px;padding:0 28px;border-radius:12px;
   background:rgba(5,8,12,.86);border:1px solid rgba(53,167,204,.35)}
 #who{font-size:34px;font-weight:700;color:#05080c;background:var(--teal2);border-radius:8px;padding:2px 16px;white-space:nowrap}
 #who:empty{display:none}
@@ -76,9 +74,6 @@ async function setup(cfg) {
     const el = document.createElement('div');
     el.className = 'view';
     el.dataset.view = v.id;
-    const ph = document.createElement('div');
-    ph.className = 'ph';
-    ph.textContent = 'not open yet';
     const label = document.createElement('div');
     label.className = 'label';
     label.textContent = v.label;
@@ -86,7 +81,7 @@ async function setup(cfg) {
     ring.className = 'ring';
     const pic = document.createElement('div');
     pic.className = 'pic';
-    pic.append(ph, ring);
+    pic.append(ring);
     el.append(pic, label);
     stage.insertBefore(el, document.getElementById('caption'));
     views[v.id] = {el, pic, ring, videos: {}, label};
@@ -131,11 +126,11 @@ async function setFrame(s) {
     view.label.style.fontSize = Math.round(r[5] * 0.68) + 'px';
     view.el.classList.toggle('ring', s.rings.includes(id) && r[4] > 0);
     view.el.classList.toggle('large', s.large.includes(id));
+    view.el.classList.toggle('front', s.front === id);
     const src = s.sources[id];
     const video = src ? view.videos[src[0]] : null;
     for (const v of Object.values(view.videos)) v.classList.toggle('on', v === video);
     const broken = !!video && (!!video.error || video.dataset.bad === '1' || video.readyState < 1);
-    view.el.classList.toggle('has', !!video && !broken);
     if (!src || r[4] <= 0) continue;
     if (!video) problems.push(`${id}: recording ${src[0]} is not on the stage`);
     else if (broken) problems.push(`${id}: recording ${src[0]} did not load`);
