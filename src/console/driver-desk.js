@@ -15,6 +15,8 @@
     ".dd{display:flex;flex-direction:column;gap:12px;padding:10px 12px;font-size:13px;color:var(--ink,#e8eaed)}",
     ".dd .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}",
     ".dd .grow{flex:1 1 auto;min-width:0}",
+    ".dd .plan{flex:1 1 100%;min-width:0}",
+    ".dd input.buffer{width:5.5em}",
     ".dd .mono{font-family:var(--mono,ui-monospace,monospace);font-size:12px;overflow-wrap:anywhere}",
     ".dd .muted{color:var(--muted,#9aa0a6)}",
     ".dd .nowrap{white-space:nowrap}",
@@ -594,8 +596,8 @@
       });
     }
     // While the red flag is out: how far the race falls behind the stint's plan, and the restart lobby's laps.
-    var planLine = el("span", {cls: "mono grow"});
-    var planBuffer = el("input", {type: "number", min: "0", max: "120", placeholder: "buffer min",
+    var planLine = el("span", {cls: "mono plan"});
+    var planBuffer = el("input", {type: "number", min: "0", max: "120", placeholder: "min", cls: "buffer",
                                   "aria-label": "Buffer until the restart, minutes"});
     var plan = null, planOf = null;
     // Take writes the stint the plan was made for, even after a switch during the hold.
