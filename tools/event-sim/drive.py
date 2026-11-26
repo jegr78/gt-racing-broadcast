@@ -32,6 +32,7 @@ import gt7_tracks  # noqa: E402
 import telemetry_probe  # noqa: E402
 
 TICK_S = 0.2
+MAX_CATCH_UP_S = 5.0        # a paused process resumes with a gap, not a replayed race
 PACKETS_PER_TICK = 6        # one sample per batch at the probe's SAMPLE_EVERY
 PIT_IN_M = 250.0            # pit entry to the first box, and box to the pit exit
 BOX_BACK_M = 180.0          # the first box stands this far before the finish line
@@ -412,16 +413,17 @@ class Field:
                 for c in self.cars]
 
     # -- the clock -----------------------------------------------------------------
-    def step(self, now, dt, flush=True):
+    def step(self, now, dt, flush=True, post=True):
         """Move every car one tick. The batches go out at once, or with `flush=False`
-        wait in `outbox` for a `flush()` outside the caller's lock."""
+        wait in `outbox` for a `flush()` outside the caller's lock; `post=False` moves
+        the cars without building a batch."""
         if self._release:
             self._release, self.released_at = False, now
         if self.positions:
             running = sorted((c for c in self.cars if c.mode not in ("dropped", "off")), key=lambda c: -c.odo)
             self._places = {c.entry: (k, len(running)) for k, c in enumerate(running, 1)}
         for car in self.cars:
-            self._step(car, now, dt)
+            self._step(car, now, dt, post)
         if flush:
             self.flush(self.take())
 
@@ -457,7 +459,7 @@ class Field:
             return self.released_at is not None and "delay" in p and now >= self.released_at + p["delay"]
         return now - p["stood"] >= p["seconds"]
 
-    def _step(self, car, now, dt):
+    def _step(self, car, now, dt, post=True):
         if car.mode in ("dropped", "off"):
             return
         length = self.line.length
@@ -507,6 +509,8 @@ class Field:
             line = math.floor(car.odo / length) * length
             frac = (car.odo - line) / max(car.odo - before, 1e-6)
             self._crossed(car, now - frac * dt)
+        if not post:
+            return
         x, z = self.line.at(car.odo, car.lat)
         place = self._places.get(car.entry, (None, None))
         self._post(car.sender, car.lap, speed, x, z, car.fuel, place)
@@ -594,7 +598,11 @@ class Runner:
             now = self.clock()
             try:
                 with self.lock:
-                    self.field.step(now, min(0.5, max(now - last, 0.0)) or self.tick_s, flush=False)
+                    backlog = min(max(now - last, 0.0), MAX_CATCH_UP_S)
+                    steps = max(1, math.ceil(backlog / self.tick_s - 1e-6))
+                    dt = backlog / steps or self.tick_s
+                    for k in range(steps, 0, -1):
+                        self.field.step(now - (k - 1) * dt, dt, flush=False, post=k == 1)
                     batches = self.field.take()
                 self.field.flush(batches)        # outside the lock: an instruction never waits for HTTP
             except Exception as exc:  # a dead sender thread must not look like quiet cars

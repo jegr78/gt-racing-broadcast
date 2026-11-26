@@ -485,9 +485,68 @@ def t_the_runner_steps_on_its_clock_and_stops():
     runner.close()
 
 
+def slow_runner(f, tick_cost, loops):
+    """A runner whose every tick costs `tick_cost` wall seconds; halts after `loops`."""
+    clock = [50.0]
+    done = []
+
+    def sleep(s):
+        clock[0] += tick_cost
+        done.append(s)
+        if len(done) == loops:
+            runner.halt.set()
+    runner = drive.Runner(f, clock=lambda: clock[0], sleep=sleep)
+    return runner
+
+
+def t_a_slow_tick_catches_up_the_wall_clock():
+    loops = 30
+    f = field(Wire(), cars=1)
+    f.start()
+    slow_runner(f, 1.0, loops).loop()
+    ref = field(Wire(), cars=1)
+    ref.start()
+    simulated = drive.TICK_S + (loops - 1) * 1.0
+    for i in range(round(simulated / drive.TICK_S)):
+        ref.step(i * drive.TICK_S, drive.TICK_S)
+    got, want = f.cars[0].odo, ref.cars[0].odo
+    assert abs(got - want) < 0.03 * want, f"the field keeps wall time: {got:.0f} m against {want:.0f} m"
+
+
+def t_a_catch_up_posts_only_the_newest_batch_per_sender():
+    loops = 10
+    wire = Wire()
+    f = field(wire, cars=2)
+    f.start()
+    slow_runner(f, 1.0, loops).loop()
+    for code in ("c0s0", "c1s0"):
+        assert wire.count(code) == loops * drive.PACKETS_PER_TICK, \
+            f"{code}: one batch per loop, not one per catch-up step ({wire.count(code)} samples)"
+        pids = [s["pid"] for s in wire.samples[code]]
+        assert pids == list(range(pids[0], pids[0] + len(pids))), f"{code}: a catch-up skips no packet id: {pids}"
+
+
+def t_a_long_stall_catches_up_only_a_bounded_time():
+    f = field(Wire(), cars=1)
+    f.start()
+    steps = []
+    step = f.step
+
+    def counted(now, dt, flush=True, post=True):
+        steps.append(dt)
+        step(now, dt, flush, post)
+    f.step = counted
+    slow_runner(f, 3600.0, 2).loop()
+    bound = getattr(drive, "MAX_CATCH_UP_S", 0.0)
+    assert sum(steps) <= drive.TICK_S + bound + 1e-6, \
+        f"a stall replays at most MAX_CATCH_UP_S, not {sum(steps):.0f} s"
+    assert sum(steps) >= drive.TICK_S + bound - 1e-6, f"a stall still replays the bound, not {sum(steps):.1f} s"
+    assert max(steps) <= drive.TICK_S + 1e-9, f"every step stays a tick, not {max(steps)} s"
+
+
 def t_a_step_that_raises_ends_the_runner_with_its_reason():
     f = field(Wire(), cars=1)
-    f.step = lambda now, dt, flush=True: 1 / 0
+    f.step = lambda now, dt, flush=True, post=True: 1 / 0
     runner = drive.Runner(f, clock=lambda: 1.0, sleep=lambda s: None)
     runner.loop()
     assert runner.error.startswith("ZeroDivisionError"), f"the loop ends and says why: {runner.error!r}"

@@ -895,7 +895,9 @@ page screenshot blacks out the link texts (`selectors.LINKS`).
 the synthetic track, `Field` (cars and their senders, stepped with `step(now, dt)` on the
 caller's clock, so a seed fixes every packet), `Client` (loopback unless told otherwise) and
 `Runner` (a field on real time in one thread, joined in `close`; it steps under its lock
-and posts the tick's batches outside it, each post bounded by `Client.ingest_timeout`).
+and posts the tick's batches outside it, each post bounded by `Client.ingest_timeout`; a
+slow tick catches up the lost wall time in tick-sized steps, up to `MAX_CATCH_UP_S`, and
+builds a batch only on the last one, because the relay measures gaps in wall seconds).
 `register` is all or nothing: on a failure the role holds no driver and names the
 registrations the relay already took. A car's GT7 lap counter
 reads 0 on the grid and steps at the line; a boxed car stands 22 m off the line; `lobby(n)`
