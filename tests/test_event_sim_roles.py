@@ -2705,6 +2705,9 @@ def t_the_full_scenario_runs_each_stint_lobby_to_its_lap_count():
     boxes = [s for s in steps if s.role == "drivers" and s.do == "box" and s.args.get("leader_first")]
     assert [b.args.get("laps") for b in boxes] == [counts["Stint 1"], "${take_plan.laps}"], \
         f"the swaps come at the end of the lobby's second to last lap: {[b.args for b in boxes]}"
+    late = by[by["swap2_driver"].at.ref]
+    assert "race.lobby_lap >= result('take_plan').laps - 3" in late.expect, \
+        f"the swap after the restart waits for the restart lobby's laps, not the race's: {late.expect}"
     take = by["take_plan"]
     assert take.role == "race_control" and _after(by, take.id, "red_flag") \
         and _after(by, "restart_lobby", take.id), "the plan is taken during the red flag, before the restart lobby"

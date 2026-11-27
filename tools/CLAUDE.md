@@ -663,7 +663,7 @@ inside its action.
 program feeds show), `sheet` (`tab(name)` or `sheet.<tab>`: records, index 0 is the first row
 under the header; `writes`, `write_count(action)`), `webhook` (`count(text)`, `messages`,
 `rejected`), `race` (the relay's `/drivers/race`), `page(role)` and `result(step_id)`. Keys
-match without case, spaces as `_`. Only comparisons, `and`/`or`/`not`, literals, attribute
+match without case, spaces as `_`. Only comparisons, `and`/`or`/`not`, `+` and `-` on numbers, literals, attribute
 and index access, probe methods, `len`, `sorted` and these helpers parse: `pluck(rows, key)` (the
 key of every row, in order), `row(rows, key, value)` (the first row with that value),
 `drift(before, after, key)` (the largest change of a number between rows of the same `entry`,

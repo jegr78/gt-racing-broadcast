@@ -1577,17 +1577,17 @@ do = "view"
 args = { area = "race" }
 
 [[step]]
-id = "lap11"
+id = "late2"
 at = "after:desk_race_back2"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
-expect = ["race.lap.leader >= 11"]
+expect = ["race.lobby_lap >= result('take_plan').laps - 3"]
 timeout = "12m"
 
 [[step]]
 id = "swap2_driver"
-at = "after:lap11"
+at = "after:late2"
 role = "driver"
 do = "register"
 args = { entry = "Lakeside Racing #14", name = "Driver 14-3", stint = 3 }
@@ -1736,7 +1736,7 @@ role = "api"
 do = "get"
 args = { path = "/drivers/race" }
 expect = ["row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-3'",
-          "unchanged(result('lap11').entries, race.entries, 'driver') in [[], ['Ion Racing #9']]",
+          "unchanged(result('late2').entries, race.entries, 'driver') in [[], ['Ion Racing #9']]",
           "relay.status.timer.remaining_s > 0"]
 timeout = "60s"
 

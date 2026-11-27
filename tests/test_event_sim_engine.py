@@ -764,11 +764,18 @@ def t_expect_reads_probes_views_and_calls():
     assert expect.truth("box.data.rows[0].url == 'sim://a'", names)[0]
     assert expect.truth("len(box.data.rows) == 1 and 'sim://a' in ['sim://a', 'x']", names)[0]
     assert expect.truth("not box.value < 0", names)[0]
+    assert expect.truth("box.value - 1 == 2 and box.value + 1.5 == 4.5", names)[0], "numbers add and subtract"
+    for text in ("box.data.race_control + 1 == 1", "True + 1 == 2"):
+        try:
+            expect.truth(text, names)
+        except expect.Unresolved:
+            continue
+        raise AssertionError(f"{text!r} only adds numbers")
 
 
 def t_expect_refuses_everything_else():
     for text in ("__import__('os')", "box.__class__", "box._secret", "[x for x in box.data]",
-                 "lambda: 1", "box.value + 1 == 4", "open('f')", "box.twice(n=2)", "b'x' == b'x'",
+                 "lambda: 1", "box.value * 2 == 6", "box.value // 2 == 1", "open('f')", "box.twice(n=2)", "b'x' == b'x'",
                  "x if box else y", "f'{box}'", "page('viewer').fastest.startswith('Fastest')",
                  "box.data.rows.count(1) == 1"):
         try:
