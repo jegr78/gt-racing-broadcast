@@ -41,6 +41,14 @@ html,body{background:#05080c;overflow:hidden}
 #who{font-size:34px;font-weight:700;color:#05080c;background:var(--teal2);border-radius:8px;padding:2px 16px;white-space:nowrap}
 #who:empty{display:none}
 #text{font-size:50px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* A title card covers the whole stage on its own backdrop; only its text fades. */
+#card{position:absolute;inset:0;z-index:4;display:none;flex-direction:column;align-items:center;justify-content:center;gap:40px;padding:0 120px;text-align:center;
+  background:radial-gradient(120% 90% at 78% 12%,rgba(53,167,204,.14),transparent 55%),
+             linear-gradient(160deg,var(--navy1) 0%,var(--navy0) 60%,#0b1119 100%)}
+#card.on{display:flex}
+#cardTitle{font-size:180px;font-weight:800;font-style:italic;text-transform:uppercase;letter-spacing:.01em;line-height:1}
+#cardRule{width:220px;height:8px;border-radius:4px;background:var(--teal2)}
+#cardSub{font-size:64px;font-weight:600;color:var(--teal2)}
 </style>
 </head>
 <body>
@@ -48,6 +56,7 @@ html,body{background:#05080c;overflow:hidden}
   <div id="topbar"><span id="chapterNo"></span><span id="chapterTitle"></span>
     <div id="right"><span id="ff"></span><span id="clockLabel">EVENT TIME</span><span id="clock"></span></div></div>
   <div id="caption"><span id="who"></span><span id="text"></span></div>
+  <div id="card"><div id="cardTitle"></div><div id="cardRule"></div><div id="cardSub"></div></div>
 </div>
 <script>
 const views = {};
@@ -116,6 +125,15 @@ function seek(video, t) {
 /* Shows frame state s. Returns {ok, problems}: ok only when every shown view's video
    loaded and landed on its time, so a capture never encodes a stale frame. */
 async function setFrame(s) {
+  const card = document.getElementById('card');
+  card.classList.toggle('on', !!s.card);
+  if (s.card) {
+    document.getElementById('cardTitle').textContent = s.card.title;
+    document.getElementById('cardSub').textContent = s.card.subtitle;
+    for (const id of ['cardTitle', 'cardRule', 'cardSub']) document.getElementById(id).style.opacity = s.card.opacity;
+    await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
+    return {ok: true, problems: []};
+  }
   const seeks = [];
   const problems = [];
   for (const [id, view] of Object.entries(views)) {

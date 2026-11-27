@@ -23,12 +23,14 @@
 # with a compound change. In stint 3 Race Control calls the final lap when the race timer
 # runs out; the outro ends the broadcast.
 # Its 50 screenshots carry deck image names (`<slide>-<n>`): the race-day subset of the
-# deck, see tools/CLAUDE.md for the families it does not produce. The captions, chapters and
+# deck, see tools/CLAUDE.md for the families it does not produce. The captions, chapters, cards and
 # focus are the walkthrough film's storyboard (spec 2026-11-24-event-walkthrough-video-design).
 # It runs in the workflow (about 36 min there plus the qualifying's 14); it exceeds the
 # local 2 GiB E2E unit.
 description = "Qualifying the day before, then the deck's race day in real time: approval, three stints, DC, estimate, DNF, red flag, finish."
 max_minutes = 75
+intro = { title = "GT Racing Broadcast", subtitle = "An endurance event from qualifying to the flag" }
+outro = { title = "GT Racing Broadcast", subtitle = "Setup and handbooks: the project wiki on GitHub" }
 
 [event]
 stints = 3
@@ -69,6 +71,7 @@ at = "after:relay_up"
 role = "producer"
 do = "pick_track"
 chapter = "Qualifying (the day before)"
+card = { title = "Qualifying", subtitle = "The day before the race" }
 caption = "The day before the race: the producer picks the track in the Control Center"
 
 [[step]]
@@ -396,6 +399,7 @@ expect = ["obs.scene == 'Standby'",
           "relay.status.mode == 'race'"]
 timeout = "30s"
 chapter = "Race day: start the event"
+card = { title = "Race day", subtitle = "Three stints, two driver swaps" }
 caption = "The next day the producer starts the race event, without the Qualifying option"
 
 [[step]]

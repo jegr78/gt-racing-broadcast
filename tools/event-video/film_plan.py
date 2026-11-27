@@ -3,12 +3,15 @@
 A record run's timeline.json says when each step ran and when each recording started,
 in seconds on the engine clock. The plan maps every output frame to a source time
 (pace), to the views shown large (focus) and to the rectangle, ring and recording time
-of every view on the 2560x1440 stage, plus the caption, chapter and clock it shows."""
+of every view on the 2560x1440 stage, plus the caption, chapter and clock it shows.
+Title cards add film time of their own; the source time plays the same around them."""
 import bisect
 import html
 import json
 import math
 import os
+import re
+import tomllib
 from dataclasses import dataclass
 
 CANVAS = (2560, 1440)
@@ -25,6 +28,12 @@ MOVE_S = 0.6
 CHAPTER_FRESH_S = 4.0
 FRONT_SHARE = 0.8        # a single large view comes forward at this share of the canvas
 DIM = 0.35               # the opacity of the stage behind it
+INTRO_S = 5.0            # card durations are whole frames, so the frames around a card stay as they were
+CHAPTER_CARD_S = 3.0
+OUTRO_S = 6.0
+CARD_FADE_S = 0.6
+SCENARIOS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "event-sim", "scenarios")
+SCENARIO_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 MARGIN = 16
 TOPBAR_H = 88
@@ -71,9 +80,43 @@ def stage_views(recordings):
     return sorted((v for v in views if _stage_rank(v) is not None), key=_stage_rank)
 
 
-def load_timeline(directory):
+def has_cards(timeline):
+    return any(timeline.get(k) for k in ("intro", "outro")) or any(s.get("card") for s in timeline.get("steps") or [])
+
+
+def with_cards(timeline, scenario):
+    """The timeline with the intro, outro and step cards of `scenario`, the parsed scenario
+    TOML; a card goes on the step of its id only when that step opens the same chapter."""
+    out = dict(timeline)
+    for key in ("intro", "outro"):
+        if scenario.get(key) is not None:
+            out[key] = scenario[key]
+    cards = {s.get("id", s.get("do")): (s.get("chapter"), s["card"])
+             for s in scenario.get("step") or [] if s.get("card") is not None}
+    out["steps"] = [dict(s, card=cards[s["id"]][1]) if s.get("chapter") and cards.get(s.get("id"), (None,))[0] == s["chapter"]
+                    else s for s in timeline.get("steps") or []]
+    return out
+
+
+def load_timeline(directory, scenarios=SCENARIOS):
+    """DIR/timeline.json. A recording made before the cards existed takes them from its
+    scenario file in `scenarios`, when that file is there."""
     with open(os.path.join(directory, "timeline.json"), encoding="utf-8") as fh:
-        return json.load(fh)
+        timeline = json.load(fh)
+    name = timeline.get("scenario")
+    if has_cards(timeline) or not (isinstance(name, str) and SCENARIO_NAME_RE.fullmatch(name)):
+        return timeline
+    path = os.path.join(scenarios, name + ".toml")
+    if not os.path.isfile(path):
+        return timeline
+    with open(path, "rb") as fh:
+        return with_cards(timeline, tomllib.load(fh))
+
+
+def check_card(card, where):
+    if not (isinstance(card, dict) and all(isinstance(card.get(k), str) and card[k].strip() for k in ("title", "subtitle"))):
+        raise ValueError(f"the {where} card needs a non-empty title and subtitle: {card!r}")
+    return {"title": card["title"], "subtitle": card["subtitle"]}
 
 
 @dataclass(frozen=True)
@@ -83,6 +126,7 @@ class Segment:
     speed: float      # 0 in a still
     out: float        # output time at a
     dur: float        # output duration
+    card: dict = None  # a title card, a still that shows no recording
 
 
 @dataclass(frozen=True)
@@ -119,12 +163,14 @@ def beats(steps, lead_in=LEAD_IN_S, hold=HOLD_S):
     return out
 
 
-def pace(steps, t0, t1, lead_in=LEAD_IN_S, hold=HOLD_S, speed=WAIT_SPEED, min_wait=MIN_WAIT_S):
+def pace(steps, t0, t1, lead_in=LEAD_IN_S, hold=HOLD_S, speed=WAIT_SPEED, min_wait=MIN_WAIT_S,
+         intro=None, outro=None):
     """(segments, marks): contiguous segments from t0 to t1 and, per captioned step, the
     output times its caption starts (shown), its action starts (act) and its caption ends. A captioned step plays its lead-in, action
     and hold in real time; where the source has no time for them (the next step follows at
     once), the picture stands still. Every other stretch is sped up by `speed`, unless it
-    is shorter than `min_wait`."""
+    is shorter than `min_wait`. The intro, a step's `card` (before the chapter it opens,
+    marked `card`) and the outro are stills of their own."""
     captioned = [s for s in steps if s.get("caption")]
     params = beats(steps, lead_in, hold)
     shown, prev = [], None
@@ -136,6 +182,8 @@ def pace(steps, t0, t1, lead_in=LEAD_IN_S, hold=HOLD_S, speed=WAIT_SPEED, min_wa
         shown.append(a)
         prev = s
     real, events, index = [], [], {s["id"]: n for n, s in enumerate(captioned)}
+    if intro:
+        events.append((t0, (-2, 0), "card", INTRO_S, (None, intro)))
     for n, s in enumerate(captioned):
         lead, cap, h, least, tail = params[s["id"]]
         nxt = shown[n + 1] if n + 1 < len(captioned) else t1
@@ -149,8 +197,11 @@ def pace(steps, t0, t1, lead_in=LEAD_IN_S, hold=HOLD_S, speed=WAIT_SPEED, min_wa
         last_of_tail = tail and (n + 1 == len(captioned) or params[captioned[n + 1]["id"]][4] != tail)
         if last_of_tail:
             hold_still = max(0.0, MIN_CAPTION_S - (e - shown[index[tail]]) / speed)
-        events += [(shown[n], (n, 0), "shown", 0.0), (s["start"], (n, 1), "still", lead_still),
-                   (s["start"], (n, 2), "act", 0.0), (e, (n, 3), "still", hold_still), (e, (n, 4), "end", 0.0)]
+        if s.get("card"):
+            events.append((shown[n], (n, -1), "card", CHAPTER_CARD_S, (s["id"], s["card"])))
+        events += [(shown[n], (n, 0), "shown", 0.0, None), (s["start"], (n, 1), "still", lead_still, None),
+                   (s["start"], (n, 2), "act", 0.0, None), (e, (n, 3), "still", hold_still, None),
+                   (e, (n, 4), "end", 0.0, None)]
     merged = []
     for a, b in sorted(real):
         if b <= a:
@@ -167,18 +218,24 @@ def pace(steps, t0, t1, lead_in=LEAD_IN_S, hold=HOLD_S, speed=WAIT_SPEED, min_wa
         at = b
     if t1 > at:
         parts.append((at, t1, 1.0 if t1 - at < min_wait else speed))
-    events.sort(key=lambda e: (e[0], e[1]))
+    # a step that started before the film did lines up at t0, behind the intro and its card
+    events = sorted(((max(t0, e[0]), *e[1:]) for e in events), key=lambda e: (e[0], e[1]))
     out, segs, marks, k = 0.0, [], {}, 0
     for a, b, v in parts:
         cur = a
         while k < len(events) and events[k][0] <= b:
-            p, (n, _), kind, dur = events[k]
+            p, (n, _), kind, dur, extra = events[k]
             k += 1
             if p > cur:
                 segs.append(Segment(cur, p, v, out, (p - cur) / v))
                 out += (p - cur) / v
                 cur = p
-            if kind == "still" and dur > 0:
+            if kind == "card":
+                if extra[0] is not None:
+                    marks.setdefault(extra[0], {})["card"] = out
+                segs.append(Segment(cur, cur, 0.0, out, dur, extra[1]))
+                out += dur
+            elif kind == "still" and dur > 0:
                 segs.append(Segment(cur, cur, 0.0, out, dur))
                 out += dur
             elif kind != "still":
@@ -186,6 +243,8 @@ def pace(steps, t0, t1, lead_in=LEAD_IN_S, hold=HOLD_S, speed=WAIT_SPEED, min_wa
         if b > cur:
             segs.append(Segment(cur, b, v, out, (b - cur) / v))
             out += (b - cur) / v
+    if outro:
+        segs.append(Segment(t1, t1, 0.0, out, OUTRO_S, outro))
     return segs, marks
 
 
@@ -343,6 +402,13 @@ class Plan:
         for s in self.steps:
             s.setdefault("acted", s["start"])
             s.setdefault("end", s["acted"])
+            if s.get("card") is not None:
+                s["card"] = check_card(s["card"], f"{s['id']} step's")
+                if not s.get("caption"):
+                    raise ValueError(f"the {s['id']} step's card needs a caption on its step")
+                if not s.get("chapter"):
+                    raise ValueError(f"the {s['id']} step's card needs a chapter on its step")
+        intro, outro = (check_card(timeline[k], k) if timeline.get(k) is not None else None for k in ("intro", "outro"))
         self.recordings = list(timeline.get("recordings") or [])
         self.durations = durations or {}
         self.available = available
@@ -353,7 +419,8 @@ class Plan:
         self.t1 = max(s["end"] for s in self.steps)
         if self.t1 <= self.t0:
             raise ValueError("the timeline's steps last no time")
-        self.segments, self._marks = pace(self.steps, self.t0, self.t1, lead_in, hold, wait_speed, min_wait)
+        self.segments, self._marks = pace(self.steps, self.t0, self.t1, lead_in, hold, wait_speed, min_wait,
+                                          intro, outro)
         self._seg_ends = [s.b for s in self.segments]
         self._seg_outs = [s.out for s in self.segments]
         self._moving = [s for s in self.segments if s.speed]
@@ -413,7 +480,7 @@ class Plan:
 
     def src_time(self, t):
         seg = self._out_seg(t)
-        return min(self.t1, seg.a + (t - seg.out) * seg.speed)
+        return min(self.t1, round(seg.a + (t - seg.out) * seg.speed, 9))    # no drift from the cards' offset
 
     def frame_range(self, start=None, stop=None):
         """The frames [a, b) of film seconds start..stop, clipped to the film."""
@@ -555,27 +622,40 @@ class Plan:
                 rows[-1] = (rows[-1][0], self._marks[s["id"]]["end"], rows[-1][2], rows[-1][3])
             else:
                 rows.append((self._marks[s["id"]]["shown"], self._marks[s["id"]]["end"], label(s["role"]), s["caption"]))
+        cards = [seg.out for seg in self.segments if seg.card]
         cues = []
         for n, (a, b, who, text) in enumerate(rows):
             if n + 1 < len(rows):
                 b = min(b, rows[n + 1][0])
+            b = min([b, *(c for c in cards if c >= a)])
             if b > a:
                 cues.append((a, b, who, text))
         return cues
 
     def _make_chapters(self):
-        rows = [(self._marks[s["id"]]["shown"] if s["id"] in self._marks
-                 else self.out_time(s["start"] - self.lead_in), s["chapter"])
-                for s in self.steps if s.get("chapter")]
+        """[(mark, shown, title)]: a chapter with a card is marked at the card's start and
+        shows in the chapter bar once the card has gone. The first mark is 0:00."""
+        rows, first_card = [], False
+        for s in self.steps:
+            if not s.get("chapter"):
+                continue
+            marks = self._marks.get(s["id"], {})
+            shown = marks["shown"] if "shown" in marks else self.out_time(s["start"] - self.lead_in)
+            if "card" in marks:
+                first_card = first_card or not rows
+                rows.append((marks["card"], max(shown, marks["card"] + CHAPTER_CARD_S), s["chapter"]))
+            else:
+                rows.append((shown, shown, s["chapter"]))
         if rows:
-            rows[0] = (0.0, rows[0][1])
+            mark, shown, title = rows[0]
+            rows[0] = (0.0, shown if first_card or self.segments[0].card is not None else 0.0, title)
         return rows
 
     def cues(self):
         return list(self._cues)
 
     def chapters(self):
-        return list(self._chapters)
+        return [(mark, title) for mark, _shown, title in self._chapters]
 
     # frames
 
@@ -595,11 +675,12 @@ class Plan:
         """The stage state of output frame i."""
         t = i / self.fps
         s = self.src_time(t)
-        speed = self._out_seg(t).speed
+        seg = self._out_seg(t)
+        speed = seg.speed
         rects, layout, moving, front = self._rects_at(self._switches, t)
         cue = next((c for c in self._cues if c[0] <= t < c[1]), None)
         chapter = None
-        for k, (ct, title) in enumerate(self._chapters):
+        for k, (_mark, ct, title) in enumerate(self._chapters):
             if ct <= t:
                 chapter = (k, ct, title)
         rings = [v for v, ws in self._rings.items() if any(a < (t if out else s) <= b for a, b, out in ws)]
@@ -613,7 +694,17 @@ class Plan:
             "chapter_no": chapter[0] + 1 if chapter else 0,
             "chapter_fresh": chapter is not None and t - chapter[1] < CHAPTER_FRESH_S,
             "clock": clock(s),
+            "card": self._card(seg, t),
         }
+
+    @staticmethod
+    def _card(seg, t):
+        """A card's title, subtitle and the opacity of its text, which fades in and out."""
+        if seg.card is None:
+            return None
+        u = t - seg.out
+        fade = min(1.0, u / CARD_FADE_S, (seg.dur - u) / CARD_FADE_S) if CARD_FADE_S > 0 else 1.0
+        return {**seg.card, "opacity": round(_ease(max(0.0, fade)), 4)}
 
     def stage_config(self, urls):
         """What the stage page's setup() needs: views with labels, and the recordings with

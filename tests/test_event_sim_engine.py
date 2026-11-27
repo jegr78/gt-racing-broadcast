@@ -244,6 +244,25 @@ def t_film_keys_are_checked_at_load():
         "a view a later step opens counts too"
 
 
+def t_film_cards_are_checked_at_load():
+    view = {"role": "director", "do": "view", "args": {"area": "handover"}, "chapter": "Race day", "caption": "Go"}
+    card = {"title": "Race day", "subtitle": "Three stints, two driver swaps"}
+    title = {"title": "GT Racing Broadcast", "subtitle": "An endurance event"}
+    scn = _scn([dict(view, card=card), {"id": "go", "role": "rec", "do": "go"}], intro=title, outro=title)
+    assert scn.steps[0].card == card and scn.steps[1].card is None, "the card reaches its step, and only that one"
+    assert (scn.intro, scn.outro) == (title, title), "intro and outro reach the scenario"
+    assert (_scn([view]).intro, _scn([view]).outro) == (None, None), "a scenario without them has none"
+    for bad in ("Race day", {"title": "Race day"}, {"title": "", "subtitle": "x"}, {"title": "x", "subtitle": 3},
+                dict(card, colour="red")):
+        _refused([dict(view, card=bad)], "card must be a table with a non-empty title and subtitle")
+        _refused([view], "intro must be a table with a non-empty title and subtitle", intro=bad)
+        _refused([view], "outro must be a table with a non-empty title and subtitle", outro=bad)
+    _refused([{"role": "director", "do": "view", "caption": "Go", "card": card}],
+             "a card opens a chapter: the step needs a chapter and a caption")
+    _refused([{"role": "director", "do": "view", "chapter": "Race day", "card": card}],
+             "a card opens a chapter: the step needs a chapter and a caption")
+
+
 def t_a_focus_names_one_two_or_four_views():
     steps = [{"id": r, "role": r, "do": "open"} for r in ("director", "viewer", "producer", "race_control")]
     for views in (["director"], ["director", "viewer"], ["director", "program", "viewer", "producer"]):
@@ -255,13 +274,15 @@ def t_a_focus_names_one_two_or_four_views():
 
 def t_film_keys_change_nothing_outside_record_mode():
     plain = [{"id": "a", "role": "rec", "do": "go"}, {"id": "b", "at": "after:a", "role": "rec", "do": "go"}]
-    film = [dict(plain[0], caption="Go", chapter="Start", focus=["program"]), dict(plain[1], caption="Again")]
+    film = [dict(plain[0], caption="Go", chapter="Start", focus=["program"], card={"title": "Go", "subtitle": "Now"}),
+            dict(plain[1], caption="Again")]
     runs = [_run(steps)[0] for steps in (plain, film)]
     keep = ("id", "role", "do", "status", "result", "checks")
     assert [{k: s.get(k) for k in keep} for s in runs[0]["steps"]] == \
         [{k: s.get(k) for k in keep} for s in runs[1]["steps"]], "the keys change no step of a plain run"
     assert "caption" not in json.dumps(runs[1]) and "Again" not in json.dumps(runs[1]), \
         "a plain run's report carries no caption"
+    assert "card" not in json.dumps(runs[1]) and "Now" not in json.dumps(runs[1]), "nor a card"
 
 
 def t_role_instances_share_the_kind():

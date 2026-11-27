@@ -33,10 +33,11 @@ DEFAULT_CHECK_TIMEOUT = 5.0
 DEFAULT_MAX_MINUTES = 12
 MAX_MAX_MINUTES = 120              # the spec's CI timeout for the longest scenario, `full`
 STEP_KEYS = {"id", "at", "role", "do", "args", "expect", "soft", "timeout", "wait", "shot",
-             "caption", "chapter", "focus"}
+             "caption", "chapter", "focus", "card"}
 PROGRAM_VIEW = "program"           # OBS's own recording, a view in every run
 FOCUS_SIZES = (1, 2, 4)            # four views are the quarters of a driver swap
-TOP_KEYS = {"name", "description", "max_minutes", "wait", "event", "sheet", "tolerances", "step"}
+CARD_KEYS = {"title", "subtitle"}
+TOP_KEYS = {"name", "description", "max_minutes", "wait", "event", "sheet", "tolerances", "step", "intro", "outro"}
 EVENT_KEYS = {"stints", "stint_laps", "track", "track_length_m", "cars", "classes", "parts", "qualifying_part",
               "seed", "commentators", "probe"}
 COMMENTATOR_KEYS = {"name", "channel", "stint", "scheduled"}
@@ -111,6 +112,7 @@ class Step:
     caption: str = None                # the film's keys, read only by a record run
     chapter: str = None
     focus: list = None
+    card: dict = None                  # a title card shown before the chapter this step opens
 
     @property
     def label(self):
@@ -136,6 +138,8 @@ class Scenario:
     tolerances: dict
     steps: list
     path: str = ""
+    intro: dict = None                 # the film's opening and closing title cards
+    outro: dict = None
 
     @property
     def run_seconds(self):
@@ -307,6 +311,16 @@ def _text(raw, key, where):
     return value
 
 
+def _card(raw, key, where):
+    card = raw.get(key)
+    if card is None:
+        return None
+    if not (isinstance(card, dict) and set(card) == CARD_KEYS
+            and all(isinstance(v, str) and v.strip() for v in card.values())):
+        raise ScenarioError(f"{where}{key} must be a table with a non-empty title and subtitle")
+    return {"title": card["title"], "subtitle": card["subtitle"]}
+
+
 def _focus(raw, where):
     focus = raw.get("focus")
     if focus is None:
@@ -393,9 +407,12 @@ def _step(i, raw, registry, roots, default_wait=None, commentators=None):
         at = parse_at(raw.get("at"))
     except ScenarioError as exc:
         raise ScenarioError(f"{where}: {exc}") from None
+    chapter, card = _text(raw, "chapter", where), _card(raw, "card", where + ": ")
+    if card and not (chapter and raw.get("caption")):
+        raise ScenarioError(f"{where}: a card opens a chapter: the step needs a chapter and a caption")
     return Step(i, sid, role, do, at, args, _checks(raw.get("expect"), where, "expect", roots),
                 _checks(raw.get("soft"), where, "soft", roots), timeout, wait, shot,
-                _text(raw, "caption", where), _text(raw, "chapter", where), _focus(raw, where))
+                _text(raw, "caption", where), chapter, _focus(raw, where), card)
 
 
 def from_dict(data, registry, name="scenario", path="", roots=expect.ROOTS):
@@ -449,7 +466,7 @@ def from_dict(data, registry, name="scenario", path="", roots=expect.ROOTS):
         raise ScenarioError("tolerances.state_s must be a non-negative number")
     return Scenario(name, str(data.get("description") or ""), max_minutes, event,
                     comms, tabs, {"state_s": float(slow)},
-                    steps, path)
+                    steps, path, _card(data, "intro", ""), _card(data, "outro", ""))
 
 
 def load(path, registry):

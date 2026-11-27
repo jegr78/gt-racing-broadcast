@@ -634,9 +634,11 @@ from the start); an unknown key or a value the stack would refuse fails the load
 (`kind` or `kind:instance`, the instance letters, digits, space, `.`, `_`, `-`), `do`, `args`,
 `expect`, `soft`, `timeout` (per check, default 5 s), `wait`, `shot` (a name, or
 `{name, role, element}`) and the walkthrough film's `caption` (the line shown while the step
-runs), `chapter` (a chapter title starting here) and `focus` (the views to enlarge: 1, 2 or 4
-of the run's page roles and `program`; four are the quarters of a driver swap). Only a record
-run reads those three, into `timeline.json`. The stint of a `submit_link` or `approve_link` must be a
+runs), `chapter` (a chapter title starting here), `focus` (the views to enlarge: 1, 2 or 4
+of the run's page roles and `program`; four are the quarters of a driver swap) and `card`
+(`{title, subtitle}` of a title card before the chapter the step opens; needs `chapter` and `caption`).
+The film's top-level `intro` and `outro` take the same table. Only a record run reads
+these, into `timeline.json`. The stint of a `submit_link` or `approve_link` must be a
 label of the served Configuration tab's Stints column, the event's stints plus the Qualifying
 tab's labels, since the relay writes no other; the load refuses any other. `at` is a duration since the run started, `after:<id>[+dur]`
 (after that step ended; skipped when it failed), `lap:leader=N` (`race.lap >= N`) or
@@ -1010,8 +1012,8 @@ python3 tools/event-sim/event_sim.py --restore-obs   # macOS: put back the OBS c
   match black. The mask changes paint only, so the roles still read the masked text. A
   click, fill or choice first moves the mouse to the control in `POINTER_STEPS` moves.
 - `DIR/timeline.json`: `steps` (each step that ran: `id`, `role`, `action`, `status`,
-  `start`, `acted`, `end`, plus `caption`, `chapter` and `focus` when the scenario step has
-  them) and `recordings` (`view`, `kind` page or program, `file` relative to DIR, `size`,
+  `start`, `acted`, `end`, plus `caption`, `chapter`, `focus` and `card` when the scenario
+  step has them), the scenario's `intro` and `outro` when it has them and `recordings` (`view`, `kind` page or program, `file` relative to DIR, `size`,
   `start`). A tab a step opens is its own page recording: Race Control's Show standings tab
   is the view `race_control:standings`, which a scenario's `focus` may name. `acted` is when the action returned; from there to `end` the step waited for its
   expects, which the film treats as waiting time. All times are seconds since the engine started; a recording started before has a negative
@@ -1111,6 +1113,11 @@ python3 tools/build-event-video.py DIR [--music FILE] [--workers N] [--from T] [
   `--from`/`--to` (seconds, `m:ss` or `h:mm:ss`) render a part of the film, named
   `event-walkthrough-<a>s-<b>s.mp4`. A killed render resumes from its finished segments.
   Without `--music` the film is silent.
+- Title cards: the intro (5 s), a card before each chapter whose step has one (3 s) and
+  the outro (6 s) add film time and play no source time. A recording whose timeline has no
+  card takes them from `tools/event-sim/scenarios/<scenario>.toml`, so an older recording
+  gets the current texts; a step card only lands on a recorded step that opens the same
+  chapter.
 - Outputs under `runtime/event-video/<name of DIR>/` (or `--out`): `event-walkthrough.mp4`,
   `chapters.txt` and `captions.vtt`, plus `work/` with the transcodes and segments.
 - Films, clips and recordings are never committed; the user uploads the film.

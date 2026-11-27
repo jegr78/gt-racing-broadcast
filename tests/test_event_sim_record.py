@@ -193,9 +193,12 @@ def t_the_timeline_lists_steps_and_recording_offsets_since_the_engine_start():
     rec.program_started("/elsewhere/program.mkv")
     now[0] = 25.5
     rec._add("director", "page", os.path.join(rec.dir, "pages", "director", "v.webm"), {"width": 1440, "height": 900})
-    scn = SimpleNamespace(name="t", steps=[SimpleNamespace(id="a", caption="Producer starts the event",
-                                                           chapter="Start the event", focus=["producer"]),
-                                           SimpleNamespace(id="b")])
+    card = {"title": "Race day", "subtitle": "Three stints"}
+    title = {"title": "GT Racing Broadcast", "subtitle": "An endurance event"}
+    scn = SimpleNamespace(name="t", intro=title, outro=None,
+                          steps=[SimpleNamespace(id="a", caption="Producer starts the event",
+                                                 chapter="Start the event", focus=["producer"], card=card),
+                                 SimpleNamespace(id="b")])
     steps = [{"id": "a", "role": "producer", "do": "start_event", "status": "ok", "started": 1.0, "duration": 2.5,
               "acted": 1.25},
              {"id": "b", "role": "drivers", "do": "start", "status": "failed", "started": 4.0, "duration": 0.25},
@@ -203,9 +206,10 @@ def t_the_timeline_lists_steps_and_recording_offsets_since_the_engine_start():
     tl = rec.timeline(scn, steps, start=20.0)
     assert tl["steps"][0] == {"id": "a", "role": "producer", "action": "start_event", "status": "ok", "start": 1.0,
                               "acted": 1.25, "end": 3.5, "caption": "Producer starts the event", "chapter": "Start the event",
-                              "focus": ["producer"]}, tl["steps"][0]
+                              "focus": ["producer"], "card": card}, tl["steps"][0]
+    assert tl["intro"] == title and "outro" not in tl, "the film-wide cards the scenario has reach the timeline"
     assert set(tl["steps"][1]) == {"id", "role", "action", "status", "start", "acted", "end"}, \
-        "a step without caption, chapter or focus carries none of them"
+        "a step without caption, chapter, focus or card carries none of them"
     assert tl["steps"][1]["acted"] == tl["steps"][1]["start"], "a step that never noted its action counts as acted at once"
     assert [s["id"] for s in tl["steps"]] == ["a", "b"], "a step that never started has no place on the timeline"
     by_view = {r["view"]: r for r in tl["recordings"]}

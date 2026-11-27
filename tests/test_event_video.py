@@ -538,6 +538,269 @@ def t_every_focus_of_the_full_scenario_lands_on_the_stage():
     assert any(len(s.get("focus") or ()) == 4 for s in steps), "full has the four-view switch"
 
 
+# title cards
+
+INTRO = {"title": "GT Racing Broadcast", "subtitle": "An endurance event"}
+OUTRO = {"title": "GT Racing Broadcast", "subtitle": "The project wiki"}
+SWAP_CARD = {"title": "Driver swap", "subtitle": "The next stint"}
+
+
+def cards_timeline():
+    """The fixed run with an intro, an outro and a card on each of its two chapters."""
+    tl = timeline()
+    tl.update(intro=INTRO, outro=OUTRO)
+    steps = {s["id"]: s for s in tl["steps"]}
+    steps["pick"]["card"] = {"title": "Start", "subtitle": "The day before"}
+    steps["switch"]["card"] = SWAP_CARD
+    return tl
+
+
+def _card_spans(p):
+    """[(first frame, frame count, title)] of each card in the film."""
+    spans = []
+    for i in range(p.frames):
+        card = p.frame(i)["card"]
+        if card and (not spans or spans[-1][2] != card["title"] or spans[-1][0] + spans[-1][1] != i):
+            spans.append([i, 0, card["title"]])
+        if card:
+            spans[-1][1] += 1
+    return [tuple(x) for x in spans]
+
+
+def t_the_cards_add_film_time_and_change_no_other_frame():
+    p, q = fp.Plan(cards_timeline()), plan()
+    spans = _card_spans(p)
+    want = [(0, fp.INTRO_S, "GT Racing Broadcast"), (None, fp.CHAPTER_CARD_S, "Start"),
+            (None, fp.CHAPTER_CARD_S, "Driver swap"), (None, fp.OUTRO_S, "GT Racing Broadcast")]
+    assert [(n, t) for _, n, t in spans] == [(round(d * p.fps), t) for _, d, t in want], \
+        f"intro, the two chapter cards and the outro, each for its own duration: {spans}"
+    assert spans[0][0] == 0 and spans[1][0] == spans[0][1], "the film opens on the intro, then the first chapter's card"
+    assert spans[-1][0] + spans[-1][1] == p.frames, "the film closes on the outro"
+    added = sum(n for _, n, _ in spans)
+    assert p.frames == q.frames + added, f"the cards add {added} frames and nothing else: {p.frames} vs {q.frames}"
+    body = [f for f in frames(p) if not f["card"]]
+    keys = ("t", "speed", "sources", "caption", "who", "chapter", "chapter_no", "large", "rings")
+    for n, (f, g) in enumerate(zip(body, frames(q), strict=True)):
+        assert {k: f[k] for k in keys} == {k: g[k] for k in keys}, f"frame {n} of the film without cards differs"
+    assert [(x.a, x.b, x.speed) for x in p.segments if x.speed] == [(x.a, x.b, x.speed) for x in q.segments if x.speed], \
+        "the source time plays exactly as before"
+
+
+def t_the_film_opens_on_the_intro_even_when_the_first_step_starts_before_its_view():
+    tl = cards_timeline()
+    for r in tl["recordings"]:
+        if r["view"] == "producer":
+            r["start"] = 2.0       # after the first step started at 1.0
+    p = fp.Plan(tl)
+    assert p.t0 == 2.0, p.t0
+    intro, start = round(fp.INTRO_S * p.fps), round(fp.CHAPTER_CARD_S * p.fps)
+    titles = [(p.frame(i)["card"] or {}).get("title") for i in range(intro + start + 1)]
+    assert titles[:intro] == ["GT Racing Broadcast"] * intro, f"frame 0 to the intro's end is the intro: {titles[:5]}"
+    assert titles[intro:intro + start] == ["Start"] * start, "then the first chapter's card"
+    first = p.frame(intro + start)
+    assert first["card"] is None and first["caption"] == "The producer picks the track", \
+        f"the first view comes after the cards, under its caption: {first['caption']}"
+
+
+def t_a_card_stands_still_in_source_time_and_hides_the_stage():
+    p = fp.Plan(cards_timeline())
+    fs = frames(p)
+    card_segs = [x for x in p.segments if x.card]
+    for (a0, n0, title), seg in zip(_card_spans(p), card_segs, strict=True):
+        assert seg.card["title"] == title and seg.dur * p.fps == n0, f"{title} is its own still segment"
+        for f in fs[a0:a0 + n0]:
+            assert f["t"] == seg.a and f["speed"] == 0 and not f["ff"], f"{title} stands at {seg.a}, not {f['t']}"
+    ts = [f["t"] for f in fs]
+    assert all(b >= a for a, b in zip(ts, ts[1:], strict=False)), "source time never runs back across a card"
+    a, n, _ = _card_spans(p)[2]
+    assert fs[a - 1]["t"] <= fs[a]["t"] == fs[a + n - 1]["t"] <= fs[a + n]["t"], "the card sits between two frames of the run"
+    late = a + n + round((fp.CHAPTER_FRESH_S - 0.2) * p.fps)
+    assert fs[a + n]["chapter"] == "Driver swap 1" and fs[a + n]["chapter_fresh"] and fs[late]["chapter_fresh"], \
+        "the chapter bar lights up once the card has gone, for its full time"
+
+
+def t_a_card_fades_in_and_out():
+    p = fp.Plan(cards_timeline())
+    fade = round(fp.CARD_FADE_S * p.fps)
+    for a, n, title in _card_spans(p):
+        ops = [p.frame(i)["card"]["opacity"] for i in range(a, a + n)]
+        assert ops[0] < 0.1 and ops[-1] < 0.1, f"{title} fades in and out: {ops[0]}, {ops[-1]}"
+        assert all(o == 1.0 for o in ops[fade:-fade]), f"{title} stands at full opacity between its fades"
+        assert ops[:fade] == sorted(ops[:fade]) and ops[-fade:] == sorted(ops[-fade:], reverse=True)
+
+
+def t_the_cards_shift_later_chapter_marks_and_captions_by_their_duration():
+    p, q = fp.Plan(cards_timeline()), plan()
+    spans = [(a / p.fps, (a + n) / p.fps, t) for a, n, t in _card_spans(p)]
+    assert p.chapters()[0] == (0.0, "Start the event"), p.chapters()
+    swap = spans[2][0]
+    assert abs(p.chapters()[1][0] - swap) < 1 / p.fps, f"a chapter with a card starts at its card: {p.chapters()} {spans}"
+    before = fp.INTRO_S + fp.CHAPTER_CARD_S
+    assert abs(p.chapters()[1][0] - (q.chapters()[1][0] + before)) < 1 / p.fps, "shifted by the cards before it"
+    for (a, b, _who, text), (c, d, _w, _t) in zip(p.cues(), q.cues(), strict=True):
+        shift = sum(e - s for s, e, _ in spans if e <= a + EPS)
+        assert abs(a - c - shift) < 1 / p.fps and abs(b - d - shift) < 1 / p.fps, f"{text} moves by the cards before it"
+        assert not any(a < e - EPS and s < b - EPS for s, e, _ in spans), f"{text} overlaps a card"
+    lines = fp.chapters_txt(p.chapters()).splitlines()
+    assert lines[0] == "0:00 Start the event" and len(lines) == 2, lines
+
+
+def t_a_card_must_have_a_title_and_a_subtitle():
+    for bad in ({"title": "x"}, {"title": "", "subtitle": "y"}, "x", {"title": "x", "subtitle": 3}):
+        for where in ("intro", "step"):
+            tl = cards_timeline()
+            if where == "intro":
+                tl["intro"] = bad
+            else:
+                tl["steps"][6]["card"] = bad
+            try:
+                fp.Plan(tl)
+            except ValueError as exc:
+                assert "card" in str(exc), exc
+            else:
+                raise AssertionError(f"a {where} card {bad!r} is refused")
+
+
+def t_a_card_on_a_step_without_a_caption_is_refused():
+    tl = cards_timeline()
+    tl["steps"][2]["card"] = SWAP_CARD
+    try:
+        fp.Plan(tl)
+    except ValueError as exc:
+        assert "caption" in str(exc), exc
+    else:
+        raise AssertionError("a card on an uncaptioned step is refused")
+    tl = cards_timeline()
+    tl["steps"][3]["card"] = SWAP_CARD
+    try:
+        fp.Plan(tl)
+    except ValueError as exc:
+        assert "chapter" in str(exc), exc
+    else:
+        raise AssertionError("a card on a step that opens no chapter is refused")
+
+
+def t_a_caption_still_acting_stops_at_a_card():
+    tl = cards_timeline()
+    steps = {s["id"]: s for s in tl["steps"]}
+    steps["desk"].update(start=61.0, acted=63.0, end=80.0, chapter="Desk", card={"title": "Desk", "subtitle": "x"})
+    p = fp.Plan(tl)
+    spans = [(x.out, x.out + x.dur) for x in p.segments if x.card]
+    approve = next(c for c in p.cues() if c[3] == "The director approves the link")
+    assert approve[1] - approve[0] > 1.0, f"the cue before the card still shows: {approve}"
+    for a, b, _who, text in p.cues():
+        assert not any(a < e - EPS and s < b - EPS for s, e in spans), f"{text!r} runs across a card: {(a, b)} {spans}"
+
+
+def t_the_first_chapter_lights_up_after_the_intro():
+    tl = timeline()
+    tl["intro"] = INTRO
+    p = fp.Plan(tl)
+    intro = round(fp.INTRO_S * p.fps)
+    assert p.chapters()[0] == (0.0, "Start the event"), "chapters.txt still starts at 0:00"
+    assert p.frame(intro - 1)["chapter"] is None, "no chapter under the intro"
+    late = intro + round((fp.CHAPTER_FRESH_S - 0.2) * p.fps)
+    assert p.frame(intro)["chapter_fresh"] and p.frame(late)["chapter_fresh"], \
+        "the first chapter's highlight runs its full time after the intro"
+
+
+def t_a_first_chapter_with_a_card_later_in_the_film_shows_after_its_card():
+    tl = timeline()
+    steps = {s["id"]: s for s in tl["steps"]}
+    del steps["pick"]["chapter"]
+    steps["switch"]["card"] = SWAP_CARD
+    p = fp.Plan(tl)
+    (start, n, _title), = [x for x in _card_spans(p) if x[2] == SWAP_CARD["title"]]
+    assert start > 0, "the film opens on the recording, not on the card"
+    assert p.frame(start - 1)["chapter"] is None, "the first chapter's title waits for its card"
+    after = start + n
+    assert p.frame(after)["chapter"] == "Driver swap 1" and p.frame(after)["chapter_fresh"], \
+        "the title lights up as new once its card has gone"
+    assert p.chapters()[0] == (0.0, "Driver swap 1"), "chapters.txt still starts at 0:00"
+
+
+def t_a_first_step_that_started_before_its_view_shows_its_caption_from_frame_0():
+    tl = timeline()
+    for r in tl["recordings"]:
+        if r["view"] == "producer":
+            r["start"] = 2.0
+    f = fp.Plan(tl).frame(0)
+    assert f["speed"] == 0 and f["caption"] == "The producer picks the track", \
+        f"the opening still already carries the first caption: {f['caption']}"
+
+
+def t_a_partial_render_across_a_card_matches_the_whole_film():
+    p = fp.Plan(cards_timeline())
+    spans = _card_spans(p)
+    for a0, n0, _ in spans[1:3]:
+        start, stop = (a0 + n0 - 15) / p.fps, (a0 + n0 + 15) / p.fps
+        q = fp.Plan(json.loads(json.dumps(cards_timeline())))
+        a, b = q.frame_range(start, stop)
+        assert any(q.frame(i)["card"] for i in range(a, b)) and not all(q.frame(i)["card"] for i in range(a, b))
+        assert [q.frame(i) for i in range(a, b)] == [p.frame(i) for i in range(a, b)], \
+            f"frames {a}-{b} of a partial render equal the whole film's"
+
+
+def _write(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+SCENARIO_CARDS = """
+intro = { title = "Intro", subtitle = "From the scenario" }
+outro = { title = "Outro", subtitle = "From the scenario" }
+[[step]]
+id = "switch"
+chapter = "Driver swap 1"
+card = { title = "Swap", subtitle = "From the scenario" }
+[[step]]
+do = "pick"
+chapter = "Start the event"
+card = { title = "Start", subtitle = "An id that defaults to its action" }
+[[step]]
+do = "desk"
+chapter = "Desk"
+card = { title = "Desk", subtitle = "A chapter the recording does not have" }
+"""
+
+
+def t_a_recording_without_cards_takes_them_from_its_scenario_file():
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, scenarios = os.path.join(tmp, "rec"), os.path.join(tmp, "scenarios")
+        _write(os.path.join(scenarios, "fixture.toml"), SCENARIO_CARDS)
+        _write(os.path.join(rec, "timeline.json"), json.dumps(timeline()))
+        tl = fp.load_timeline(rec, scenarios=scenarios)
+        assert tl["intro"]["title"] == "Intro" and tl["outro"]["title"] == "Outro", "the scenario's intro and outro"
+        cards = {s["id"]: s.get("card") for s in tl["steps"]}
+        assert cards["switch"] == {"title": "Swap", "subtitle": "From the scenario"}, "a card by step id"
+        assert cards["pick"]["title"] == "Start", "a step's id defaults to its action, as in the loader"
+        assert not cards["desk"], "a card whose chapter the recorded step does not open stays out"
+        assert sum(1 for c in cards.values() if c) == 2, cards
+        p = fp.Plan(json.loads(json.dumps(tl)))
+        assert [p.frame(i) for i in range(0, p.frames, 7)] == [fp.Plan(tl).frame(i) for i in range(0, p.frames, 7)], \
+            "a worker that reads the merged timeline back plans the same frames"
+        _write(os.path.join(rec, "timeline.json"), json.dumps(cards_timeline()))
+        assert fp.load_timeline(rec, scenarios=scenarios) == cards_timeline(), \
+            "a recording that has cards keeps them and reads no scenario"
+        for name in ("missing", "../scenarios/fixture", ""):
+            _write(os.path.join(rec, "timeline.json"), json.dumps(dict(timeline(), scenario=name)))
+            tl = fp.load_timeline(rec, scenarios=scenarios)
+            assert "intro" not in tl and not any(s.get("card") for s in tl["steps"]), f"no cards for {name!r}"
+
+
+def t_the_full_scenario_carries_the_film_s_cards():
+    with tempfile.TemporaryDirectory() as rec:
+        steps = [_step("track", "producer", 0, 1, 2, chapter="Qualifying (the day before)"),
+                 _step("start_event", "producer", 3, 4, 5, chapter="Race day: start the event")]
+        _write(os.path.join(rec, "timeline.json"), json.dumps({"scenario": "full", "steps": steps, "recordings": []}))
+        tl = fp.load_timeline(rec)
+    assert tl["intro"] == {"title": "GT Racing Broadcast", "subtitle": "An endurance event from qualifying to the flag"}
+    assert tl["outro"] == {"title": "GT Racing Broadcast", "subtitle": "Setup and handbooks: the project wiki on GitHub"}
+    assert [s["card"] for s in tl["steps"]] == [{"title": "Qualifying", "subtitle": "The day before the race"},
+                                                 {"title": "Race day", "subtitle": "Three stints, two driver swaps"}]
+
+
 # stage layout
 
 
@@ -690,6 +953,42 @@ def t_the_stage_page_lays_out_a_frame_without_overlap():
                                         [x + w / 2, y + h / 2])
                     assert top == state["front"], f"{state['front']} lies over the stage, not {top}"
                 assert (state["caption"] or "") in text
+            assert not errors, errors
+        finally:
+            browser.close()
+
+
+def t_the_stage_page_lays_a_card_out_inside_the_canvas_over_everything():
+    sync_playwright = _playwright()
+    if sync_playwright is None:
+        return
+    tl = cards_timeline()
+    tl.update(intro={"title": "GT Racing Broadcast", "subtitle": "An endurance event from qualifying to the flag"},
+              outro={"title": "GT Racing Broadcast", "subtitle": "Setup and handbooks: the project wiki on GitHub"})
+    p = fp.Plan(tl, available=set())
+    a, n, _ = _card_spans(p)[-1]
+    url = "file://" + os.path.join(VIDEO, "stage.html").replace(os.sep, "/")
+    with sync_playwright() as pw:
+        browser, page, errors = _stage(pw, url)
+        try:
+            page.evaluate("cfg => setup(cfg)", p.stage_config({}))
+            for i in (a, a + n // 2):
+                state = p.frame(i)
+                done = page.evaluate("s => setFrame(s)", state)
+                assert done["ok"], done
+                texts = page.evaluate("""() => ['#cardTitle', '#cardSub'].map(sel => {
+                    const e = document.querySelector(sel), r = e.getBoundingClientRect();
+                    return [e.textContent, +getComputedStyle(e).opacity, r.x, r.y, r.width, r.height]; })""")
+                for text, opacity, *rect in texts:
+                    assert _inside(rect) and rect[3] < 300, f"{text!r} lies inside the canvas on one line: {rect}"
+                    assert abs(opacity - state["card"]["opacity"]) < 1e-3, f"{text!r} fades with the card: {opacity}"
+                assert [t[0] for t in texts] == [state["card"]["title"], state["card"]["subtitle"]], texts
+                hit = page.evaluate("() => [[40, 40], [1280, 1380], [2520, 720]].map(([x, y]) =>"
+                                    " document.elementFromPoint(x, y).closest('#card') !== null)")
+                assert all(hit), f"the card covers the whole stage, no picture behind it: {hit}"
+            page.evaluate("s => setFrame(s)", p.frame(a - 1))
+            assert page.evaluate("() => getComputedStyle(document.querySelector('#card')).display") == "none", \
+                "the card leaves with its last frame"
             assert not errors, errors
         finally:
             browser.close()
