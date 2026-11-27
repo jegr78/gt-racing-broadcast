@@ -605,6 +605,36 @@ def t_the_event_file_lock_waits_and_breaks_a_stale_lock():
         assert not os.path.exists(path + ".lock")
 
 
+def t_the_file_lock_waits_out_a_lock_file_windows_still_deletes():
+    calls = []
+    real = ls._create_lock
+
+    def create(lock):
+        calls.append(lock)
+        if len(calls) == 1:
+            raise PermissionError(13, "Permission denied", lock)
+        real(lock)
+    saved = ls._create_lock, ls._DELETE_PENDING
+    ls._create_lock, ls._DELETE_PENDING = create, (PermissionError,)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            path = ls.path_in(d)
+            with ls.file_lock(path):
+                assert os.path.exists(path + ".lock")
+            assert len(calls) == 2, f"a lock file pending deletion is retried like a held one: {calls}"
+            ls._DELETE_PENDING = ()
+            calls.clear()
+            refused = False
+            try:
+                with ls.file_lock(path):
+                    pass
+            except PermissionError:
+                refused = True
+            assert refused, "off Windows a refused create is a real error, not a held lock"
+    finally:
+        ls._create_lock, ls._DELETE_PENDING = saved
+
+
 def t_client_logs_carry_no_key():
     records = []
 
