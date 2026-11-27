@@ -1229,7 +1229,7 @@ id = "box2"
 at = "after:open2"
 role = "drivers"
 do = "box"
-args = { leader_first = true, laps = 7 }
+args = { laps = 7 }
 caption = "The cars come into the box at the end of lap 6 of the 7-lap lobby"
 focus = ["race_control", "program"]
 
@@ -1724,7 +1724,7 @@ id = "box3"
 at = "after:open3"
 role = "drivers"
 do = "box"
-args = { leader_first = true, laps = "${take_plan.laps}" }
+args = { laps = "${take_plan.laps}" }
 caption = "The cars come into the box at the end of the restart lobby's second to last lap"
 focus = ["race_control", "program"]
 

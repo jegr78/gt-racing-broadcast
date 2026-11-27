@@ -448,11 +448,10 @@ def t_the_next_lobby_drives_lap_1_and_each_car_takes_over_at_its_box_stop():
     assert run(f, wire, 600.0, lambda: all(c.next.mode == "stand" for c in f.cars)), "each drives lap 1 and boxes"
     assert all(c.next.lap == 1 for c in f.cars), [c.next.lap for c in f.cars]
     assert all(c.mode == "drive" and c.active == 0 for c in f.cars), "the old lobby races on meanwhile"
-    f.box()
-    assert run(f, wire, 600.0, lambda: all(c.mode == "stand" for c in f.cars))
-    run(f, wire, 20.0)
+    run(f, wire, 60.0)
     assert all(c.next is not None and c.next.mode == "stand" for c in f.cars), \
-        "no next car leaves its box before the change is allowed"
+        "no next car leaves its box before its team's old car stands there"
+    f.box()
     f.allow_change()
     assert run(f, wire, 120.0, lambda: all(c.next is None and c.active == 1 and c.mode == "drive" for c in f.cars)), \
         [(c.entry, c.active, c.mode) for c in f.cars]
@@ -481,8 +480,26 @@ def t_a_next_lobby_car_starts_low_on_fuel_and_refuels_at_its_change():
     f.box()
     f.allow_change()
     assert run(f, wire, 900.0, lambda: all(c.active == 1 and c.mode == "drive" for c in f.cars))
-    assert all(wire.last(f"c{k}s1")["fuel"] > drive.FUEL_CAP - 10 for k in range(3)), \
-        "they fill up at the stop where they take over"
+    fills = [wire.last(f"c{k}s1")["fuel"] for k in range(3)]
+    assert all(drive.NEXT_FILL_L[0] - 3 <= x <= drive.NEXT_FILL_L[1] for x in fills), \
+        f"each fills to its own amount at the stop where it takes over: {fills}"
+    assert len({round(x) for x in fills}) > 1, f"the amount differs per driver: {fills}"
+
+
+def t_a_next_car_stands_as_long_as_its_refuelling_takes_from_the_go_signal():
+    wire, f = _overlap(cars=1)
+    f.open_next(1)
+    old = f.cars[0]
+    twin = old.next
+    assert run(f, wire, 600.0, lambda: twin.mode == "stand")
+    f.box()
+    assert run(f, wire, 900.0, lambda: old.mode == "stand" and old.pit["stood"] is not None)
+    go, fuel = old.pit["stood"], twin.fuel
+    assert run(f, wire, 120.0, lambda: f.cars[0] is twin and twin.mode != "stand"), \
+        "the go signal alone lets it leave, before any stint switch on air"
+    need = drive.TYRE_CHANGE_S + (twin.fill - fuel) / drive.REFUEL_LPS
+    assert abs(wire.now - go - need) < 0.5, \
+        f"it leaves {wire.now - go:.1f} s after the go, tyres then refuelling take {need:.1f} s"
 
 
 def t_the_next_lobby_keeps_the_old_cars_boxing_behind_their_leader():

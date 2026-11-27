@@ -2763,8 +2763,8 @@ def t_the_full_scenario_splits_on_the_leaders_box_entry_and_each_team_changes_at
     assert len(nexts) == 2, [s.id for s in nexts]
     for (stint, (out, inn)), nxt, prev in zip(swaps, nexts, [None, *nexts], strict=False):
         box = [s for s in steps if s.role == "drivers" and s.do == "box" and _after(by, nxt.id, s.id)][-1]
-        assert box.args.get("leader_first") is True, \
-            f"{box.id}: no car boxes before the leader, so the splitscreen runs until the others are in"
+        assert not box.args.get("leader_first") and box.args.get("laps"), \
+            f"{box.id}: each car boxes at the end of its own second to last lap, none drives on behind the leader"
         opened = [s for s in steps if s.role == "drivers" and s.do == "next_lobby" and s.args.get("stint") == stint]
         assert len(opened) == 1 and _after(by, box.id, opened[0].id), \
             f"the stint {stint} lobby opens while the old one still races, before {box.id}"
@@ -2830,7 +2830,7 @@ def t_the_full_scenario_runs_each_stint_lobby_to_its_lap_count():
     counts = by["stint_laps"].args["laps"]
     assert by["stint_laps"].role == "race_control" and sorted(counts) == ["Stint 1", "Stint 2", "Stint 3"], counts
     assert _after(by, by["formation"].id, "stint_laps"), "Race Control sets the counts before the cars leave the grid"
-    boxes = [s for s in steps if s.role == "drivers" and s.do == "box" and s.args.get("leader_first")]
+    boxes = [s for s in steps if s.role == "drivers" and s.do == "box" and s.args.get("laps")]
     assert [b.args.get("laps") for b in boxes] == [counts["Stint 1"], "${take_plan.laps}"], \
         f"the swaps come at the end of the lobby's second to last lap: {[b.args for b in boxes]}"
     sheet = [s for s in by["stint_laps"].soft if "sheet.tab('Schedule')" in s]

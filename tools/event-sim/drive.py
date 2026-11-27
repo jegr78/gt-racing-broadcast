@@ -45,8 +45,11 @@ MIN_LENGTH_M = 2 * (PIT_IN_M + BOX_BACK_M)
 MAX_CARS = 15
 PATH_STEP_M = 20.0
 FUEL_CAP = 100.0
-CHANGE_STOP_S = 6.0         # the next car leaves its box this long after its team's old car stood
-NEXT_START_FUEL = 10.0      # a next lobby's driver starts low and refuels at the change
+CHANGE_STOP_S = 6.0         # a driver staying on leaves the new session's box this long after the change
+NEXT_START_FUEL = 5.0       # a next lobby's driver starts low and refuels at the change
+NEXT_FILL_L = (70.0, 100.0)  # each fills to its own amount in this range
+TYRE_CHANGE_S = 4.5         # the change stop's tyres, from the old car's stop (the go signal)
+REFUEL_LPS = 3.0            # then refuelling until the next car leaves
 DEFAULT_TRACK_M = 1200.0
 
 TEAMS = ("Apex Works #11", "Blue Harbor Racing #22", "Cedar Motorsport #33", "Delta Sim Team #44",
@@ -269,6 +272,7 @@ class Car:
         self.flag_sent = False       # ... and that crossing went out: the sender stops
         self.next = None             # the next lobby's car while this one still races
         self.owner = None            # on a next car: the old lobby's car it takes over from
+        self.fill = None             # on a next car: the litres it refuels to at the change
         self.stay = False            # its driver stays on into the open next lobby
         self.session = 0             # the GT7 lobby it drives in; 0x84 ranks each lobby on its own
 
@@ -368,8 +372,10 @@ class Field:
         """The lobby of 0-based `stint` opens while the current one still races: each running
         car's next driver starts there on the grid with NEXT_START_FUEL, drives lap 1 and
         waits in the box. Once
-        `allow_change` came and its team's old car stood CHANGE_STOP_S in the old lobby's
-        box, the next car leaves and takes over; the old sender stops."""
+        its team's old car stood in the old lobby's box (the go signal, which never waits for
+        the broadcast's switch), the next car changes tyres in TYRE_CHANGE_S, then refuels to
+        its own fill at REFUEL_LPS, leaves
+        and takes over; the old sender stops. `allow_change` releases a driver staying on."""
         if stint < 0:
             raise DriveError("a stint counts from 1")
         if self.next_stint is not None:
@@ -384,6 +390,7 @@ class Field:
                 continue
             twin = Car(c.k, c.entry, c.senders, c.base, NEXT_START_FUEL, self.gap_m)
             twin.active, twin.owner, twin.session = nxt, c, c.session + 1
+            twin.fill = round(self.rnd.uniform(*NEXT_FILL_L), 1)
             twin.mode = "drive"
             twin.requests = [{"hold": True, "change": True, "stall": 0, "lap": 1}]
             twin.sender.new_session()
@@ -546,8 +553,13 @@ class Field:
             return now - p["restart"] >= CHANGE_STOP_S
         if p.get("change"):
             old = car.owner
-            return self.change_allowed and old.mode in ("stand", "off", "dropped") and \
-                (old.mode != "stand" or now - (old.pit["stood"] or now) >= CHANGE_STOP_S)
+            if old.mode == "stand" and old.pit.get("stood") is not None:
+                go = old.pit["stood"]                 # the old driver's go signal
+            elif old.mode in ("off", "dropped"):
+                go = p["stood"]
+            else:
+                return False
+            return now >= max(go, p["stood"]) + TYRE_CHANGE_S + max(0.0, car.fill - car.fuel) / REFUEL_LPS
         if p.get("hold"):
             return self.released_at is not None and "delay" in p and now >= self.released_at + p["delay"]
         return now - p["stood"] >= p["seconds"]
@@ -603,7 +615,7 @@ class Field:
                 if car.extra is not None:
                     car.active, car.extra = car.extra, None
                     car.lap = 0
-                car.fuel = FUEL_CAP
+                car.fuel = car.fill if car.owner is not None else FUEL_CAP
                 car.mode, car.pit["q"], car.left_at = "pit_out", 0.0, now
                 if car.owner is not None:
                     self._take_over(car)
