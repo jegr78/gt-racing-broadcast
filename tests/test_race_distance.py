@@ -576,6 +576,26 @@ def t_an_early_exit_long_before_the_window_counts_every_metre_driven_since():
     assert stall is not None and abs(stall[1] - exit_t) < 0.5, f"its change stand ends at its box exit: {stall}"
 
 
+def t_an_early_exit_just_before_the_line_keeps_its_lap_when_it_crosses_before_the_window():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    old, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 10, "Ann")
+    t = _drive(race, [old, rival], [50, 50], 0.0, 60)
+    new = Car(race, "A", "a2", L - 15, "Lea")
+    t = _drive(race, [old, new, rival], [50, 40, 50], t, 4)
+    new.along = L - 60                                   # lap 1, its box 60 m before the line
+    new.box = old.box = True
+    t = _drive(race, [old, new, rival], [None, None, 50], t, 6)
+    anchor = _row(race, "A", t)["distance_m"]
+    new.box = False
+    t = _drive(race, [old, new, rival], [None, 40, 50], t, 3)       # over the line: its counter reads 2
+    assert new.lap() == 2
+    race.open_change_window(t)
+    t = _drive(race, [old, new, rival], [None, 40, 50], t, 1)
+    row = _row(race, "A", t)
+    assert row["driver"] == "Lea" and abs(row["distance_m"] - (anchor + 160)) < 25, \
+        f"a line crossing after the exit adds no lap: {row}, {anchor}"
+
+
 def t_an_early_exit_at_the_next_switch_keeps_the_window_open_for_the_others():
     race = rd.Race(TRACE, formation=False, multi_lobby=True)
     a1, b1 = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 60, "Ann")
