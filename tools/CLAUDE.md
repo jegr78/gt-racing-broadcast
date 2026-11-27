@@ -957,7 +957,7 @@ times on a maintainer machine, start and teardown included:
   on the invite page before swap 1, the cars boxing behind the leader at the end of
   the lobby's second to last lap, the
   splitscreen once the leader stands in the box and NEXT right after it, which opens the
-  relay's change window: the next stint's lobby opened 3 laps before the old one ends, its
+  relay's change window: the next stint's lobby opened in the old one's second to last lap, its
   drivers drove lap 1 and wait in their box, and each leaves once its team's old car stands
   in the old lobby's box (`next_lobby`, `change`; every team within 5 min), then the cut back
   to the stint and the new compounds,

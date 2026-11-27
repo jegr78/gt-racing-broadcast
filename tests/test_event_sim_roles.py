@@ -2817,7 +2817,7 @@ def t_the_full_scenario_runs_each_stint_lobby_to_its_lap_count():
     assert sheet and all(expect.truth(s, {"sheet": Sheet()})[0] for s in sheet), \
         f"the Sheet check finds the Schedule row by its header: {sheet}"
     late = by[by["swap2_driver"].at.ref]
-    assert "race.lobby_lap >= result('take_plan').laps - 3" in late.expect, \
+    assert "race.lobby_lap >= result('take_plan').laps - 2" in late.expect, \
         f"the swap after the restart waits for the restart lobby's laps, not the race's: {late.expect}"
     take = by["take_plan"]
     assert take.role == "race_control" and _after(by, take.id, "red_flag") \

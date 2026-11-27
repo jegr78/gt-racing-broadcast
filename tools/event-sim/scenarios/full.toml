@@ -1620,7 +1620,7 @@ at = "after:desk_race_back2"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
-expect = ["race.lobby_lap >= result('take_plan').laps - 3"]
+expect = ["race.lobby_lap >= result('take_plan').laps - 2"]
 timeout = "12m"
 
 [[step]]
