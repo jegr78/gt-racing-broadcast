@@ -1277,7 +1277,7 @@ def t_the_runs_profile_places_the_stream_chat_at_the_bottom_right():
             css = fh.read()
         with open(os.path.join(od, "layout-hud.json"), encoding="utf-8") as fh:
             chat = json.load(fh)["slots"].get("chat")
-    assert chat == stack.SIM_HUD_SLOTS["chat"] and "#chat { left: 1620px; top: 840px;" in css, \
+    assert chat == stack.SIM_HUD_SLOTS["chat"] and "#chat { left: 1620px; top: 860px;" in css, \
         f"the run's HUD keeps the stream chat off the timing tower: {chat}"
     with open(os.path.join(stack.PROFILE_DIR, "overlay", "hud.css"), encoding="utf-8") as fh:
         assert "#chat" not in fh.read(), "the demo standard itself stays as it is"

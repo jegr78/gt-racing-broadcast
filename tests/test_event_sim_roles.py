@@ -1847,6 +1847,15 @@ def t_the_later_stints_register_when_their_lobby_comes():
     fails(lambda: role.do("register_stint", {"stint": 2}), "stint 2 registered already")
     fails(lambda: role.do("register_stint", {"stint": 4}), "no stint 4")
     fails(lambda: drivers_role().do("register", {"stints": 3, "now": [4]}), "now")
+    late = drivers_role()
+    late.do("register", {"stints": 3, "now": [2]})
+    fails(lambda: late.do("start", {}), "stint 1 drivers have not registered")
+    role.do("register_stint", {"stint": 3})
+    fails(lambda: role.do("register_stint", {"stint": 3}), "stint 3 registered already")
+    early = drivers_role()
+    early.do("register", {"stints": 3, "now": [1, 2]})
+    early.do("start", {})
+    fails(lambda: early.do("lobby", {"stint": 4}), "stint 3 drivers have not registered")
 
 
 class HeatRelay(Relay):

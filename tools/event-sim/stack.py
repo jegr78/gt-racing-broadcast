@@ -273,7 +273,7 @@ def child_env(base, extra):
 SRC = os.path.join(ROOT, "src")
 PROFILE_DIR = os.path.join(ROOT, "profiles", PROFILE)
 HOST_RUNTIME = os.path.join(ROOT, "runtime")     # its gt7/signatures.json is downloaded, never committed
-SIM_HUD_SLOTS = {"chat": {"left": 1620, "top": 840, "width": 290, "height": 220}}   # off the timing tower
+SIM_HUD_SLOTS = {"chat": {"left": 1620, "top": 860, "width": 290, "height": 220}}   # off the timing tower
 
 
 def make_home(home, src=SRC, profile=PROFILE_DIR, track=None, host=None):

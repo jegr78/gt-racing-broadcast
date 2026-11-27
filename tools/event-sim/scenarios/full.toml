@@ -665,7 +665,7 @@ focus = ["director", "program"]
 
 [[step]]
 id = "shot_formation_1"
-at = "after:rc_formation+3s"
+at = "after:formation+3s"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
@@ -674,7 +674,7 @@ shot = { name = "formation-1", role = "page:overlay" }
 
 [[step]]
 id = "shot_formation_2"
-at = "after:shot_formation_1+3s"
+at = "after:rc_formation+3s"
 role = "api"
 do = "get"
 args = { path = "/status" }
@@ -1131,6 +1131,7 @@ role = "drivers"
 do = "register_stint"
 args = { stint = 2 }
 expect = ["result('register2').registered == 13"]
+chapter = "Driver swap 1"
 caption = "The other stint 2 drivers register for their lobby"
 focus = ["race_control", "program"]
 
@@ -1142,13 +1143,21 @@ do = "register"
 args = { entry = "Kestrel Sim Racing #12", name = "Driver 12-2", stint = 2 }
 expect = ["page('driver').registered"]
 timeout = "20s"
-chapter = "Driver swap 1"
 caption = "The stint 2 driver of Kestrel Sim Racing #12 registers on the invite page"
 focus = ["driver", "race_control"]
 
 [[step]]
-id = "swap1_approve"
+id = "swap1_waiting"
 at = "after:swap1_driver"
+role = "race_control"
+do = "view"
+args = { area = "drivers" }
+expect = ["page('race_control').waiting == 14"]
+timeout = "20s"
+
+[[step]]
+id = "swap1_approve"
+at = "after:swap1_waiting"
 role = "race_control"
 do = "approve_all"
 expect = ["result('swap1_approve').approved == 14", "page('race_control').waiting == 0"]
@@ -1630,8 +1639,17 @@ caption = "The stint 3 drivers register for their lobby"
 focus = ["race_control", "program"]
 
 [[step]]
-id = "swap2_approve"
+id = "swap2_waiting"
 at = "after:swap2_driver"
+role = "race_control"
+do = "view"
+args = { area = "drivers" }
+expect = ["page('race_control').waiting == 14"]
+timeout = "20s"
+
+[[step]]
+id = "swap2_approve"
+at = "after:swap2_waiting"
 role = "race_control"
 do = "approve_all"
 expect = ["result('swap2_approve').approved == 14", "page('race_control').waiting == 0"]

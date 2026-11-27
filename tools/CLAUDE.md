@@ -944,15 +944,17 @@ times on a maintainer machine, start and teardown included:
   before (about 14 min, 10 of them on its timer: Start event with the Qualifying option, Comms 1's qualifying link
   submitted and approved, Comms 1 on air, one driver on the invite page and the others as
   a second `drivers:quali` field registered for the `Qualifying` segment, Approve all, a
-  10 min timer the director sets and starts by hand as the cars go out, their laps and
+  10 min timer the director sets before going on air and starts by hand as the cars go out, their laps and
   three added on the desk, the cars in once the timer has run out, Stop event). The race
-  event starts in race mode: one driver on the invite page, one request corrected and one rejected, Approve all for
-  the other 40, intro and trailer, crew chat, the finished qualifying timer reset and the
+  event starts in race mode with only the stint 1 drivers registered: one on the invite page, one request
+  corrected and one rejected, Approve all for the other 14, intro and trailer, crew chat, the finished qualifying timer reset and the
   race timer set to the race length, the stint lobbies' lap counts set on the desk, Race
   start on the grid (the timer runs from the first race lap), every car's compound at each
-  stint's start, formation, a pit stop with its compound, a DC (a held suspected phase, its
+  stint's start, formation with Formation Lap as the HUD's Race Control message (cleared at
+  the start; Final Lap and Chequered Flag at the finish), a pit stop with its compound, a DC (a held suspected phase, its
   standings of before the drop), an estimate, a DNF, a late stream link, before each swap
-  a next-stint driver on the invite page, the cars boxing behind the leader at the end of
+  the next stint's drivers registering with `register_stint` and Approve all, one of them
+  on the invite page before swap 1, the cars boxing behind the leader at the end of
   the lobby's second to last lap, the
   splitscreen once the leader stands in the box and NEXT once every car stands there (a
   soft check bounds that wait to 5 min), the cut back to the stint and the new compounds,
