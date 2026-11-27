@@ -1,8 +1,8 @@
 """The `expect` expression language: a restricted Python expression over named probes.
 
 Allowed: literals, lists and tuples, `and`/`or`/`not`, comparisons (`==`, `!=`, `<`,
-`<=`, `>`, `>=`, `in`, `not in`), unary minus, attribute and index access, and calls of
-the methods a probe lists in `calls` (plus `len`, `sorted`, the row helpers `pluck`, `row`,
+`<=`, `>`, `>=`, `in`, `not in`), unary minus, `+` and `-` on numbers, attribute and
+index access, and calls of the methods a probe lists in `calls` (plus `len`, `sorted`, the row helpers `pluck`, `row`,
 `drift`, `swaps` and `unchanged`, and `having` for texts). Never `eval`: anything else, a name
 that is no probe, or an attribute starting with `_` is refused when the scenario loads.
 
@@ -15,7 +15,8 @@ _CMP = {ast.Eq: lambda a, b: a == b, ast.NotEq: lambda a, b: a != b,
         ast.Lt: lambda a, b: a < b, ast.LtE: lambda a, b: a <= b,
         ast.Gt: lambda a, b: a > b, ast.GtE: lambda a, b: a >= b,
         ast.In: lambda a, b: a in b, ast.NotIn: lambda a, b: a not in b}
-_NODES = (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.UnaryOp, ast.Not, ast.USub,
+_ARITH = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b}
+_NODES = (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.UnaryOp, ast.Not, ast.USub, ast.BinOp, *_ARITH,
           ast.Compare, ast.Name, ast.Load, ast.Constant, ast.Attribute, ast.Subscript,
           ast.Call, ast.List, ast.Tuple, *_CMP)
 
@@ -268,6 +269,11 @@ def _eval(node, names):
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             return -value
         raise Unresolved(f"cannot negate {short(value)}")
+    if isinstance(node, ast.BinOp):
+        a, b = (raw(plain(_eval(n, names))) for n in (node.left, node.right))
+        if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (a, b)):
+            return _ARITH[type(node.op)](a, b)
+        raise Unresolved(f"cannot add or subtract {short(a)} and {short(b)}")
     if isinstance(node, ast.Compare):
         left = raw(plain(_eval(node.left, names)))
         for op, comp in zip(node.ops, node.comparators, strict=True):

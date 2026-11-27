@@ -138,11 +138,11 @@ def sheet_tabs(scn):
     names = [c.name for c in comms]
     teams = event_roster(scn.event)
     laps = scn.event.get("stint_laps")
-    schedule = [["URL", "Streamer", "Stint"] + (["Laps"] if laps else [])]
+    schedule = [["URL", "Streamer", "Stint", "Laps"]]
     for n in range(1, stints + 1):
         c = next((c for c in comms if c.stint == n), None)
         url = f"sim://{c.channel}" if c and c.scheduled else ""
-        schedule.append([url, c.name if c else "", f"Stint {n}"] + ([str(laps[n - 1])] if laps else []))
+        schedule.append([url, c.name if c else "", f"Stint {n}", str(laps[n - 1]) if laps else ""])
     # The relay writes a Schedule or Qualifying row only with a label of the Stints column.
     labels = [f"Stint {n}" for n in range(1, stints + 1)]
     quali = scn.tabs.get("Qualifying") or [[]]

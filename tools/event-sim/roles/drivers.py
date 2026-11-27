@@ -155,11 +155,15 @@ class DriversRole(Role):
 
     def act_box(self, args):
         """Every car drives into its box and waits there for `release`; with `leader_first`
-        none enters the pit lane before the first of the order."""
+        none enters the pit lane before the first of the order, with `laps` (the lobby's
+        lap count) none before the end of its lap `laps - 1`."""
         order = args.get("order", "race")
         leader_first = args.get("leader_first", False)
         if not isinstance(leader_first, bool):
             raise StepError(f"box: leader_first is true or false, not {leader_first!r}")
+        laps = args.get("laps")
+        if laps is not None and (type(laps) is not int or laps < 1):
+            raise StepError(f"box: laps is a whole number from 1 (the lobby's lap count), not {laps!r}")
         if order == "race":
             entries = self._race_order()
         elif order == "grid":
@@ -168,8 +172,9 @@ class DriversRole(Role):
             entries = [self._entry(e) for e in order]
         else:
             raise StepError("box order is 'race', 'grid' or a list of entries")
-        self._do(lambda: self._field().box(entries, leader_first), "box")
-        return {"order": entries or [c.entry for c in self._field().cars]}
+        self._do(lambda: self._field().box(entries, leader_first, laps), "box")
+        out = {"order": entries or [c.entry for c in self._field().cars]}
+        return dict(out, laps=laps) if laps else out
 
     def act_lobby(self, args):
         """The next GT7 lobby opens: the drivers of `stint` join in the box."""

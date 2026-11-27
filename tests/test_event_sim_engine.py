@@ -764,11 +764,18 @@ def t_expect_reads_probes_views_and_calls():
     assert expect.truth("box.data.rows[0].url == 'sim://a'", names)[0]
     assert expect.truth("len(box.data.rows) == 1 and 'sim://a' in ['sim://a', 'x']", names)[0]
     assert expect.truth("not box.value < 0", names)[0]
+    assert expect.truth("box.value - 1 == 2 and box.value + 1.5 == 4.5", names)[0], "numbers add and subtract"
+    for text in ("box.data.race_control + 1 == 1", "True + 1 == 2"):
+        try:
+            expect.truth(text, names)
+        except expect.Unresolved:
+            continue
+        raise AssertionError(f"{text!r} only adds numbers")
 
 
 def t_expect_refuses_everything_else():
     for text in ("__import__('os')", "box.__class__", "box._secret", "[x for x in box.data]",
-                 "lambda: 1", "box.value + 1 == 4", "open('f')", "box.twice(n=2)", "b'x' == b'x'",
+                 "lambda: 1", "box.value * 2 == 6", "box.value // 2 == 1", "open('f')", "box.twice(n=2)", "b'x' == b'x'",
                  "x if box else y", "f'{box}'", "page('viewer').fastest.startswith('Fastest')",
                  "box.data.rows.count(1) == 1"):
         try:
@@ -1193,8 +1200,8 @@ def t_sheet_tabs_follow_the_event():
         "sheet": {"tabs": {"POV": [["URL", "Name"], ["sim://pov", "Dan"]]}},
         "step": [{"role": "rec", "do": "go"}]}, _reg())
     tabs = stack.sheet_tabs(scn)
-    assert tabs["Schedule"] == [["URL", "Streamer", "Stint"], ["sim://comms1", "Comms 1", "Stint 1"],
-                                ["", "Comms 2", "Stint 2"], ["", "", "Stint 3"]], tabs["Schedule"]
+    assert tabs["Schedule"] == [["URL", "Streamer", "Stint", "Laps"], ["sim://comms1", "Comms 1", "Stint 1", ""],
+                                ["", "Comms 2", "Stint 2", ""], ["", "", "Stint 3", ""]], tabs["Schedule"]
     assert [r[2] for r in tabs["Configuration"][1:3]] == ["Comms 1", "Comms 2"]
     assert tabs["POV"][1] == ["sim://pov", "Dan"], "the scenario's own tabs win"
 
@@ -1204,6 +1211,10 @@ def t_the_schedule_carries_each_stints_lap_count():
                               "step": [{"role": "rec", "do": "go"}]}, _reg())
     assert stack.sheet_tabs(scn)["Schedule"] == [["URL", "Streamer", "Stint", "Laps"], ["", "", "Stint 1", "14"],
                                                  ["", "", "Stint 2", "14"], ["", "", "Stint 3", "12"]]
+    empty = scenario.from_dict({"event": {"stints": 2}, "step": [{"role": "rec", "do": "go"}]}, _reg())
+    assert stack.sheet_tabs(empty)["Schedule"] == [["URL", "Streamer", "Stint", "Laps"], ["", "", "Stint 1", ""],
+                                                   ["", "", "Stint 2", ""]], \
+        "the Laps column is there to write into, empty without the event's counts"
     for bad in ([14, 14], [14, 0, 12], [14, "14", 12], 14, [14, 14, 1000]):
         _refused([{"role": "rec", "do": "go"}], "event.stint_laps", event={"stints": 3, "stint_laps": bad})
 

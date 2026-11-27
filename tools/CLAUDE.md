@@ -625,7 +625,8 @@ so the report is written inside the lifetime.
 It shares the one E2E unit: run it after, not beside, `tools/e2e.py`.
 
 Scenario (`scenario.py`, TOML): `name`, `description`, `max_minutes`, `wait` (default
-trigger timeout), `[event]` with `stints`, `track` (a GT7 layout id), `track_length_m`, `cars`
+trigger timeout), `[event]` with `stints`, `stint_laps` (one count per stint for the Schedule's
+`Laps` column, which is empty without it), `track` (a GT7 layout id), `track_length_m`, `cars`
 (1-15), `classes`, `parts` (0-9), `qualifying_part`, `seed` and `[[event.commentators]]`
 (`name`, `channel` for `sim://<channel>`, `stint`, `scheduled` = the Schedule row has the link
 from the start); an unknown key or a value the stack would refuse fails the load (`--check`),
@@ -662,7 +663,7 @@ inside its action.
 program feeds show), `sheet` (`tab(name)` or `sheet.<tab>`: records, index 0 is the first row
 under the header; `writes`, `write_count(action)`), `webhook` (`count(text)`, `messages`,
 `rejected`), `race` (the relay's `/drivers/race`), `page(role)` and `result(step_id)`. Keys
-match without case, spaces as `_`. Only comparisons, `and`/`or`/`not`, literals, attribute
+match without case, spaces as `_`. Only comparisons, `and`/`or`/`not`, `+` and `-` on numbers, literals, attribute
 and index access, probe methods, `len`, `sorted` and these helpers parse: `pluck(rows, key)` (the
 key of every row, in order), `row(rows, key, value)` (the first row with that value),
 `drift(before, after, key)` (the largest change of a number between rows of the same `entry`,
@@ -812,12 +813,12 @@ action and acts on the controls a person uses; the drivers have no page.
 |---|---|---|
 | `producer` | Control Center `/` | `open`, `pick_track` (track), `race_settings` (formation, finish_mode, laps), `start_event` (stint, qualifying), `stop_event`, `relay_restart` |
 | `director` | Director Panel `/panel` | `open`, `approve_link` (stint; `area = "schedule"` approves it in the Schedule area's pending list, which also holds the stint on air and a qualifying link), `next`, `scene` (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode` (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name), `play` (media: intro, trailer or outro; returns at the end of the loop the clip plays, from OBS's `mediaDuration` and `mediaCursor` read after the air light: the panel shows no media state and the clips loop), `timer` (duration H:MM:SS, typed into the Timer SET… prompt), `timer_key` (key: START or RESET), `view` (area) |
-| `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers` (one by one), `approve_all` (Approve all waiting; result `approved`, `skipped`, `names`), `reject_driver` (name), `correct_driver` (name, entry, stint: changed on the waiting request, then approved), `compound` (entry, code), `compounds` (code, skip: every entry of the tyre table; result `changed`, and `kept` for an entry already on it, whose select sends nothing), `race_start`, `show_standings` (entry, seconds: the frozen standings tab of its disconnect event, kept in view `seconds` (default 8) once it lists rows, then closed; result `rows`), `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason), `set_time` and `add_lap` (entry, time; qualifying mode), `note` (text, target), `confirm_dc` (entry), `class_laps` (class, laps), `view` (area) |
+| `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers` (one by one), `approve_all` (Approve all waiting; result `approved`, `skipped`, `names`), `reject_driver` (name), `correct_driver` (name, entry, stint: changed on the waiting request, then approved), `compound` (entry, code), `compounds` (code, skip: every entry of the tyre table; result `changed`, and `kept` for an entry already on it, whose select sends nothing), `race_start`, `show_standings` (entry, seconds: the frozen standings tab of its disconnect event, kept in view `seconds` (default 8) once it lists rows, then closed; result `rows`), `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason), `set_time` and `add_lap` (entry, time; qualifying mode), `note` (text, target), `confirm_dc` (entry), `class_laps` (class, laps), `stint_laps` (laps: `{label = count}` in the Race area's Stint laps), `take_plan` (buffer: waits for the red flag's restart plan, enters the buffer minutes and takes the suggestion; result `laps`), `view` (area) |
 | `commentator:<crew name>` | `/cockpit` with that person's token; the name must be in `[[event.commentators]]` or a Commentator of a `[sheet.tabs] Crew`, checked at load | `open`, `submit_link` (url, stint), `chat` (text) |
 | `viewer` | `/console/timing` on the event's timing link | `open`, `read` (cars) |
 | `driver` | `/console/drive` on the event's invite link, 390x844, no console token | `open`, `register` (entry, name, stint when the event registers per stint: its number picks the invite's segment label, the key the `drivers` role uses too; the code the page shows goes to the `drivers` role through `ctx.driver_codes`, never into a result) |
 | `probe` | `tools/probe-stage2.py` as the runbook runs it, and the real `racecast-sender.py` (#1116) | `watch`, `mark` (text), `kit` (sheets into the role's temporary folder), `race_reset`, `spectator` (name, position, cars: the sender with the probe key against a simulated PS5; needs `[event] probe = true`), `stop_spectator`, `check` (entry, segment, name: registers and runs `--check`), `report` (`collect` and `report`; its result is `probe_stage2.facts`) |
-| `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints or segment: one invite label such as `Qualifying`, each driver registering once for it, positions: 0x84 from the road order, skip: `[{entry, stint}]` seats the `driver` page registers; such a seat sends with the code that page showed, and `start` or `lobby` fails while it has none), `start`, `pit` (entry, seconds), `box` (order, leader_first: a car reaching the pit entry before the first of the order drives on another lap), `lobby` (stint), `release` (gaps: the rows of a race reading, for a keep restart), `drop` (entry), `rejoin` (entry, seconds), `stop` (entries) |
+| `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints or segment: one invite label such as `Qualifying`, each driver registering once for it, positions: 0x84 from the road order, skip: `[{entry, stint}]` seats the `driver` page registers; such a seat sends with the code that page showed, and `start` or `lobby` fails while it has none), `start`, `pit` (entry, seconds), `box` (order, leader_first: a car reaching the pit entry before the first of the order drives on another lap, laps: the lobby's lap count, so no car boxes before the end of its lap `laps - 1`), `lobby` (stint), `release` (gaps: the rows of a race reading, for a keep restart), `drop` (entry), `rejoin` (entry, seconds), `stop` (entries) |
 
 `hold` keeps any page role's page in view for `seconds` (at most 300) inside the action, so
 the film plays that stretch in real time under the step's caption.
@@ -947,15 +948,17 @@ times on a maintainer machine, start and teardown included:
   three added on the desk, the cars in once the timer has run out, Stop event). The race
   event starts in race mode: one driver on the invite page, one request corrected and one rejected, Approve all for
   the other 40, intro and trailer, crew chat, the finished qualifying timer reset and the
-  race timer set to the race length, Race
+  race timer set to the race length, the stint lobbies' lap counts set on the desk, Race
   start on the grid (the timer runs from the first race lap), every car's compound at each
   stint's start, formation, a pit stop with its compound, a DC (a held suspected phase, its
   standings of before the drop), an estimate, a DNF, a late stream link, before each swap
-  a next-stint driver on the invite page, the cars boxing behind the leader, the
+  a next-stint driver on the invite page, the cars boxing behind the leader at the end of
+  the lobby's second to last lap, the
   splitscreen once the leader stands in the box and NEXT once every car stands there (a
   soft check bounds that wait to 5 min), the cut back to the stint and the new compounds,
-  a red flag with a keep restart, a pit stop with a compound change, the final lap called
-  when the race timer runs out, the outro. Its steps carry
+  a red flag with a keep restart whose lobby runs the laps of the plan Race Control takes,
+  a pit stop with a compound change, the final lobby finishing by laps with the final lap
+  called as the leader starts its last, the outro. Its steps carry
   the walkthrough film's twelve chapters, captions and focus; `tests/test_event_sim_roles.py`
   holds the 50 shot names to their steps, roles and elements, not to their content. It
   runs in the workflow; locally it exceeds the 2 GiB E2E unit. Its 50 screenshots carry

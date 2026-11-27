@@ -290,6 +290,22 @@ def t_box_holds_every_car_until_release_and_the_next_lobby_takes_over():
     assert [c.entry for c in order] == TEAMS[:3], "cars leave in the order they arrived, each by its gap"
 
 
+def t_a_lobby_of_n_laps_boxes_each_car_at_the_end_of_its_lap_n_minus_1():
+    wire = Wire()
+    f = field(wire, cars=3)
+    f.start()
+    f.box(laps=3)
+    boxed = {}
+
+    def watch():
+        for c in f.cars:
+            if c.mode == "pit_in" and c.entry not in boxed:
+                boxed[c.entry] = c.lap
+        return all(c.mode == "stand" for c in f.cars)
+    assert run(f, wire, 600.0, watch), "every car boxes"
+    assert boxed == {c.entry: 2 for c in f.cars}, f"each car turns into the pit lane at the end of its lap 2: {boxed}"
+
+
 def _box_entries(leader_first):
     """(order the cars drove into the pit lane, per car the time it stood) for a box call
     made just after the leader passed the pit entry."""
@@ -348,6 +364,28 @@ def t_a_plain_pit_stop_of_the_leader_does_not_lift_the_leader_first_box_call():
         return len(held) == 3
     assert run(f, wire, 400.0, watch), "every car drives in for the hold"
     assert held[0] == TEAMS[0], f"the leader's plain stop before its hold keeps the others out: {held}"
+
+
+def t_a_car_that_rejoined_the_lobby_boxes_at_its_next_pit_entry():
+    wire = Wire()
+    f = field(wire, cars=3)
+    f.start()
+    lead = f.car(TEAMS[0])
+    assert run(f, wire, 600.0, lambda: lead.lap >= 2)
+    f.drop(TEAMS[2])
+    f.rejoin(TEAMS[2], seconds=1.0)
+    x = f.car(TEAMS[2])
+    assert run(f, wire, 30.0, lambda: x.mode == "drive")
+    f.box(laps=3)
+    boxed = {}
+
+    def watch():
+        if x.mode == "pit_in" and "x" not in boxed:
+            boxed["x"] = x.lap
+        return all(c.mode == "stand" for c in f.cars)
+    assert run(f, wire, 600.0, watch), "every car boxes, the rejoined one too"
+    assert boxed["x"] == 1, \
+        f"the rejoined car boxes at the first pit entry after it left the box, not after lap 2 of its new session: {boxed}"
 
 
 def t_a_keep_restart_releases_each_car_by_its_given_gap():
