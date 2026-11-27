@@ -1223,8 +1223,8 @@ timeout = "20s"
 caption = "The race leader is in the box: the director puts the splitscreen on program"
 focus = ["program", "director"]
 
-# NEXT once every running car stands in the box, after 5 minutes at most when the field is
-# spread out: a soft check ends the wait without failing the step.
+# NEXT right after the splitscreen: it opens the relay's change window before the first
+# next-lobby car leaves its box.
 [[step]]
 id = "next2"
 at = "after:split2"
@@ -1712,8 +1712,8 @@ timeout = "20s"
 caption = "The race leader is in the box: the director puts the splitscreen on program"
 focus = ["program", "director"]
 
-# NEXT once every running car stands in the box, after 5 minutes at most when the field is
-# spread out: a soft check ends the wait without failing the step.
+# NEXT right after the splitscreen: it opens the relay's change window before the first
+# next-lobby car leaves its box.
 [[step]]
 id = "next3"
 at = "after:split3"

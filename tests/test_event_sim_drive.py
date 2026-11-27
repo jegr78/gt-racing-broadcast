@@ -463,6 +463,100 @@ def t_the_next_lobby_drives_lap_1_and_each_car_takes_over_at_its_box_stop():
     assert f.stint == 1
 
 
+def _overlap(cars=3, stints=2, positions=False):
+    wire = Wire()
+    f = field(wire, cars=cars, stints=stints)
+    f.positions = positions
+    f.start()
+    assert run(f, wire, 600.0, lambda: all(c.lap >= 2 for c in f.cars))
+    return wire, f
+
+
+def t_the_next_lobby_keeps_the_old_cars_boxing_behind_their_leader():
+    wire, f = _overlap(cars=4)
+    f.open_next(1)
+    lead = max(f.cars, key=lambda c: c.odo)
+    f.box(leader_first=True, laps=lead.lap + 3)           # the next cars reach their box first
+    assert run(f, wire, 300.0, lambda: lead.next.mode == "stand") and lead.mode == "drive"
+    assert f.box_lead == lead.entry, "the leader's next car in its box does not lift the old cars' box order"
+    first = []
+    def boxed():
+        for c in f.cars:
+            if c.mode in ("pit_in", "stand") and c.entry not in first:
+                first.append(c.entry)
+        return len(first) == 4
+    assert run(f, wire, 900.0, boxed)
+    assert first[0] == lead.entry, f"the old leader boxes first, its next car does not release the others: {first}"
+    assert run(f, wire, 300.0, lambda: all(c.next.mode == "stand" for c in f.cars)), \
+        "every next car waits in its box after lap 1"
+
+
+def t_a_driver_staying_on_starts_the_next_session_in_the_box_at_the_change():
+    wire = Wire()
+    f = drive.Field(drive.trace(drive.synthetic_path(LENGTH)), wire, seed=7)
+    f.add(TEAMS[0], ["Max", "Max"])
+    f.add(TEAMS[1], ["Ann", "Lea"])
+    for k in range(2):
+        for s in range(2):
+            f.set_code(TEAMS[k], s, f"c{k}s{s}")
+    f.start()
+    assert run(f, wire, 600.0, lambda: all(c.lap >= 2 for c in f.cars))
+    f.open_next(1)
+    stay = f.car(TEAMS[0])
+    assert stay.next is None, "a driver staying on gets no second car"
+    f.box()
+    assert run(f, wire, 600.0, lambda: stay.mode == "stand")
+    f.allow_change()
+    assert run(f, wire, 120.0, lambda: stay.mode == "drive"), "the change releases a driver staying on"
+    laps = [x["lap"] for x in wire.samples["c0s1"]]          # one driver, one sender: the last code set
+    assert 0 in laps[laps.index(max(laps)):], "it waits on lap 0 of the new session before it leaves"
+    assert run(f, wire, 120.0, lambda: f.car(TEAMS[1]).active == 1) and f.stint == 1
+
+
+def t_a_dropped_car_rejoins_the_old_lobby_while_its_next_driver_waits():
+    wire, f = _overlap()
+    f.open_next(1)
+    f.drop(TEAMS[0])
+    f.rejoin(TEAMS[0], 2.0)
+    assert f.car(TEAMS[0]).driver == "D0S0", "until the change the current stint is the old one"
+    assert f.stint == 0
+
+
+def t_stop_closes_the_next_lobby_s_cars_too():
+    wire, f = _overlap()
+    f.open_next(1)
+    run(f, wire, 5.0)
+    f.stop()
+    sent = {k: wire.count(f"c{k}s1") for k in range(3)}
+    run(f, wire, 5.0)
+    assert {k: wire.count(f"c{k}s1") for k in range(3)} == sent, "no next car sends after stop"
+    assert all(c.next is None for c in f.cars)
+
+
+def t_a_second_next_lobby_waits_for_the_first_change():
+    wire, f = _overlap(stints=3)
+    f.open_next(1)
+    try:
+        f.open_next(2)
+    except drive.DriveError:
+        return
+    raise AssertionError("open_next refuses while next cars still wait")
+
+
+def t_each_lobby_ranks_its_own_cars():
+    wire, f = _overlap(cars=3, positions=True)
+    f.open_next(1)
+    f.box([max(f.cars, key=lambda c: c.odo).entry])       # only the leader's team changes yet
+    f.allow_change()
+    assert run(f, wire, 900.0, lambda: sum(c.active == 1 for c in f.cars) == 1)
+    changed = next(c for c in f.cars if c.active == 1)
+    run(f, wire, 1.0)
+    assert wire.last(f"c{f.cars.index(changed)}s1")["position"] == 1, "the only car in the new lobby leads it"
+    old = sorted(wire.last(f"c{f.cars.index(c)}s0")["position"] for c in f.cars if c.active == 0
+                 and c.mode not in ("dropped", "off"))
+    assert old == list(range(1, len(old) + 1)), f"the old lobby ranks its own cars: {old}"
+
+
 def t_a_keep_restart_releases_each_car_by_its_given_gap():
     wire = Wire()
     f = field(wire, cars=3)

@@ -2728,7 +2728,7 @@ def t_the_full_scenario_plays_qualifying_the_day_before_as_its_own_event():
                           and _after(by, s.id, race.id)), "the race event's new timing link opens again"
 
 
-def t_the_full_scenario_splits_on_the_leaders_box_entry_and_switches_once_every_car_boxed():
+def t_the_full_scenario_splits_on_the_leaders_box_entry_and_each_team_changes_at_its_box_stop():
     steps = _full().steps
     by = {s.id: s for s in steps}
     swaps = ((2, ("comms1", "comms2")), (3, ("comms2", "comms3")))
