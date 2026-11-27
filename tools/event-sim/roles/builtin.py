@@ -233,7 +233,8 @@ def budget_for(kind):
 @register
 class PageRole(Role):
     """A page in its own browser context: `open` (service, path, optional `as` for a
-    console token, `wait_for` a selector, `viewport` [width, height] on the first open). A script error on the page is a hard finding
+    console token, `wait_for` a selector, `viewport` [width, height] on the first open),
+    `close` (ends the page and its recording until the next `open`). A script error on the page is a hard finding
     when the role closes, a failed resource load a soft one. Without Playwright, `open`
     is skipped. A screenshot blacks out the invite and timing links of any page."""
     kind = "page"
@@ -356,6 +357,24 @@ class PageRole(Role):
                 except Exception as exc:
                     raise StepError(f"{args['wait_for']} not visible: {redact(exc)}") from None
         return {"url": redact(self.pg.url), "title": self.pg.title()}
+
+    def act_close(self, args):
+        """The page closes, which ends its recording; a later `open` starts both anew. Its
+        script errors so far are still reported when the role closes."""
+        if self.context is None:
+            raise StepError("close: the page is not open")
+        if self.tracing:
+            try:
+                self.context.tracing.stop()
+            except Exception:  # noqa: BLE001  a browser that went away keeps no trace
+                pass
+        self.context.close()
+        rec = getattr(self.ctx, "recorder", None)
+        if rec:
+            rec.page_closed(self.name)
+        self.context = self.pg = self.cdp = None
+        self.tracing = self.chunk = False
+        return {"closed": True}
 
     def _console(self, msg):
         where = (msg.location or {}).get("url") or ""

@@ -347,18 +347,18 @@ def fails(fn, *needles):
 
 # -- every role, every selector ---------------------------------------------------
 def t_the_registry_has_every_party_and_its_actions():
-    want = {"producer": {"open", "hold", "pick_track", "race_settings", "start_event", "stop_event", "relay_restart"},
-            "director": {"open", "hold", "approve_link", "next", "scene", "red_flag",
+    want = {"producer": {"open", "close", "hold", "pick_track", "race_settings", "start_event", "stop_event", "relay_restart"},
+            "director": {"open", "close", "hold", "approve_link", "next", "scene", "red_flag",
                          "show_dashboard", "cue", "chat", "graphic", "pov", "hud", "mode", "start_part",
                          "end_part", "fit", "view", "play", "timer", "timer_key"},
-            "race_control": {"open", "hold", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
+            "race_control": {"open", "close", "hold", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
                              "release", "retire", "rejoin", "estimate", "add_lap", "set_time", "correction",
                              "note", "fit", "confirm_dc", "class_laps", "stint_laps", "take_plan", "view", "reject_driver",
                              "correct_driver", "compound", "compounds", "race_start", "approve_all",
                              "show_standings"},
-            "commentator": {"open", "hold", "submit_link", "chat", "fit", "view"},
-            "viewer": {"open", "hold", "read"},
-            "driver": {"open", "hold", "register"},
+            "commentator": {"open", "close", "hold", "submit_link", "chat", "fit", "view"},
+            "viewer": {"open", "close", "hold", "read"},
+            "driver": {"open", "close", "hold", "register"},
             "drivers": {"register", "register_stint", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop",
                         "chequer", "next_lobby", "change"},
             "probe": {"watch", "mark", "kit", "race_reset", "spectator", "stop_spectator", "check", "report"}}
@@ -2549,12 +2549,31 @@ def t_the_full_scenario_keeps_the_decks_50_shots():
         f"each name stays at its step, role and element: {sorted(set(shots.items()) ^ set(FULL_SHOTS.items()))}"
 
 
+def t_the_full_scenario_closes_pages_while_the_film_does_not_need_them():
+    steps = _full().steps
+    by = {s.id: s for s in steps}
+    closed = {}
+    for s in steps:
+        if s.do == "close":
+            closed[s.role] = s.index
+        elif s.role in closed and s.do != "close":
+            closed.pop(s.role)
+        for e in s.expect:
+            for role in list(closed):
+                assert f"page('{role}')" not in e, f"{s.id} checks {role}, which is closed"
+        if s.shot:
+            assert s.shot.role not in closed, f"{s.id} shoots {s.shot.role}, which is closed"
+    away = {s.role for s in steps if s.do == "close"}
+    assert {"producer", "driver", "commentator:Comms 1", "commentator:Comms 2", "commentator:Comms 3"} <= away, away
+    assert _after(by, "next3", "cockpit3_back"), "Comms 3 is open again before NEXT puts it on air"
+
+
 def t_the_full_scenario_plays_the_twelve_chapters_of_the_storyboard():
     steps = _full().steps
     at = {s.id: s.index for s in steps}
     assert [s.chapter for s in steps if s.chapter] == FULL_CHAPTERS, [s.chapter for s in steps if s.chapter]
     quiet = [s.id for s in steps if (REG[scenario.role_kind(s.role)].recorded or scenario.role_kind(s.role) == "drivers")
-             and s.do not in ("open", "view") and not s.caption]
+             and s.do not in ("open", "close", "view") and not s.caption]
     assert quiet == [], f"every party step the film shows has a caption: {quiet}"
     assert all(s.caption for s in steps if s.chapter), "each chapter opens on a captioned step"
 

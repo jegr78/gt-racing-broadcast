@@ -64,7 +64,7 @@ class Surface(builtin.PageRole):
         return super().act_open(spec)
 
     def do(self, action, args):
-        if self.pg is None and action != "open":
+        if self.pg is None and action not in ("open", "close"):
             self.act_open({})
         return super().do(action, args)
 

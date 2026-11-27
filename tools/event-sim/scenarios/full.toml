@@ -414,8 +414,14 @@ caption = "The producer sets the race: a formation lap and a finish by laps"
 
 # Stop event ended the qualifying invite: the driver page opens the race event's.
 [[step]]
-id = "driver_open"
+id = "producer_away"
 at = "after:race_settings"
+role = "producer"
+do = "close"
+
+[[step]]
+id = "driver_open"
+at = "after:producer_away"
 role = "driver"
 do = "open"
 
@@ -479,8 +485,14 @@ caption = "Race Control corrects the team of Reserve 44 to Delta Sim Team #44 an
 focus = ["race_control", "driver"]
 
 [[step]]
-id = "reject_guest"
+id = "driver_away"
 at = "after:correct_reserve"
+role = "driver"
+do = "close"
+
+[[step]]
+id = "reject_guest"
+at = "after:driver_away"
 role = "race_control"
 do = "reject_driver"
 args = { name = "Guest Driver" }
@@ -554,8 +566,14 @@ expect = ["not page('commentator:Comms 2').on_air"]
 timeout = "20s"
 
 [[step]]
-id = "cockpit3"
+id = "cockpit2_away"
 at = "after:cockpit2"
+role = "commentator:Comms 2"
+do = "close"
+
+[[step]]
+id = "cockpit3"
+at = "after:cockpit2_away"
 role = "commentator:Comms 3"
 do = "open"
 expect = ["not page('commentator:Comms 3').on_air"]
@@ -563,8 +581,14 @@ timeout = "20s"
 
 # The race event has a new timing link.
 [[step]]
-id = "timing_race"
+id = "cockpit3_away"
 at = "after:cockpit3"
+role = "commentator:Comms 3"
+do = "close"
+
+[[step]]
+id = "timing_race"
+at = "after:cockpit3_away"
 role = "viewer"
 do = "open"
 
@@ -1166,8 +1190,14 @@ caption = "Race Control approves the stint 2 drivers with Approve all"
 focus = ["race_control", "driver"]
 
 [[step]]
-id = "swap1_desk"
+id = "driver_away2"
 at = "after:swap1_approve"
+role = "driver"
+do = "close"
+
+[[step]]
+id = "swap1_desk"
+at = "after:driver_away2"
 role = "race_control"
 do = "view"
 args = { area = "race" }
@@ -1286,8 +1316,14 @@ do = "view"
 args = { area = "race" }
 
 [[step]]
+id = "cockpit1_away"
+at = "after:desk_stint2"
+role = "commentator:Comms 1"
+do = "close"
+
+[[step]]
 id = "shot_swaps_1"
-at = "after:desk_stint2+3s"
+at = "after:cockpit1_away+3s"
 role = "api"
 do = "get"
 args = { path = "/status" }
@@ -1652,7 +1688,7 @@ do = "approve_all"
 expect = ["result('swap2_approve').approved == 14", "page('race_control').waiting == 0"]
 timeout = "20s"
 caption = "Race Control approves the stint 3 drivers with Approve all"
-focus = ["race_control", "driver"]
+focus = ["race_control"]
 
 [[step]]
 id = "swap2_desk"
@@ -1684,8 +1720,14 @@ caption = "The stint 3 lobby opens for the last laps of the restart lobby: the s
 focus = ["race_control", "program"]
 
 [[step]]
-id = "box3"
+id = "cockpit3_back"
 at = "after:open3"
+role = "commentator:Comms 3"
+do = "open"
+expect = ["not page('commentator:Comms 3').on_air"]
+[[step]]
+id = "box3"
+at = "after:cockpit3_back"
 role = "drivers"
 do = "box"
 args = { leader_first = true, laps = "${take_plan.laps}" }
@@ -1774,8 +1816,14 @@ do = "view"
 args = { area = "race" }
 
 [[step]]
-id = "stint3"
+id = "cockpit2_off"
 at = "after:desk_stint3"
+role = "commentator:Comms 2"
+do = "close"
+
+[[step]]
+id = "stint3"
+at = "after:cockpit2_off"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }

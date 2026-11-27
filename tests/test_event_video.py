@@ -453,6 +453,22 @@ def t_a_recording_s_time_stops_at_its_known_duration():
     assert t == round(10.0 - 1 / p.fps, 4), f"time stops at the last frame of the file: {t}"
 
 
+def t_a_closed_page_leaves_the_stage_until_it_opens_again():
+    tl = swaps_timeline()
+    for r in tl["recordings"]:
+        if r["view"] == "producer":
+            r["end"] = 50.0
+    tl["recordings"].append(_rec("producer", 350.0, file="pages/producer/page@2.webm"))
+    tl["steps"][-1].update(caption="The producer stops", chapter="Stop", focus=["producer"])
+    p = fp.Plan(tl)
+    assert _present(_at(p, 1.5), "producer"), "the producer is on the stage while its page is open"
+    assert not _present(_at(p, 150.0), "producer") and _at(p, 150.0)["sources"]["producer"] is None, \
+        "a closed page shows nothing and gives its place up"
+    assert _present(_at(p, 360.0), "producer"), "it comes back with its next recording"
+    rec, _t = _at(p, 360.0)["sources"]["producer"]
+    assert p.recordings[rec]["file"] == "pages/producer/page@2.webm"
+
+
 def t_a_missing_transcode_of_a_reopened_page_shows_the_earlier_recording():
     tl = timeline()
     second = len(tl["recordings"]) - 1

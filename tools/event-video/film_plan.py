@@ -462,6 +462,11 @@ class Plan:
                 by[r["view"]].append((r["start"], n))
         return {v: sorted(lst) for v, lst in by.items()}
 
+    def _open_at(self, view, s):
+        """True while a recording of `view` runs at source time s (a closed page has an `end`)."""
+        return any(r["view"] == view and r.get("file") and r["start"] <= s
+                   and (r.get("end") is None or s < r["end"]) for r in self.recordings)
+
     # time
 
     def speed_at(self, s):
@@ -543,21 +548,19 @@ class Plan:
 
     def _layout_switches(self):
         """[(output time, Layout, from rects, previous Layout, views on the stage)]: the layout
-        at the start of each caption and whenever a view's first recording starts, since a
-        view takes a place on the stage only from then on."""
+        at the start of each caption and whenever a view's recording starts or ends, since a
+        view holds a place on the stage only while its page is open."""
         caps = [s for s in self.steps if s.get("caption")]
         shown = [self._marks[s["id"]]["shown"] for s in caps]
-        opens = {}
-        for r in self.recordings:
-            if r.get("file") and r["view"] in self.views:
-                opens[r["view"]] = min(r["start"], opens.get(r["view"], r["start"]))
-        times = sorted({0.0, *shown, *(self.out_time(a) for a in opens.values() if a > self.t0)})
+        edges = [e for r in self.recordings if r.get("file") and r["view"] in self.views
+                 for e in (r["start"], r.get("end")) if e is not None and e > self.t0]
+        times = sorted({0.0, *shown, *(self.out_time(min(e, self.t1)) for e in edges)})
         switches, layout, present = [], Layout(()), None
         for t in times:
             n = max(0, bisect.bisect_right(shown, t) - 1)
             s = self.src_time(t)
             placed = self._present[n] if caps else list(self.views)
-            now = [v for v in placed if v in opens and opens[v] <= s]
+            now = [v for v in placed if self._open_at(v, s)]
             new = focus_layout(caps[n], layout, now) if caps else Layout(())
             if not new.large and now:
                 new = Layout((now[0],))
@@ -665,6 +668,9 @@ class Plan:
         if k < 0:
             return None
         start, n = recs[k]
+        end = self.recordings[n].get("end")
+        if end is not None and s >= end:
+            return None
         t = s - start
         dur = self.durations.get(self.recordings[n]["file"])
         if dur is not None:
