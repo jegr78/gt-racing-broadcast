@@ -472,6 +472,19 @@ def _overlap(cars=3, stints=2, positions=False):
     return wire, f
 
 
+def t_a_next_lobby_car_starts_low_on_fuel_and_refuels_at_its_change():
+    wire, f = _overlap()
+    f.open_next(1)
+    run(f, wire, 2.0)
+    assert all(wire.last(f"c{k}s1")["fuel"] <= drive.NEXT_START_FUEL for k in range(3)), \
+        "the next lobby's drivers start with little fuel"
+    f.box()
+    f.allow_change()
+    assert run(f, wire, 900.0, lambda: all(c.active == 1 and c.mode == "drive" for c in f.cars))
+    assert all(wire.last(f"c{k}s1")["fuel"] > drive.FUEL_CAP - 10 for k in range(3)), \
+        "they fill up at the stop where they take over"
+
+
 def t_the_next_lobby_keeps_the_old_cars_boxing_behind_their_leader():
     wire, f = _overlap(cars=4)
     f.open_next(1)

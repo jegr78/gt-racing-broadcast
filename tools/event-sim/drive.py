@@ -46,6 +46,7 @@ MAX_CARS = 15
 PATH_STEP_M = 20.0
 FUEL_CAP = 100.0
 CHANGE_STOP_S = 6.0         # the next car leaves its box this long after its team's old car stood
+NEXT_START_FUEL = 10.0      # a next lobby's driver starts low and refuels at the change
 DEFAULT_TRACK_M = 1200.0
 
 TEAMS = ("Apex Works #11", "Blue Harbor Racing #22", "Cedar Motorsport #33", "Delta Sim Team #44",
@@ -365,7 +366,8 @@ class Field:
 
     def open_next(self, stint):
         """The lobby of 0-based `stint` opens while the current one still races: each running
-        car's next driver starts there on the grid, drives lap 1 and waits in the box. Once
+        car's next driver starts there on the grid with NEXT_START_FUEL, drives lap 1 and
+        waits in the box. Once
         `allow_change` came and its team's old car stood CHANGE_STOP_S in the old lobby's
         box, the next car leaves and takes over; the old sender stops."""
         if stint < 0:
@@ -380,7 +382,7 @@ class Field:
             if c.senders[nxt] is c.sender:
                 c.stay = True               # starts the new session in its box at the change
                 continue
-            twin = Car(c.k, c.entry, c.senders, c.base, FUEL_CAP, self.gap_m)
+            twin = Car(c.k, c.entry, c.senders, c.base, NEXT_START_FUEL, self.gap_m)
             twin.active, twin.owner, twin.session = nxt, c, c.session + 1
             twin.mode = "drive"
             twin.requests = [{"hold": True, "change": True, "stall": 0, "lap": 1}]
