@@ -12380,10 +12380,20 @@ def _push_live_schedule(relay, setup_ctl):
 
 
 def seed_launch_hud(relay, setup_ctl):
-    """At launch, write the on-air row's Streamer + Stint label into the HUD, so a race
-    event does not show the label the previous (qualifying) event left in the Sheet."""
-    if not getattr(relay, "solo", False) and relay.mode in ("race", "qualifying"):
-        _push_live_schedule(relay, setup_ctl)
+    """At launch, write the on-air row's Streamer + Stint label into the HUD. In race mode
+    only over a qualifying label the previous event left in the Sheet, so a restart in the
+    middle of a race keeps the label on air, also one the director set by hand."""
+    if getattr(relay, "solo", False) or relay.mode not in ("race", "qualifying"):
+        return
+    if relay.mode == "race":
+        try:
+            label = (setup_ctl.hud.data() or {}).get("stint")
+            quali = {row[2] for row in setup_ctl.qual_source.get_rows()} if setup_ctl.qual_source else set()
+        except Exception:                                # noqa: BLE001  best-effort, like every HUD write
+            return
+        if not label or label not in quali:
+            return
+    _push_live_schedule(relay, setup_ctl)
 
 
 def should_push_live_schedule(result):
@@ -17519,7 +17529,8 @@ def main():
         remaining, running = public_remaining(timer)
         return {"roster": hud_source.roster_details() if hud_source else {},
                 "stint": cur["stint"] if cur else None, "remaining": remaining,
-                "remaining_running": running, "timer_shown": bool(timer and timer.get("visible")),
+                "remaining_running": running,
+                "timer_shown": bool(hud_source and timer and timer.get("visible")),
                 "mode": relay.mode, "segment": cur["stint"] if cur and relay.mode == "qualifying" else None,
                 "connections": driver_hub.connections() if relay.mode == "qualifying" else []}
 

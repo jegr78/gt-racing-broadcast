@@ -703,10 +703,25 @@ def t_health_snapshot_live_stint_is_display_row_on_continuation():
     assert snap["live_stint"] == rc.on_air_row_idx() + 1 == 3, snap["live_stint"]
 
 
-def t_a_launch_seeds_the_hud_from_the_on_air_row_in_race_and_qualifying():
+def t_a_launch_seeds_the_hud_only_over_a_qualifying_label():
+    class Hud:
+        def __init__(self, stint):
+            self.stint = stint
+
+        def data(self):
+            return {"stint": self.stint, "streamer": "Sub"}
+
+    class Rows:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def get_rows(self):
+            return self.rows
+
     class Ctl:
-        def __init__(self):
-            self.fields = []
+        def __init__(self, label):
+            self.fields, self.hud = [], Hud(label)
+            self.qual_source = Rows([("", "Comms 1", "Qualifying", 2)])
 
         def set_field(self, k, v):
             self.fields.append((k, v))
@@ -717,12 +732,16 @@ def t_a_launch_seeds_the_hud_from_the_on_air_row_in_race_and_qualifying():
 
         def live_schedule_row(self):
             return {"streamer": "Comms 1", "stint": "Stint 1" if self.mode == "race" else "Qualifying"}
-    for mode, want in (("race", "Stint 1"), ("qualifying", "Qualifying")):
-        ctl = Ctl()
-        m.seed_launch_hud(Relay(mode), ctl)
-        assert ("stint", want) in ctl.fields, \
-            f"a {mode} launch replaces the label the previous event left in the Sheet: {ctl.fields}"
-    ctl = Ctl()
+    ctl = Ctl("Qualifying")
+    m.seed_launch_hud(Relay("race"), ctl)
+    assert ("stint", "Stint 1") in ctl.fields, f"a race launch replaces the qualifying label: {ctl.fields}"
+    ctl = Ctl("Stint 2")
+    m.seed_launch_hud(Relay("race"), ctl)
+    assert ctl.fields == [], f"a restart mid-race keeps the label on air, also one set by hand: {ctl.fields}"
+    ctl = Ctl("Stint 2")
+    m.seed_launch_hud(Relay("qualifying"), ctl)
+    assert ("stint", "Qualifying") in ctl.fields, f"a qualifying launch seeds as before: {ctl.fields}"
+    ctl = Ctl("Qualifying")
     m.seed_launch_hud(Relay("race", solo=True), ctl)
     assert ctl.fields == [], "solo mode has no schedule to seed from"
 

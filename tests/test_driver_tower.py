@@ -118,13 +118,15 @@ def t_the_header_leaves_the_time_to_a_visible_hud_timer():
       race(1, [], {remaining: 754, lap: lap}); const timed = head();
       race(1, [], {remaining: 754, lap: lap, timer_shown: true}); const shown = head();
       race(1, [], {lap: lap}); const untimed = head();
+      race(1, [], {remaining: 754, lap: lap, timer_shown: true, multi_lobby: true}); const endurance = head();
       renderQualifying({qualifying: [], remaining: 754, timer_shown: true}); const q = head();
-      return [timed, shown, untimed, q];""")
+      return [timed, shown, untimed, q, endurance];""")
     if got is None:
         return
-    timed, shown, untimed, q = got
+    timed, shown, untimed, q, endurance = got
+    assert endurance == "LAP 5", f"an endurance race's count comes from the stint lobbies and stays off air: {endurance}"
     assert timed == "12:34", f"without the HUD timer the tower keeps the time: {timed}"
-    assert shown == "LAP 5", f"with the HUD timer on air the header shows only the race lap: {shown}"
+    assert shown == "LAP 5 / 20", f"with the HUD timer on air the header shows the race lap: {shown}"
     assert untimed == "LAP 5 / 20", f"no timer at all keeps the lap and its count: {untimed}"
     assert q == "QUALIFYING", f"qualifying names the session while the HUD shows the time: {q}"
 
