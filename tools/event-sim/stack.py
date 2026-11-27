@@ -55,7 +55,8 @@ TEARDOWN_MARGIN_S = 600           # start, teardown and the report around the st
 READY_TIMEOUT_S = 90
 LOG_TAIL = 4000
 PART_KEY_REF = "sim-part-{}"     # a Script Property name; its value is made up per run
-RACE_CONTROL = ("GREEN", "Red Flag - Race Suspended", "Driver Swaps")   # RED FLAG banner, then the SPLIT macro's text
+# The RED FLAG banner, the SPLIT macro's text and the messages the director shows at the start and the finish.
+RACE_CONTROL = ("GREEN", "Red Flag - Race Suspended", "Driver Swaps", "Formation Lap", "Final Lap", "Chequered Flag")
 EVENT_FILES = {"invite": "driver-invite.json", "timing": "timing-link.json"}
 MAX_TRACK_M = 30000             # above the longest real circuit (about 25 km)
 KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)     # SIGTERM is TerminateProcess on Windows

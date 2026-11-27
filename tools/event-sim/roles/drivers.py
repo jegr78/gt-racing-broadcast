@@ -28,6 +28,8 @@ class DriversRole(Role):
         self.field = self.runner = self.client = None
         self.registered = 0
         self.waiting = {}        # (entry, 0-based stint) -> its key in ctx.driver_codes
+        self.later = {}          # (entry, 0-based stint) -> (grid slot, segment): registers before its lobby
+        self.invite = None
 
     def _field(self):
         if self.field is None:
@@ -55,7 +57,8 @@ class DriversRole(Role):
             raise StepError(f"the drivers could not {what}: {type(exc).__name__}: {exc}") from None
 
     def act_register(self, args):
-        """Every driver of `stints` (default: all), or of the one `segment`, registers on the invite."""
+        """Every driver of `stints` (default: all), or of the one `segment`, registers on the invite;
+        with `now` (1-based stints) only those, the others with `register_stint` before their lobby."""
         if self.field is not None:
             raise StepError("the drivers registered already")
         event = self.ctx.event
@@ -79,6 +82,9 @@ class DriversRole(Role):
                 raise StepError("the invite lists no entries: the roster ([event] cars) is empty")
             stints = int(args.get("stints") or len(segments) or 1)
             skip = self._skips(args.get("skip", []), entries, stints)
+            now = args.get("now", list(range(1, stints + 1)))
+            if not isinstance(now, list) or not all(type(n) is int and 1 <= n <= stints for n in now):
+                raise StepError(f"register: now lists stints 1-{stints}, not {now!r}")
             length = float(event.get("track_length_m", drive.DEFAULT_TRACK_M))
             line = self.ctx.track_trace or drive.trace(drive.synthetic_path(length))
             field = drive.Field(line, self.client.ingest,
@@ -90,6 +96,9 @@ class DriversRole(Role):
                     if (entry, s) in skip:
                         self.waiting[(entry, s)] = (entry, segment or "")
                         continue
+                    if s + 1 not in now:
+                        self.later[(entry, s)] = (k, segment)
+                        continue
                     field.set_code(entry, s, self.client.register(
                         invite, entry, drive.driver_name(entry, s), segment, drive.device_address(k, s)))
                     self.registered += 1
@@ -99,8 +108,30 @@ class DriversRole(Role):
                 f"the relay did not answer the drivers: {exc}"
             left = f" {made} registrations were already made and stay waiting at the relay." if made else ""
             raise StepError(why + "." + left + " No driver of this role is registered.") from None
-        self.field = field
+        self.field, self.invite = field, invite
         return {"registered": self.registered, "skipped": len(self.waiting), "entries": entries, "stints": stints}
+
+    def act_register_stint(self, args):
+        """The drivers of 1-based `stint` that `register` left for later register now."""
+        field, stint = self._field(), args.get("stint")
+        stints = len(field.cars[0].senders) if field.cars else 0
+        if type(stint) is not int or not 1 <= stint <= stints:
+            raise StepError(f"register_stint: no stint {stint!r} (stints 1-{stints})")
+        seats = [(seat, slot) for seat, slot in self.later.items() if seat[1] == stint - 1]
+        if not seats:
+            raise StepError(f"stint {stint} registered already")
+        made = 0
+        try:
+            for (entry, s), (k, segment) in seats:
+                code = self.client.register(self.invite, entry, drive.driver_name(entry, s), segment,
+                                            drive.device_address(k, s))
+                self._do(lambda e=entry, s=s, c=code: field.set_code(e, s, c), "register")
+                del self.later[(entry, s)]
+                made += 1
+                self.registered += 1
+        except (ValueError, OSError, http.client.HTTPException) as exc:
+            raise StepError(f"stint {stint}: {made} drivers registered, then the relay did not answer: {exc}") from None
+        return {"stint": stint, "registered": made}
 
     @staticmethod
     def _skips(skip, entries, stints):
@@ -193,6 +224,8 @@ class DriversRole(Role):
         stint = args.get("stint")
         if type(stint) is not int or stint < 1:
             raise StepError("lobby needs args.stint, counted from 1")
+        if any(s == stint - 1 for _e, s in self.later):
+            raise StepError(f"the stint {stint} drivers have not registered: register_stint first")
         self._do(lambda: (self._seats_of(stint - 1), self._field().lobby(stint - 1)), "open the lobby")
 
     def act_release(self, args):

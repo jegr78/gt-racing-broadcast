@@ -359,7 +359,8 @@ def t_the_registry_has_every_party_and_its_actions():
             "commentator": {"open", "hold", "submit_link", "chat", "fit", "view"},
             "viewer": {"open", "hold", "read"},
             "driver": {"open", "hold", "register"},
-            "drivers": {"register", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop", "chequer"},
+            "drivers": {"register", "register_stint", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop",
+                        "chequer"},
             "probe": {"watch", "mark", "kit", "race_reset", "spectator", "stop_spectator", "check", "report"}}
     for kind, actions in want.items():
         assert kind in REG, f"role {kind} is not registered"
@@ -1830,6 +1831,24 @@ def t_drivers_register_each_stint_as_its_own_device_and_keep_the_codes():
     assert "code" not in json.dumps(role.page())
 
 
+def t_the_later_stints_register_when_their_lobby_comes():
+    role = drivers_role()
+    teams = drive.roster(3)
+    out = role.do("register", {"stints": 3, "now": [1], "skip": [{"entry": teams[1], "stint": 2}]})
+    assert out["registered"] == 3, f"only the stint 1 drivers register before the race: {out}"
+    relay = Relay.made[-1]
+    assert {r[3] for r in relay.registered} == {"Stint 1"}, relay.registered
+    role.do("start", {})
+    fails(lambda: role.do("lobby", {"stint": 2}), "register_stint first")
+    out = role.do("register_stint", {"stint": 2})
+    assert out == {"stint": 2, "registered": 2}, f"stint 2 registers before its lobby, the page's seat left out: {out}"
+    assert [r[3] for r in relay.registered[3:]] == ["Stint 2", "Stint 2"], relay.registered
+    assert role.page()["registered"] == 5
+    fails(lambda: role.do("register_stint", {"stint": 2}), "stint 2 registered already")
+    fails(lambda: role.do("register_stint", {"stint": 4}), "no stint 4")
+    fails(lambda: drivers_role().do("register", {"stints": 3, "now": [4]}), "now")
+
+
 class HeatRelay(Relay):
     def data(self, invite):
         return {"entries": drive.roster(3), "segments": ["Heat A", "Heat B", "Heat C"]}
@@ -2067,7 +2086,8 @@ def t_the_sheet_carries_the_roster_and_the_red_flag_banner():
     assert [row[0] for row in config[1:5]] == drive.roster(4), config
     banners = [row[config[0].index("Race Control")] for row in config[1:]]
     assert "Red Flag - Race Suspended" in banners, "Race Control's RED FLAG sets this banner"
-    assert [row[0] for row in stack.sheet_tabs(scn({"stints": 3}))["Configuration"][1:]] == ["", "", ""]
+    assert [row[0] for row in stack.sheet_tabs(scn({"stints": 3}))["Configuration"][1:]] == [""] * len(stack.RACE_CONTROL), \
+        "without cars the roster column is empty, one row per Race Control text"
     try:
         stack.sheet_tabs(scn({"cars": 99}))
     except ValueError as exc:
@@ -2592,6 +2612,35 @@ def _events(by, steps):
     return starts[0], stops[0], starts[1]
 
 
+def t_the_qualifying_timer_holds_the_session_length_before_program_goes_on_air():
+    steps = _full().steps
+    by = {s.id: s for s in steps}
+    quali, _stop, _race = _events(by, steps)
+    on_air = next(s for s in steps if s.do == "scene" and _after(by, s.id, quali.id))
+    timer = next(s for s in steps if s.do == "timer" and _after(by, s.id, quali.id))
+    assert _after(by, on_air.id, timer.id), \
+        f"{timer.id} sets the length before {on_air.id}, so the program never shows the 6:00:00 preset"
+
+
+def t_the_full_scenario_shows_race_control_messages_at_formation_final_lap_and_finish():
+    import stack
+    steps = _full().steps
+    by = {s.id: s for s in steps}
+    rc = [s for s in steps if s.do == "hud" and s.args.get("field") == "racecontrol"]
+    said = {s.args["value"]: s for s in rc}
+    for text in ("Formation Lap", "Final Lap", "Chequered Flag"):
+        assert text in said, f"Race Control's message {text!r} is on the HUD: {[s.args for s in rc]}"
+        assert text in stack.RACE_CONTROL, f"{text!r} is in the run's Configuration vocabulary"
+        assert said[text].role == "director" and said[text].caption, said[text]
+    clear = [s for s in rc if s.args["value"] == ""]
+    assert clear, "the formation message is cleared when the race starts"
+    assert _after(by, said["Formation Lap"].id, "formation") and _after(by, "racing", said["Formation Lap"].id), \
+        "Formation Lap shows while the cars run the formation lap"
+    assert _after(by, clear[0].id, "racing"), "it goes when the race starts"
+    assert _after(by, said["Final Lap"].id, "final_lap"), "Final Lap follows Race Control's call"
+    assert _after(by, said["Chequered Flag"].id, "flag"), "Chequered Flag once the leader has taken it"
+
+
 def t_the_full_scenario_plays_qualifying_the_day_before_as_its_own_event():
     steps = _full().steps
     by = {s.id: s for s in steps}
@@ -2774,7 +2823,7 @@ def t_the_full_scenario_shows_the_dc_snapshot_the_stint_compounds_crew_chat_and_
     codes = [s.args["code"] for s in sets]
     assert len(set(codes)) == len(codes), f"each stint starts on its own compound: {codes}"
     assert by["approve_drivers"].do == "approve_all" and \
-        "result('approve_drivers').approved == 40" in by["approve_drivers"].expect, by["approve_drivers"]
+        "result('approve_drivers').approved == 14" in by["approve_drivers"].expect, by["approve_drivers"]
     chats = [s for s in steps if s.do == "chat"]
     assert len(chats) >= 3 and all(s.caption for s in chats), [s.id for s in chats]
     assert {s.role.split(":")[0] for s in chats} == {"director", "commentator"}, [s.role for s in chats]
@@ -2784,7 +2833,15 @@ def t_the_full_scenarios_driver_page_seats_drive_with_an_approved_code():
     steps = _full().steps
     field = [s for s in steps if s.role == "drivers" and s.do == "register"][0]
     skip = {(seat["entry"], seat["stint"]) for seat in field.args.get("skip", [])}
-    assert len(skip) == 3 and {st for _, st in skip} == {1, 2, 3}, f"one page seat per stint: {skip}"
+    assert {st for _, st in skip} == {1, 2} and len(skip) == 2, \
+        f"one page seat before the race, one later stint's shown once: {skip}"
+    assert field.args.get("now") == [1], "only the stint 1 drivers register before the race"
+    for stint in (2, 3):
+        reg = [s for s in steps if s.role == "drivers" and s.do == "register_stint" and s.args.get("stint") == stint]
+        lobby = [s for s in steps if s.role == "drivers" and s.do == "lobby" and s.args.get("stint") == stint]
+        assert len(reg) == 1 and lobby and reg[0].index < lobby[0].index, f"stint {stint} registers before its lobby"
+        assert [s for s in steps if reg[0].index < s.index < lobby[0].index and s.do == "approve_all"], \
+            f"Race Control approves the stint {stint} drivers before their lobby"
     page = [s for s in steps if s.role == "driver" and s.do == "register"]
     names = [s.args["name"] for s in page]
     assert len(set(names)) == len(names), f"the desk finds a request by its name: {names}"

@@ -129,8 +129,20 @@ timeout = "90s"
 caption = "Feed A runs warm with the qualifying stream as soon as the link is approved"
 
 [[step]]
-id = "quali_on_air"
+id = "quali_timer"
 at = "after:warm_a"
+role = "director"
+do = "timer"
+args = { duration = "0:10:00" }
+expect = ["relay.get('/timer/data').mode == 'prestart'",
+          "relay.get('/timer/data').duration_s == 600"]
+timeout = "10s"
+caption = "The director sets the qualifying timer to 10 minutes before going on air"
+focus = ["director", "program"]
+
+[[step]]
+id = "quali_on_air"
+at = "after:quali_timer"
 role = "director"
 do = "scene"
 args = { scene = "Stint" }
@@ -233,20 +245,8 @@ caption = "Race Control approves the 14 qualifying requests with Approve all"
 focus = ["race_control", "driver"]
 
 [[step]]
-id = "quali_timer"
-at = "after:quali_approve"
-role = "director"
-do = "timer"
-args = { duration = "0:10:00" }
-expect = ["relay.get('/timer/data').mode == 'prestart'",
-          "relay.get('/timer/data').duration_s == 600"]
-timeout = "10s"
-caption = "The director sets the qualifying timer to 10 minutes"
-focus = ["director", "program"]
-
-[[step]]
 id = "quali_drive"
-at = "after:quali_timer"
+at = "after:quali_approve"
 role = "drivers:quali"
 do = "start"
 expect = ["page('drivers:quali').driving == 14"]
@@ -455,9 +455,9 @@ id = "register"
 at = "after:driver_guest"
 role = "drivers"
 do = "register"
-args = { stints = 3, skip = [{ entry = "Juniper Motorsport #10", stint = 1 }, { entry = "Kestrel Sim Racing #12", stint = 2 }, { entry = "Lakeside Racing #14", stint = 3 }] }
-expect = ["result('register').registered == 39"]
-caption = "The other drivers register for their stints"
+args = { stints = 3, now = [1], skip = [{ entry = "Juniper Motorsport #10", stint = 1 }, { entry = "Kestrel Sim Racing #12", stint = 2 }] }
+expect = ["result('register').registered == 13"]
+caption = "The other stint 1 drivers register"
 focus = ["driver"]
 
 [[step]]
@@ -465,7 +465,7 @@ id = "desk_waiting"
 at = "after:register"
 role = "race_control"
 do = "open"
-expect = ["page('race_control').waiting == 42"]
+expect = ["page('race_control').waiting == 16"]
 timeout = "20s"
 
 [[step]]
@@ -484,7 +484,7 @@ at = "after:correct_reserve"
 role = "race_control"
 do = "reject_driver"
 args = { name = "Guest Driver" }
-expect = ["page('race_control').waiting == 40"]
+expect = ["page('race_control').waiting == 14"]
 timeout = "20s"
 caption = "Race Control rejects the request of Guest Driver"
 
@@ -501,12 +501,12 @@ id = "approve_drivers"
 at = "after:desk_requests"
 role = "race_control"
 do = "approve_all"
-expect = ["result('approve_drivers').approved == 40",
+expect = ["result('approve_drivers').approved == 14",
           "result('approve_drivers').skipped == 0",
           "page('race_control').waiting == 0"]
 timeout = "20s"
 shot = { name = "approval-approved-1", role = "race_control", element = ".area[data-area=\"drivers\"]" }
-caption = "Race Control approves the 40 waiting requests with Approve all"
+caption = "Race Control approves the 14 waiting requests with Approve all"
 
 [[step]]
 id = "intro"
@@ -653,8 +653,19 @@ caption = "The cars leave the grid for the formation lap"
 focus = ["program", "viewer"]
 
 [[step]]
+id = "rc_formation"
+at = "after:formation"
+role = "director"
+do = "hud"
+args = { field = "racecontrol", value = "Formation Lap" }
+expect = ["relay.get('/setup/data').fields.racecontrol == 'Formation Lap'"]
+timeout = "20s"
+caption = "The director shows Formation Lap as the Race Control message on the HUD"
+focus = ["director", "program"]
+
+[[step]]
 id = "shot_formation_1"
-at = "after:formation+3s"
+at = "after:rc_formation+3s"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
@@ -681,8 +692,19 @@ expect = ["race.state == 'racing'",
 timeout = "6m"
 
 [[step]]
+id = "rc_go"
+at = "after:racing"
+role = "director"
+do = "hud"
+args = { field = "racecontrol", value = "" }
+expect = ["relay.get('/setup/data').fields.racecontrol == ''"]
+timeout = "20s"
+caption = "The director clears the Race Control message as the race starts"
+focus = ["director", "program"]
+
+[[step]]
 id = "shot_start_1"
-at = "after:racing+3s"
+at = "after:rc_go+3s"
 role = "api"
 do = "get"
 args = { path = "/status" }
@@ -1103,8 +1125,18 @@ expect = ["race.lap.leader >= 4"]
 timeout = "12m"
 
 [[step]]
-id = "swap1_driver"
+id = "register2"
 at = "after:lap6"
+role = "drivers"
+do = "register_stint"
+args = { stint = 2 }
+expect = ["result('register2').registered == 13"]
+caption = "The other stint 2 drivers register for their lobby"
+focus = ["race_control", "program"]
+
+[[step]]
+id = "swap1_driver"
+at = "after:register2"
 role = "driver"
 do = "register"
 args = { entry = "Kestrel Sim Racing #12", name = "Driver 12-2", stint = 2 }
@@ -1118,10 +1150,10 @@ focus = ["driver", "race_control"]
 id = "swap1_approve"
 at = "after:swap1_driver"
 role = "race_control"
-do = "approve_driver"
-args = { name = "Driver 12-2" }
+do = "approve_all"
+expect = ["result('swap1_approve').approved == 14", "page('race_control').waiting == 0"]
 timeout = "20s"
-caption = "Race Control approves Driver 12-2 for stint 2"
+caption = "Race Control approves the stint 2 drivers with Approve all"
 focus = ["race_control", "driver"]
 
 [[step]]
@@ -1588,23 +1620,23 @@ timeout = "12m"
 [[step]]
 id = "swap2_driver"
 at = "after:late2"
-role = "driver"
-do = "register"
-args = { entry = "Lakeside Racing #14", name = "Driver 14-3", stint = 3 }
-expect = ["page('driver').registered"]
+role = "drivers"
+do = "register_stint"
+args = { stint = 3 }
+expect = ["result('swap2_driver').registered == 14"]
 timeout = "20s"
 chapter = "Driver swap 2"
-caption = "The stint 3 driver of Lakeside Racing #14 registers on the invite page"
-focus = ["driver", "race_control"]
+caption = "The stint 3 drivers register for their lobby"
+focus = ["race_control", "program"]
 
 [[step]]
 id = "swap2_approve"
 at = "after:swap2_driver"
 role = "race_control"
-do = "approve_driver"
-args = { name = "Driver 14-3" }
+do = "approve_all"
+expect = ["result('swap2_approve').approved == 14", "page('race_control').waiting == 0"]
 timeout = "20s"
-caption = "Race Control approves Driver 14-3 for stint 3"
+caption = "Race Control approves the stint 3 drivers with Approve all"
 focus = ["race_control", "driver"]
 
 [[step]]
@@ -1762,8 +1794,19 @@ caption = "Race Control calls the final lap"
 focus = ["race_control", "viewer"]
 
 [[step]]
+id = "rc_final"
+at = "after:final_lap"
+role = "director"
+do = "hud"
+args = { field = "racecontrol", value = "Final Lap" }
+expect = ["relay.get('/setup/data').fields.racecontrol == 'Final Lap'"]
+timeout = "20s"
+caption = "The director shows Final Lap on the HUD"
+focus = ["director", "program"]
+
+[[step]]
 id = "shot_finallap_2"
-at = "after:final_lap+3s"
+at = "after:rc_final+3s"
 role = "api"
 do = "get"
 args = { path = "/status" }
@@ -1798,8 +1841,19 @@ caption = "Each car stops sending as it crosses the finish line and leaves the t
 focus = ["race_control", "program"]
 
 [[step]]
+id = "rc_flag"
+at = "after:chequer"
+role = "director"
+do = "hud"
+args = { field = "racecontrol", value = "Chequered Flag" }
+expect = ["relay.get('/setup/data').fields.racecontrol == 'Chequered Flag'"]
+timeout = "20s"
+caption = "The director shows Chequered Flag on the HUD"
+focus = ["director", "program"]
+
+[[step]]
 id = "shot_chequered_1"
-at = "after:flag+3s"
+at = "after:rc_flag+3s"
 role = "api"
 do = "get"
 args = { path = "/status" }
