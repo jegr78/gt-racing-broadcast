@@ -1268,6 +1268,21 @@ def t_make_home_copies_into_the_temp_dir():
         assert not os.path.exists(os.path.join(home, "src", "__pycache__"))
 
 
+def t_the_runs_profile_places_the_stream_chat_at_the_bottom_right():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = os.path.join(tmp, "home")
+        stack.make_home(home)
+        od = os.path.join(home, "profiles", "demo", "overlay")
+        with open(os.path.join(od, "hud.css"), encoding="utf-8") as fh:
+            css = fh.read()
+        with open(os.path.join(od, "layout-hud.json"), encoding="utf-8") as fh:
+            chat = json.load(fh)["slots"].get("chat")
+    assert chat == stack.SIM_HUD_SLOTS["chat"] and "#chat { left: 1620px; top: 840px;" in css, \
+        f"the run's HUD keeps the stream chat off the timing tower: {chat}"
+    with open(os.path.join(stack.PROFILE_DIR, "overlay", "hud.css"), encoding="utf-8") as fh:
+        assert "#chat" not in fh.read(), "the demo standard itself stays as it is"
+
+
 def t_the_relay_browser_sources_move_with_the_relay():
     col = {"sources": [{"settings": {"url": "http://127.0.0.1:8088/hud"}},
                        {"settings": {"url": "http://127.0.0.1:8088/splitscreen?x=1"}}]}

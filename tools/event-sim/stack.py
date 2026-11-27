@@ -35,6 +35,7 @@ import e2e_safety  # noqa: E402
 import gt7_tracks  # noqa: E402
 import obs_grab  # noqa: E402
 import obs_sim  # noqa: E402
+import overlay_build  # noqa: E402
 import ports  # noqa: E402
 import probes  # noqa: E402
 import record  # noqa: E402
@@ -272,6 +273,7 @@ def child_env(base, extra):
 SRC = os.path.join(ROOT, "src")
 PROFILE_DIR = os.path.join(ROOT, "profiles", PROFILE)
 HOST_RUNTIME = os.path.join(ROOT, "runtime")     # its gt7/signatures.json is downloaded, never committed
+SIM_HUD_SLOTS = {"chat": {"left": 1620, "top": 840, "width": 290, "height": 220}}   # off the timing tower
 
 
 def make_home(home, src=SRC, profile=PROFILE_DIR, track=None, host=None):
@@ -280,6 +282,7 @@ def make_home(home, src=SRC, profile=PROFILE_DIR, track=None, host=None):
     runtime's downloaded one when it fits (`drive.write_track_data`), else a simulated lap."""
     shutil.copytree(src, os.path.join(home, "src"), ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(profile, os.path.join(home, "profiles", PROFILE))
+    place_hud_slots(os.path.join(home, "profiles", PROFILE, "overlay"), os.path.join(src, "obs", "hud.html"))
     runtime = os.path.join(home, "runtime")
     os.makedirs(runtime, exist_ok=True)
     with open(os.path.join(runtime, "yt-cookies.txt"), "w", encoding="utf-8") as fh:
@@ -291,6 +294,23 @@ def make_home(home, src=SRC, profile=PROFILE_DIR, track=None, host=None):
     if track:
         drive.write_track_data(runtime, *track, host=host)
     return os.path.join(home, "src", "racecast.py")
+
+
+def place_hud_slots(overlay_dir, hud_page, slots=SIM_HUD_SLOTS):
+    """Move the run's HUD `slots` in a copied profile's layout and recompile its hud.css,
+    as the overlay builder would; a profile without a HUD layout stays as it is."""
+    layout_path = os.path.join(overlay_dir, "layout-hud.json")
+    if not (os.path.isfile(layout_path) and os.path.isfile(hud_page)):
+        return
+    with open(layout_path, encoding="utf-8") as fh:
+        layout = json.load(fh)
+    layout.setdefault("slots", {}).update(slots)
+    with open(hud_page, encoding="utf-8") as fh:
+        page_slots = overlay_build.extract_slots(fh.read())
+    with open(layout_path, "w", encoding="utf-8") as fh:
+        json.dump(layout, fh, indent=2)
+    with open(os.path.join(overlay_dir, "hud.css"), "w", encoding="utf-8") as fh:
+        fh.write(overlay_build.compile_overlay_css(layout, page_slots))
 
 
 def profile_value(key, profile=PROFILE_DIR):
