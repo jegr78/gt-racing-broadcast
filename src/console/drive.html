@@ -26,12 +26,20 @@ input + .dim{margin-top:6px}
 #consoleErr{margin:0 0 10px}
 .note{border-left:3px solid var(--warn);padding:4px 0 4px 10px}
 .cmd{display:flex;gap:8px;align-items:flex-start;margin:6px 0 12px}
-#helpSec code{white-space:nowrap}
 .cmd code{flex:1;min-width:0;display:block;font:13px/1.45 var(--mono);background:#0e141b;border:1px solid var(--edge);border-radius:6px;padding:9px 10px;overflow-wrap:anywhere;white-space:pre-wrap}
 a{color:#8ac6ff}
 ul{margin:0 0 10px;padding-left:20px}
 li{margin-bottom:6px}
 [hidden]{display:none !important}
+.step{margin:12px 0 6px}
+.help{color:var(--dim);font-size:14px;margin:18px 2px 0}
+details{margin:4px 0 14px}
+summary{cursor:pointer;color:#8ac6ff}
+details input{margin-top:8px}
+.status{display:flex;gap:12px;align-items:flex-start;border:1px solid var(--edge);border-radius:8px;padding:12px;margin:6px 0 12px;background:#0e141b}
+.pill{flex:none;font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border-radius:999px;padding:3px 10px;border:1px solid currentColor}
+.pill.wait{color:var(--warn)}.pill.ok{color:#6fd08c}.pill.bad{color:var(--bad)}.pill.info{color:#8ac6ff}
+button.link{background:none;border:0;padding:0;color:#8ac6ff;text-decoration:underline;cursor:pointer}
 </style>
 </head>
 <body>
@@ -45,8 +53,8 @@ li{margin-bottom:6px}
     <label for="entry">Entry</label>
     <select id="entry"><option value="">Pick your entry</option></select>
     <div id="segBox" hidden>
-      <label for="segment">Stint or qualifying segment</label>
-      <select id="segment"><option value="">Pick your stint</option></select>
+      <label for="segment" id="segLabel">Stint</label>
+      <select id="segment"><option value="">Pick one</option></select>
     </div>
     <label for="name">Your name</label>
     <input id="name" maxlength="24" autocomplete="nickname" placeholder="Letters, digits, spaces, _ . -">
@@ -56,50 +64,34 @@ li{margin-bottom:6px}
 
   <section id="runSec" hidden>
     <h2>2. Start the sender</h2>
-    <p class="note">Race Control approves your registration before the broadcast uses your
-      telemetry. Start the sender anyway: until then it prints <code>waiting for approval by
-      Race Control</code> and asks again every 10 seconds.</p>
-    <label for="console">PlayStation IP address</label>
-    <input id="console" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Needed on an iPhone">
-    <p class="dim">On an iPhone the sender's search for the PlayStation fails, so enter its
-      address here and the commands below include it. The PlayStation's network settings
-      show the address. An iPad was not tested. Elsewhere leave the field empty.</p>
-    <div id="consoleErr" class="err" role="alert" hidden></div>
-    <p>With Python 3.8 or newer: download
-      <a id="script" download="racecast-sender.py">racecast-sender.py</a>, open a terminal in
-      that folder and run, on macOS, Linux, Termux (Android) or a-Shell (iOS)</p>
-    <div class="cmd"><code id="cmdPy"></code><button data-copy="cmdPy">Copy</button></div>
-    <p>or on Windows</p>
-    <div class="cmd"><code id="cmdPyWin"></code><button data-copy="cmdPyWin">Copy</button></div>
-    <p>Without Python: download the <a id="winExe">Windows program</a> and run in its folder</p>
-    <div class="cmd"><code id="cmdWin"></code><button data-copy="cmdWin">Copy</button></div>
-    <p>or the <a id="macExe">macOS program</a>, once <code>chmod +x racecast-sender-macos</code>,
-      then</p>
-    <div class="cmd"><code id="cmdMac"></code><button data-copy="cmdMac">Copy</button></div>
-    <p class="dim">The code is yours for this event. If the producer renews the invite link,
-      register again here.</p>
+    <p class="dim">Race Control approves your registration. Until then the sender waits and asks again by itself.</p>
+    <label for="platform">The sender runs on</label>
+    <select id="platform">
+      <option value="win">Windows PC</option>
+      <option value="mac">Mac</option>
+      <option value="linux">Linux PC</option>
+      <option value="android">Android phone or tablet (Termux)</option>
+      <option value="ios">iPhone (a-Shell)</option>
+    </select>
+    <p id="getIt" class="step"></p>
+    <p class="step">Then run:</p>
+    <div class="cmd"><code id="cmd"></code><button data-copy="cmd">Copy</button></div>
+    <details id="ipBox">
+      <summary>PlayStation not found? Enter its IP address</summary>
+      <input id="console" aria-label="PlayStation IP address" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g. 192.168.1.20">
+      <p class="dim">Settings, Network, Connection status on the PlayStation shows it. The command above then includes it.</p>
+      <div id="consoleErr" class="err" role="alert" hidden></div>
+    </details>
+    <div id="statusBox" class="status" role="status" aria-live="polite">
+      <span id="statusPill" class="pill"></span>
+      <div><div id="statusText"></div><div id="statusWho" class="dim"></div></div>
+    </div>
+    <p class="dim">This browser remembers your registration.
+      <button id="forget" type="button" class="link">Register again</button></p>
   </section>
 
-  <section id="helpSec">
-    <h2>Which setup?</h2>
-    <ul>
-      <li><b>Nothing else receives your telemetry:</b> run the command as shown.</li>
-      <li><b>A dashboard app on your phone:</b> run the sender on a second device on the same
-        network, such as a PC, laptop or tablet. Two programs cannot share one device's
-        telemetry port, unless the app takes forwarded packets like those below.</li>
-      <li><b>SimHub on the same PC:</b> if SimHub forwards its UDP packets, add
-        <code>--listen PORT</code> with its forwarding port and leave SimHub as it is. Or add
-        <code>--forward 127.0.0.1:PORT</code> and set SimHub's game telemetry port to that
-        port, then restart SimHub.</li>
-      <li><b>GT Race Engineer, Coach Dave Delta or Sim-to-Motec on the same device:</b> add
-        <code>--forward 127.0.0.1:PORT</code> and enter the same port in the app (GT Race
-        Engineer: its forwarding setting, Delta: "Enable Custom Port", Sim-to-Motec: any
-        port other than 33740).</li>
-    </ul>
-    <p class="dim">A firewall that filters inbound UDP must allow port 33740, because the
-      console answers from a port of its own. On iOS keep a-Shell in front and the device charging.
-      The driver guide in the GT Racing Broadcast wiki covers every platform.</p>
-  </section>
+  <p class="help">SimHub, a dashboard app or another telemetry tool on the same device, or the sender
+    does not connect? The <a href="https://github.com/jegr78/gt-racing-broadcast/wiki/Driver-Telemetry" target="_blank" rel="noopener">driver guide</a> covers every setup.</p>
 </main>
 <script>
 (() => {
@@ -111,8 +103,11 @@ li{margin-bottom:6px}
   // A release build links its own programs; dev and preview builds the latest release.
   const release = /^v\d+\.\d+\.\d+$/.test(version) ? repo + 'download/' + version + '/' : repo + 'latest/download/';
   let multi = false;
-
   let registered = null;
+  let polling = null;
+  const KEY = 'racecast.drive.' + invite;
+  const POLL_MS = 3000, POLL_MAX_MS = 60000;
+  let pollMs = POLL_MS;
 
   function consoleProblem(ip) {
     const octet = '(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
@@ -128,16 +123,94 @@ li{margin-bottom:6px}
     if (consoleProblem(ip)) return false;
     return args + ' --console ' + ip;
   }
+  function guess() {
+    const ua = navigator.userAgent;
+    if (/iPhone|iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
+    if (/Android/.test(ua)) return 'android';
+    if (/Windows/.test(ua)) return 'win';
+    if (/Macintosh/.test(ua)) return 'mac';
+    return 'linux';
+  }
+  function link(href, text) {
+    const a = document.createElement('a');
+    a.href = href; a.textContent = text;
+    if (/^https:/.test(href)) { a.target = '_blank'; a.rel = 'noopener'; }
+    else a.download = text;
+    return a;
+  }
   function showCommands() {
     if (!registered) return;
+    const p = $('platform').value;
+    const py = link('/console/drive/sender.py?i=' + encodeURIComponent(invite), 'racecast-sender.py');
+    const parts = {
+      win: ['Download the ', link(release + 'racecast-sender-windows.exe', 'Windows program'), ' and open PowerShell in its folder.'],
+      mac: ['Download the ', link(release + 'racecast-sender-macos', 'Mac program'), ' and open Terminal in its folder.'],
+      linux: ['Download ', py, ' (needs Python 3.8 or newer) and open a terminal in its folder.'],
+      android: ['Install ', link('https://f-droid.org/packages/com.termux/', 'Termux from F-Droid'),
+                ' (the Play Store version is outdated), download ', py, ' and open Termux in its folder.'],
+      ios: ['Install ', link('https://apps.apple.com/app/a-shell/id1473805438', 'a-Shell from the App Store'),
+            ', download ', py, ' and open a-Shell in its folder. Keep a-Shell in front and the phone charging.']
+    }[p];
+    $('getIt').replaceChildren(...parts);
     let args = senderArgs(location.origin, registered, $('console').value);
     $('consoleErr').textContent = args === false ? consoleProblem($('console').value.trim()) : '';
     $('consoleErr').hidden = args !== false;
     if (args === false) args = senderArgs(location.origin, registered, '');
-    $('cmdPy').textContent = 'python3 racecast-sender.py ' + args;
-    $('cmdPyWin').textContent = 'py racecast-sender.py ' + args;
-    $('cmdWin').textContent = '.\\racecast-sender-windows.exe ' + args;
-    $('cmdMac').textContent = './racecast-sender-macos ' + args;
+    $('cmd').textContent = {win: '.\\racecast-sender-windows.exe ',
+      mac: 'chmod +x racecast-sender-macos; ./racecast-sender-macos ',
+      linux: 'python3 racecast-sender.py ', android: 'python3 racecast-sender.py ',
+      ios: 'python3 racecast-sender.py '}[p] + args;
+  }
+  function remember(saved) { try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) { /* private mode */ } }
+  function recalled() { try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { return null; } }
+  // What the page shows for one status answer: HTTP status and body (null without one).
+  // `stop` ends the polling, `forget` drops the remembered code.
+  function statusView(code, d) {
+    const STATES = {
+      pending: ['wait', 'Waiting', 'Race Control has your registration and decides shortly. Start the sender now: it waits by itself.'],
+      approved: ['info', 'Approved', 'Approved. Start the sender: the broadcast has no data from it yet.'],
+      receiving: ['ok', 'Live', 'The broadcast receives your telemetry.'],
+      quiet: ['wait', 'No data', 'No data from your sender for a while. Is it still running? The driver guide below helps.'],
+      rejected: ['bad', 'Rejected', 'Race Control rejected this registration. Check your entry and stint and register again.'],
+      disconnected: ['bad', 'Disconnected', 'Race Control disconnected this code. Register again.'],
+      dropped: ['bad', 'Dropped', 'This registration is no longer valid. Register again.']
+    };
+    if (code === 403) d = {state: 'dropped'};
+    const s = code === 200 || code === 403 ? STATES[d && d.state] : null;
+    if (!s) return {cls: '', label: 'Unknown', text: 'The status is not available right now. The sender works on regardless.',
+                    who: '', stop: false, forget: false, error: true};
+    const done = ['rejected', 'disconnected', 'dropped'].includes(d.state);
+    return {cls: s[0], label: s[1], who: [d.entry, d.segment, d.name].filter(Boolean).join(' \u00b7 '),
+            text: d.state === 'quiet' && d.quiet_s ? s[2].replace('for a while', 'for ' + d.quiet_s + ' s') : s[2],
+            stop: done, forget: done, error: false};
+  }
+  async function pollStatus() {
+    polling = null;
+    if (!registered) return;
+    if (document.hidden) { polling = setTimeout(pollStatus, pollMs); return; }
+    let code = 0, d = null;
+    try {
+      const r = await fetch('/console/drive/status?i=' + encodeURIComponent(invite),
+                            {cache: 'no-store', headers: {'X-Driver-Code': registered}});
+      code = r.status;
+      d = await r.json();
+    } catch (e) { d = null; }
+    const v = statusView(code, d);
+    $('statusPill').className = 'pill ' + v.cls;
+    $('statusPill').textContent = v.label;
+    $('statusText').textContent = v.text;
+    $('statusWho').textContent = v.who;
+    if (v.forget) { try { localStorage.removeItem(KEY); } catch (e) { /* private mode */ } }
+    if (v.stop) return;
+    pollMs = v.error ? Math.min(pollMs * 2, POLL_MAX_MS) : POLL_MS;
+    polling = setTimeout(pollStatus, pollMs);
+  }
+  function showRun() {
+    showCommands();
+    $('runSec').hidden = false;
+    clearTimeout(polling);
+    pollMs = POLL_MS;
+    pollStatus();
   }
   function fail(text) { $('err').textContent = text; $('err').hidden = !text; }
   function fill(select, values) {
@@ -154,6 +227,7 @@ li{margin-bottom:6px}
     fill($('entry'), d.entries || []);
     $('segBox').hidden = !multi;
     if (multi) fill($('segment'), d.segments);
+    if (d.mode === 'qualifying') $('segLabel').textContent = 'Qualifying segment';
     if (!(d.entries || []).length) {
       fail(d.roster === false ? 'The broadcast has no entry list: ask the producer.'
                               : 'The league has no entries in its Configuration tab yet.');
@@ -165,7 +239,7 @@ li{margin-bottom:6px}
     const body = {entry: $('entry').value, name: $('name').value.trim()};
     if (multi) body.segment = $('segment').value;
     if (!body.entry) return fail('Pick your entry.');
-    if (multi && !body.segment) return fail('Pick your stint or segment.');
+    if (multi && !body.segment) return fail($('segLabel').textContent === 'Stint' ? 'Pick your stint.' : 'Pick your segment.');
     if (!/^[A-Za-z0-9 _.\-]{1,24}$/.test(body.name)) return fail('Use up to 24 letters, digits, spaces, _ . - for your name.');
     let d, r;
     try {
@@ -175,14 +249,33 @@ li{margin-bottom:6px}
     } catch (e) { return fail('The broadcast is not reachable.'); }
     if (!r.ok || !d.ok) return fail(d.error || 'Registration failed.');
     registered = d.code;
-    showCommands();
-    $('script').href = '/console/drive/sender.py?i=' + encodeURIComponent(invite);
-    $('winExe').href = release + 'racecast-sender-windows.exe';
-    $('macExe').href = release + 'racecast-sender-macos';
-    $('runSec').hidden = false;
+    $('platform').value = guess();
+    remember({code: d.code, platform: $('platform').value});
+    showRun();
     $('runSec').scrollIntoView({behavior: 'smooth', block: 'start'});
   });
   $('console').addEventListener('input', showCommands);
+  $('platform').addEventListener('change', () => {
+    showCommands();
+    if (registered) remember({code: registered, platform: $('platform').value});
+  });
+  $('forget').addEventListener('click', () => {
+    try { localStorage.removeItem(KEY); } catch (e) { /* private mode */ }
+    registered = null;
+    clearTimeout(polling);
+    polling = null;
+    $('runSec').hidden = true;
+    $('regSec').scrollIntoView({behavior: 'smooth', block: 'start'});
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && registered && polling) { clearTimeout(polling); pollStatus(); }
+  });
+  const saved = recalled();
+  if (saved && typeof saved.code === 'string') {
+    registered = saved.code;
+    $('platform').value = ['win', 'mac', 'linux', 'android', 'ios'].includes(saved.platform) ? saved.platform : guess();
+    showRun();
+  }
   document.addEventListener('click', e => {
     const id = e.target.dataset && e.target.dataset.copy;
     if (id) navigator.clipboard.writeText($(id).textContent).then(() => {

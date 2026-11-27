@@ -24,13 +24,20 @@ epic #1109.
 `GET /console/drive/data?i=<invite>` returns
 
 ```json
-{"v": 1, "multi_lobby": false, "entries": ["OVO eSports #111"], "segments": [], "rate_hz": 20}
+{"v": 1, "multi_lobby": false, "entries": ["OVO eSports #111"], "segments": [], "rate_hz": 20, "mode": "race"}
 ```
 
 `entries` are the rows of the league's `Configuration` tab; `roster` is false when the
 relay runs without the HUD and so has no entry list. `multi_lobby` is true for
-endurance; `segments` then lists the stint and qualifying labels of the `Schedule` and
-`Qualifying` tabs, and registration needs one of them.
+endurance; `segments` then lists the labels of the event mode on air (`mode`): the
+`Schedule` tab's stints in a race, the `Qualifying` tab's segments in qualifying.
+Registration needs a label of either tab, so a desk correction can still move it.
+
+`GET /console/drive/status?i=<invite>` with the code in `X-Driver-Code` answers where
+the code's registration stands, for the invite page: `{"state", "entry", "segment",
+"name", "quiet_s"}`, `state` one of `pending`, `rejected`, `approved` (no batch yet),
+`receiving`, `quiet` (no batch for 10 s, `quiet_s` the seconds), `disconnected` or
+`dropped`. An invalid code is a 403 like the ingest's.
 
 `POST /console/drive/register?i=<invite>` with
 `{"entry": "...", "segment": "...", "name": "..."}` returns `{"ok": true, "v": 1,

@@ -12495,6 +12495,7 @@ _CONSOLE_PAGE_GETS = frozenset({(), ("cockpit",), ("panel",),
 # after the /console gate answered it).
 MAX_POST_BODY = 65536
 DRIVE_REGISTER_PER_MIN = 30   # registrations per client and minute
+DRIVE_QUIET_S = 10.0          # a sender without a batch for this long shows as quiet on its page
 
 
 def drive_client_key(peer, headers):
@@ -12629,6 +12630,16 @@ def _stop_timing_publisher(pub, timeout=1.0):
     pub.thread.join(timeout)
 
 
+def segment_labels(source):
+    """The stint labels of a ScheduleSource's rows, in sheet order, each once."""
+    out = []
+    for row in source.get_rows() if source else []:
+        label = (row[2] or "").strip()
+        if label and label not in out:
+            out.append(label)
+    return out
+
+
 def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_dir=None,
                  timer_store=None, setup_ctl=None, overlay_dir=None,
                  chat_store=None, cue_store=None, preview_path=None, graphics_dir=None,
@@ -12649,7 +12660,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  intermission_runtime_path=None, audience_runtime=None, youtube_service=None, twitch_service=None, radio_service=None, radio_native=None,
                  event_documents_source=None, browser_hosts=(), track_pick=None,
                  telemetry_probe_obj=None, driver_hub=None, driver_invite_path=None,
-                 drive_page_path=None, sender_script_path=None, driver_segments=None,
+                 drive_page_path=None, sender_script_path=None, driver_segments=None, driver_mode_segments=None,
                  driver_desk_path=None, race_snapshot_page_path=None,
                  driver_race_svc=None, timing_link_path=None, timing_page_path=None,
                  timing_publisher=None, funnel_host=None, league_exporter=None,
@@ -15399,12 +15410,15 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return self._send_page(drive_page_path, "/console")
             if rest == ["data"] and method == "GET":
                 multi = not relay.solo
+                listed = driver_mode_segments or driver_segments
                 return self._send({
                     "v": driver_ingest.CONTRACT, "multi_lobby": multi,
                     "roster": hud_source is not None,
                     "entries": hud_source.roster_names() if hud_source else [],
-                    "segments": (driver_segments() if driver_segments else []) if multi else [],
-                    "rate_hz": hub.rate_hz}, no_store=True)
+                    "segments": (listed() if listed else []) if multi else [],
+                    "rate_hz": hub.rate_hz, "mode": relay.mode}, no_store=True)
+            if rest == ["status"] and method == "GET":
+                return self._drive_status(invite, hub)
             if rest == ["sender.py"] and method == "GET":
                 return self._send_file(sender_script_path, "text/x-python; charset=utf-8")
             if rest == ["register"] and method == "POST":
@@ -15449,6 +15463,30 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return self._send({"ok": True, "code": issued, "pending": True,
                                    "v": driver_ingest.CONTRACT}, no_store=True)
             return self._drive_refuse(404, "not found")
+
+        def _drive_status(self, invite, hub):
+            """Where the driver's own registration stands, for the invite page."""
+            reg = driver_invite.verify(invite, self.headers.get("X-Driver-Code"))
+            if reg is None:
+                return self._drive_refuse(403, "invalid or revoked code: register again on the invite page")
+            req = _requests.get(reg["conn"])
+            if req is None and not _requests.was_evicted(reg["conn"]):
+                return self._drive_refuse(403, "unknown registration: register again on the invite page")
+            idle = hub.idle_s(reg["conn"])
+            if _requests.was_disconnected(reg["conn"]):
+                state = "disconnected"
+            elif req is None:
+                state = "dropped"
+            elif req["status"] in ("pending", "rejected"):
+                state = req["status"]
+            elif idle is None:
+                state = "approved"
+            else:
+                state = "receiving" if idle < DRIVE_QUIET_S else "quiet"
+            shown = req or reg
+            return self._send({"state": state, "entry": shown.get("entry"), "segment": shown.get("segment"),
+                               "name": shown.get("name"),
+                               "quiet_s": round(idle) if state == "quiet" else None}, no_store=True)
 
         def _probe_ingest(self, method):
             probe = telemetry_probe_obj
@@ -17536,6 +17574,9 @@ def main():
                 if label and label not in out:
                     out.append(label)
         return out
+    def driver_mode_segments():
+        """The labels of the event mode on air: the stints in a race, the segments in qualifying."""
+        return segment_labels(relay.source)
     radio_link = getattr(engineer_live, "radio_link", None)
     def radio_snapshot():
         snapshot = engineer_live.snapshot() if engineer_live is not None else {}
@@ -17619,7 +17660,7 @@ def main():
         driver_hub=driver_hub, driver_invite_path=driver_invite.path_in(runtime),
         drive_page_path=drive_page_path, sender_script_path=sender_script_path,
         driver_desk_path=driver_desk_path, race_snapshot_page_path=race_snapshot_page_path,
-        driver_segments=driver_segments, driver_race_svc=race_svc, league_exporter=league_exporter, league_live=league_live,
+        driver_segments=driver_segments, driver_mode_segments=driver_mode_segments, driver_race_svc=race_svc, league_exporter=league_exporter, league_live=league_live,
         timing_link_path=timing_link.path_in(runtime), timing_page_path=timing_page_path,
         timing_publisher=lambda **fns: timing_pubs.append(
             _start_timing_publisher(timing_go, stop_evt, **fns)) or timing_pubs[-1],

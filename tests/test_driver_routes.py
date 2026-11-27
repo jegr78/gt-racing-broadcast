@@ -312,7 +312,7 @@ def t_invite_page_data_register_and_ingest_in_a_single_lobby():
         code, text, _h = _req(port, f"/console/drive/data?i={invite}")
         data = json.loads(text)
         assert data == {"v": 1, "multi_lobby": False, "roster": True, "entries": ENTRIES,
-                        "segments": [], "rate_hz": 20}, data
+                        "segments": [], "rate_hz": 20, "mode": "race"}, data
         assert "https://" not in text, "the invite data carries no stream URLs"
         code, text, _h = _req(port, f"/console/drive/sender.py?i={invite}")
         assert code == 200 and "racecast relay" in text, code
@@ -340,6 +340,64 @@ def t_invite_page_data_register_and_ingest_in_a_single_lobby():
         code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})
         assert code == 403 and "register again" in text, (code, text)
         assert _req(port, f"/console/drive/data?i={invite}")[0] == 403, "the old link is dead"
+    finally:
+        srv.shutdown()
+
+
+def t_the_invite_data_lists_the_segments_of_the_event_mode_only():
+    srv, port, path, _hub = _serve(solo=False, segments=["Stint 1", "Stint 2", "Q1"],
+                                   driver_mode_segments=lambda: ["Q1"])
+    try:
+        invite = driver_invite.create(path)["id"]
+        data = json.loads(_req(port, f"/console/drive/data?i={invite}")[1])
+        assert data["segments"] == ["Q1"] and data["mode"] == "race", \
+            f"qualifying offers only its segments, the race only its stints: {data}"
+    finally:
+        srv.shutdown()
+
+
+def t_the_invite_lists_each_label_of_the_mode_source_once_in_sheet_order():
+    class Source:
+        def get_rows(self):
+            return [("u", "A", "Stint 1", 2), ("u", "B", " Stint 2 ", 3), ("", "", "", 4), ("u", "C", "Stint 1", 5)]
+    assert g.m.segment_labels(Source()) == ["Stint 1", "Stint 2"]
+    assert g.m.segment_labels(None) == [], "no source (a relay without the tab) lists nothing"
+
+
+def t_a_driver_follows_the_registration_from_waiting_to_live():
+    now = [1000.0]
+    srv, port, path, _hub = _serve(clock=lambda: now[0])
+    try:
+        invite = driver_invite.create(path)["id"]
+        issued = json.loads(_register(port, invite, entry="Team A #1", name="Max")[1])["code"]
+        conn = _conn_of(path, issued)
+
+        def status(code=issued, link=invite):
+            st, text, h = _req(port, f"/console/drive/status?i={link}", headers={"X-Driver-Code": code})
+            return st, (json.loads(text) if text.startswith("{") else text), h
+        st, body, h = status()
+        assert st == 200 and body == {"state": "pending", "entry": "Team A #1", "segment": None, "name": "Max",
+                                      "quiet_s": None}, body
+        assert "no-store" in h.get("Cache-Control", ""), "a status is never cached"
+        assert _post(port, "/drivers/requests/approve", {"conn": conn})[0] == 200
+        assert status()[1]["state"] == "approved", "approved, no data from the sender yet"
+        batch = tp.encode_batch([_wire(1)])
+        assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})[0] == 200
+        assert status()[1]["state"] == "receiving"
+        now[0] += 30.0
+        body = status()[1]
+        assert body["state"] == "quiet" and body["quiet_s"] == 30, body
+        assert _post(port, "/drivers/disconnect", {"conn": conn})[0] == 200
+        assert status()[1]["state"] == "disconnected"
+        other = json.loads(_register(port, invite, entry="Team B #2", name="Ann")[1])["code"]
+        assert _post(port, "/drivers/requests/reject", {"conn": _conn_of(path, other)})[0] == 200
+        assert status(other)[1]["state"] == "rejected"
+        first = json.loads(_register(port, invite, entry="Team B #2", name="Lea")[1])["code"]
+        for name in ("Lea", "Lea", "Lea"):
+            assert _register(port, invite, entry="Team B #2", name=name)[0] == 200
+        assert status(first)[1]["state"] == "dropped", "a waiting registration the client's cap dropped says so"
+        assert status("D1:forged.sig")[0] == 403, "a code the invite did not sign sees nothing"
+        assert status(link="x")[0] == 403, "the invite link is checked first"
     finally:
         srv.shutdown()
 

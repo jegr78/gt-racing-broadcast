@@ -253,6 +253,27 @@ def t_long_quiet_connections_are_forgotten_with_their_side_state():
         ("a sender coming back after the sweep must keep the producer's correction", back)
 
 
+def t_a_forgotten_sender_still_reports_how_long_it_has_been_quiet():
+    hub, clock = _hub()
+    assert hub.idle_s("c1") is None, "before its first batch a sender has no idle time"
+    hub.ingest(_reg("c1"), _batch(1), None)
+    clock.t += ing.FORGET_S + 5
+    assert hub.connections() == [] and hub.idle_s("c1") == ing.FORGET_S + 5, \
+        "its invite page says quiet, never approved without data"
+    hub.reset()
+    assert hub.idle_s("c1") is None
+
+
+def t_last_batch_records_are_bounded():
+    clock = _Clock()
+    hub = ing.Hub(multi_lobby=lambda: False, clock=clock, max_connections=2)
+    for i in range(20):
+        hub.ingest(_reg(f"c{i}", entry=f"E{i}"), _batch(1), None)
+        clock.t += ing.FORGET_S + 1
+        hub.connections()
+    assert len(hub._seen) <= 4 * 2, f"last batch times must not grow without bound: {len(hub._seen)}"
+
+
 def t_reassignment_records_are_bounded():
     clock = _Clock()
     hub = ing.Hub(multi_lobby=lambda: False, clock=clock, max_connections=2)

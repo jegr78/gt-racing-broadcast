@@ -49,6 +49,7 @@ class Hub:
                                              on_sample=self._sample if on_sample else None)
         self._lock = threading.Lock()
         self._conns = {}        # conn -> {entry, segment, name, last}
+        self._seen = {}         # conn -> its last batch, kept after FORGET_S for the invite page
         self._dropped = {}         # conn -> None, oldest first
         self._hook_failed = set()
         self._reassigned = {}      # conn -> entry the producer moved it to
@@ -116,6 +117,10 @@ class Hub:
                 held = self._conns.get(conn)
                 self._conns[conn] = {"entry": entry, "segment": reg.get("segment"),
                                      "name": reg["name"], "last": now}
+                self._seen.pop(conn, None)
+                self._seen[conn] = now
+                while len(self._seen) > 4 * self._max:
+                    self._seen.pop(next(iter(self._seen)))
         finally:
             for stale in forgotten:     # also when the batch is refused
                 self._counts.forget(stale)
@@ -204,6 +209,7 @@ class Hub:
 
     def _clear(self):
         self._conns.clear()
+        self._seen.clear()
         self._dropped.clear()
         self._reassigned.clear()
         self._hook_failed.clear()
@@ -212,6 +218,12 @@ class Hub:
         with self._lock:
             self._clear()
         self._counts.reset()
+
+    def idle_s(self, conn):
+        """Seconds since `conn`'s last batch, None before its first."""
+        with self._lock:
+            last = self._seen.get(conn)
+            return None if last is None else self._clock() - last
 
     def connections(self):
         self._follow_invite()

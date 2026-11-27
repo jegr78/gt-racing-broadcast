@@ -10,11 +10,18 @@ it does not change what the PlayStation or your other apps do.
 ## Get your command
 
 1. Open the invite link the producer shares for the event.
-2. Pick your entry and, in an endurance race, your stint or qualifying segment.
+2. Pick your entry and, in an endurance race, your stint. In qualifying the list offers
+   the qualifying segments, in the race only the stints.
 3. Type your name (up to 24 letters, digits, spaces, `_ . -`; your PSN Online ID fits) and
    press **Get my sender command**.
+4. Pick the device the sender runs on. The page preselects the one you opened it on and
+   shows what to download, with the store link for Termux or a-Shell, and one command
+   with your personal code.
 
-The page shows a command with your personal code. Your registration is a request.
+The page then shows where your registration stands: **Waiting**, **Approved** (no data
+from the sender yet), **Live**, **No data** (the sender went quiet), **Rejected** or
+**Disconnected**. The browser remembers the registration, so the page shows it again
+after a reload; **Register again** forgets it. Your registration is a request.
 Race Control or the director compares it with the car in the GT7 lobby and approves it,
 and only then does the relay use your telemetry. Start the sender right away anyway.
 Until the approval it prints `waiting for approval by Race Control` and asks again every
@@ -115,16 +122,16 @@ sender keeps open through Funnel and opens again after an error. A proxy set in 
 system or in `HTTPS_PROXY` carries it through a tunnel, and the sender still checks the
 relay's certificate.
 
-- **Windows.** With Python 3.8 or newer from python.org, download
-  `racecast-sender.py` from the invite page and run the Windows Python command (`py
-  racecast-sender.py ...`) in a terminal in that folder. Without Python, download the
-  Windows program and run the `.\racecast-sender-windows.exe ...` command in its folder.
+- **Windows.** Download the Windows program and run the `.\racecast-sender-windows.exe ...`
+  command in its folder. With Python 3.8 or newer from python.org you can run the script
+  instead: pick **Linux PC** on the invite page for its link and command, then run that
+  command with `py` in place of `python3`.
   The program is not signed: SmartScreen shows
   "Windows protected your PC", choose **More info → Run anyway**. When Windows asks
   whether to allow the program on networks, allow **private networks**.
-- **macOS.** Python 3 from python.org with the `python3 racecast-sender.py ...` command,
-  or the macOS program: run `chmod +x racecast-sender-macos` once, then the
-  `./racecast-sender-macos ...` command. The program is not signed: macOS refuses the
+- **macOS.** The macOS program: the page's command runs `chmod +x racecast-sender-macos`
+  and then the program. With Python 3 from python.org, pick **Linux PC** for the script
+  and its `python3 racecast-sender.py ...` command instead. The program is not signed: macOS refuses the
   first start, then open **System Settings → Privacy & Security** and choose **Open
   Anyway**. With the macOS firewall on, allow incoming connections when it asks. With
   it off, nothing asks.
