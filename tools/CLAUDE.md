@@ -1098,7 +1098,7 @@ Spec: `docs/superpowers/specs/2026-11-24-event-walkthrough-video-design.md`.
 
 ```bash
 python3 tools/event-sim/event_sim.py --scenario full --record DIR --obs real --out OUT
-python3 tools/build-event-video.py DIR [--music TRACK...] [--workers N] [--from T] [--to T]
+python3 tools/build-event-video.py DIR [--music TRACK]... [--workers N] [--from T] [--to T]
 ```
 
 - Machine: recording runs on the maintainer Mac (Apple M3, 8 cores, 16 GB). The Linux box
@@ -1115,9 +1115,9 @@ python3 tools/build-event-video.py DIR [--music TRACK...] [--workers N] [--from 
   per recording of `full`, about 25 GB in all) and checks the free disk before it starts.
   `--from`/`--to` (seconds, `m:ss` or `h:mm:ss`) render a part of the film, named
   `event-walkthrough-<a>s-<b>s.mp4`. A killed render resumes from its finished segments.
-  `--music` takes one or more tracks: they play quietly in the given order, each
-  crossfading into the next (3 s), and repeat until the film ends. Without it the film
-  is silent.
+  `--music` names one track and repeats for more: they play quietly in the given order,
+  each crossfading into the next (3 s), and repeat until the film ends. The tracks are
+  checked before the capture starts. Without it the film is silent.
 - Title cards: the intro (5 s), a card before each chapter whose step has one (3 s) and
   the outro (6 s) add film time and play no source time. A recording whose timeline has no
   card takes them from `tools/event-sim/scenarios/<scenario>.toml`, so an older recording

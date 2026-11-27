@@ -1374,7 +1374,8 @@ def t_the_cli_writes_into_runtime_event_video_run_and_reads_times():
 
 
 def t_the_cli_takes_several_music_tracks_and_refuses_a_missing_one():
-    assert cli.parse_args(["/x/r", "--music", "a.mp3", "b.mp3"]).music == ["a.mp3", "b.mp3"]
+    assert cli.parse_args(["--music", "a.mp3", "--music", "b.mp3", "/x/r"]).music == ["a.mp3", "b.mp3"], \
+        "the option repeats per track, so a record dir after it stays the record dir"
     with tempfile.TemporaryDirectory() as tmp:
         rec = os.path.join(tmp, "rec")
         os.makedirs(rec)
@@ -1384,9 +1385,23 @@ def t_the_cli_takes_several_music_tracks_and_refuses_a_missing_one():
         open(track, "w").close()
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            code = cli.main([rec, "--out", os.path.join(tmp, "out"), "--music", track, os.path.join(tmp, "gone.mp3")],
+            code = cli.main([rec, "--out", os.path.join(tmp, "out"), "--music", track, "--music", os.path.join(tmp, "gone.mp3")],
                             render=lambda *a, **k: 0)
         assert code == 2 and "gone.mp3" in err.getvalue() and "a.mp3" not in err.getvalue(), err.getvalue()
+
+
+def t_an_unusable_music_track_stops_the_render_before_any_capture():
+    calls = []
+    saved = fr.music_bed, fr.transcode_all
+    fr.music_bed = lambda *a, **k: None
+    fr.transcode_all = lambda *a, **k: calls.append("transcode") or ({}, {})
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            code = fr.render(plan(), timeline(), tmp, os.path.join(tmp, "out"), (0, 10), music=["a.mp3", "b.mp3"],
+                             log=lambda *_: None)
+    finally:
+        fr.music_bed, fr.transcode_all = saved
+    assert code == 1 and calls == [], f"the bed is checked before the recording is transcoded: {code} {calls}"
 
 
 def t_an_unreadable_music_track_stops_the_bed_with_its_name():

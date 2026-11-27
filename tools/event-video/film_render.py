@@ -402,6 +402,14 @@ def render(plan, timeline, rec_dir, out_dir, frames, workers=4, music=None, opti
     out_dir = os.path.abspath(out_dir)
     work = os.path.join(out_dir, "work")
     media = os.path.join(work, "media")
+    a, b = frames
+    if isinstance(music, (list, tuple)) and len(music) > 1:
+        os.makedirs(work, exist_ok=True)
+        music = music_bed(music, (b - a) / plan.fps, work, list(ffmpeg), list(ffprobe), log=log)
+        if music is None:
+            return 1
+    elif isinstance(music, (list, tuple)):
+        music = music[0] if music else None
     try:
         urls, durations = transcode_all(plan, rec_dir, media, list(ffmpeg), list(ffprobe), workers, log=log)
     except RuntimeError as exc:
@@ -410,7 +418,6 @@ def render(plan, timeline, rec_dir, out_dir, frames, workers=4, music=None, opti
     plan = fp.Plan(timeline, durations=durations, available=set(urls), **options)
     seg_dir = os.path.join(work, "segments", plan_key(timeline, options, durations))
     os.makedirs(seg_dir, exist_ok=True)
-    a, b = frames
     segs = [(x, y, os.path.join(seg_dir, f"seg-{x:07d}-{y:07d}.mp4")) for x, y in segments(a, b)]
     todo = pending(segs)
     codes = []
@@ -442,12 +449,6 @@ def render(plan, timeline, rec_dir, out_dir, frames, workers=4, music=None, opti
     whole = (a, b) == (0, plan.frames)
     name = FILM if whole else f"event-walkthrough-{int(a / plan.fps)}s-{int(b / plan.fps)}s.mp4"
     out = os.path.join(out_dir, name)
-    if isinstance(music, (list, tuple)) and len(music) > 1:
-        music = music_bed(music, (b - a) / plan.fps, work, list(ffmpeg), list(ffprobe), log=log)
-        if music is None:
-            return 1
-    elif isinstance(music, (list, tuple)):
-        music = music[0] if music else None
     done = subprocess.run(final_argv(list(ffmpeg), concat, out, (b - a) / plan.fps, music=music),
                           capture_output=True, text=True, errors="replace")
     if done.returncode != 0:
