@@ -463,9 +463,10 @@ class Plan:
         return {v: sorted(lst) for v, lst in by.items()}
 
     def _open_at(self, view, s):
-        """True while a recording of `view` runs at source time s (a closed page has an `end`)."""
-        return any(r["view"] == view and r.get("file") and r["start"] <= s
-                   and (r.get("end") is None or s < r["end"]) for r in self.recordings)
+        """True while a shown recording of `view` runs at source time s (a closed page has an `end`)."""
+        return any(self.recordings[n]["start"] <= s and (self.recordings[n].get("end") is None
+                                                         or s < self.recordings[n]["end"])
+                   for _start, n in self._by_view.get(view, ()))
 
     # time
 
@@ -552,8 +553,8 @@ class Plan:
         view holds a place on the stage only while its page is open."""
         caps = [s for s in self.steps if s.get("caption")]
         shown = [self._marks[s["id"]]["shown"] for s in caps]
-        edges = [e for r in self.recordings if r.get("file") and r["view"] in self.views
-                 for e in (r["start"], r.get("end")) if e is not None and e > self.t0]
+        edges = [e for v in self.views for _start, n in self._by_view.get(v, ())
+                 for e in (self.recordings[n]["start"], self.recordings[n].get("end")) if e is not None and e > self.t0]
         times = sorted({0.0, *shown, *(self.out_time(min(e, self.t1)) for e in edges)})
         switches, layout, present = [], Layout(()), None
         for t in times:

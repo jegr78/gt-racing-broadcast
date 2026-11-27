@@ -1720,14 +1720,8 @@ caption = "The stint 3 lobby opens for the last laps of the restart lobby: the s
 focus = ["race_control", "program"]
 
 [[step]]
-id = "cockpit3_back"
-at = "after:open3"
-role = "commentator:Comms 3"
-do = "open"
-expect = ["not page('commentator:Comms 3').on_air"]
-[[step]]
 id = "box3"
-at = "after:cockpit3_back"
+at = "after:open3"
 role = "drivers"
 do = "box"
 args = { leader_first = true, laps = "${take_plan.laps}" }
@@ -1735,8 +1729,16 @@ caption = "The cars come into the box at the end of the restart lobby's second t
 focus = ["race_control", "program"]
 
 [[step]]
-id = "leader_box3"
+id = "cockpit3_back"
 at = "after:box3"
+role = "commentator:Comms 3"
+do = "open"
+expect = ["not page('commentator:Comms 3').on_air"]
+timeout = "20s"
+
+[[step]]
+id = "leader_box3"
+at = "after:cockpit3_back"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }

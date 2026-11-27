@@ -467,6 +467,8 @@ def t_a_closed_page_leaves_the_stage_until_it_opens_again():
     assert _present(_at(p, 360.0), "producer"), "it comes back with its next recording"
     rec, _t = _at(p, 360.0)["sources"]["producer"]
     assert p.recordings[rec]["file"] == "pages/producer/page@2.webm"
+    missing = fp.Plan(tl, available=set(range(len(tl["recordings"]))) - {len(tl["recordings"]) - 1})
+    assert not _present(_at(missing, 360.0), "producer"), "a reopened page without its transcode takes no place"
 
 
 def t_a_missing_transcode_of_a_reopened_page_shows_the_earlier_recording():

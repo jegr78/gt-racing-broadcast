@@ -574,6 +574,14 @@ def t_a_plain_page_without_a_browser_is_skipped_and_masks_the_links_in_a_shot():
         assert "browser" in str(exc)
     else:
         raise AssertionError("a page without a browser is a skip, which --no-skips can fail")
+    for cls in (builtin.PageRole, party.ProducerRole):
+        role, _, _ = make(cls, "page:x" if cls is builtin.PageRole else None, browser=False)
+        try:
+            role.do("close", {})
+        except roles.Unavailable as exc:
+            assert "browser" in str(exc), exc
+        else:
+            raise AssertionError(f"{cls.__name__}: close without a browser is a skip too")
     role, page, _ = make(builtin.PageRole, "page:x")
     role.do("open", {"path": "/panel"})
     role.shot("p.png")

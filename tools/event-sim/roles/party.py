@@ -933,6 +933,8 @@ class RaceControlRole(LiveColumn, Surface):
                 self.pg.wait_for_timeout(seconds * 1000)
         finally:
             tab.close()
+            if rec:
+                rec.page_closed(f"{self.name}:{self.tabs[0]}")
         return {"entry": entry, "rows": rows}
 
     def act_final_lap(self, args):

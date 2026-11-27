@@ -144,7 +144,7 @@ def t_the_standings_tab_is_its_own_recording_and_stays_open_for_its_hold():
     page.add('.dd tr:has(div:text-is("B #2")) button[data-label="Show standings"]', on_click=click)
     assert role.do("show_standings", {"entry": "B #2", "seconds": 8}) == {"entry": "B #2", "rows": 14}
     assert rec.recordings[-1] == {"view": "race_control:standings", "kind": "page", "file": "pages/race_control/b.webm",
-                                  "size": dict(role.viewport), "at": 60.0}, rec.recordings
+                                  "size": dict(role.viewport), "at": 60.0, "end": 60.0}, rec.recordings
     assert tab.closed and page.clock.t - opened["t"] >= 8, "the tab stays in view for the step's hold, then closes"
     fails = []
     for bad in (0, "8", 301):

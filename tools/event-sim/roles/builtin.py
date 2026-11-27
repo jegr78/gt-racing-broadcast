@@ -362,6 +362,8 @@ class PageRole(Role):
         """The page closes, which ends its recording; a later `open` starts both anew. Its
         script errors so far are still reported when the role closes."""
         if self.context is None:
+            if self.ctx.browser() is None:
+                raise Unavailable(f"a page needs a browser: {self.ctx.browser_problem()}")
             raise StepError("close: the page is not open")
         if self.tracing:
             try:

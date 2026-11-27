@@ -808,8 +808,8 @@ run, remove that path. Never clean up `/tmp/racecast-sim-*` or
 
 One class per party. A page role opens its page in its own browser context on its first
 action and acts on the controls a person uses; the drivers have no page. Every page role
-also has `close`: the page and its recording end, the film takes the view off the stage, and
-the role's next action opens both anew. The full scenario closes the producer, the driver
+also has `close`. It ends the page and its recording, the film takes the view off the stage,
+and the role's next action opens both anew. The full scenario closes the producer, the driver
 page and each cockpit while the film does not need them, so a record run encodes fewer pages
 at a time.
 
