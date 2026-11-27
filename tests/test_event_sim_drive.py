@@ -388,6 +388,56 @@ def t_a_car_that_rejoined_the_lobby_boxes_at_its_next_pit_entry():
         f"the rejoined car boxes at the first pit entry after it left the box, not after lap 2 of its new session: {boxed}"
 
 
+def t_after_the_chequered_flag_each_car_stops_sending_once_it_crosses_the_line():
+    wire = Wire()
+    f = field(wire, cars=3)
+    f.start()
+    lead = f.car(TEAMS[0])
+    assert run(f, wire, 600.0, lambda: lead.lap >= 2)
+    at = {c.entry: c.lap for c in f.cars}
+    f.chequer(done=[TEAMS[0]])
+    assert lead.mode == "off", "a car that already took the flag stops at once"
+    assert run(f, wire, 300.0, lambda: all(c.mode == "off" for c in f.cars)), "every car finishes its lap"
+    for k, c in enumerate(f.cars[1:], 1):
+        assert wire.last(f"c{k}s0")["lap"] == at[c.entry] + 1, \
+            f"{c.entry} sends the crossing of the line, then nothing: {wire.last(f'c{k}s0')} {at}"
+    sent = {k: wire.count(f"c{k}s0") for k in range(3)}
+    run(f, wire, 5.0)
+    assert {k: wire.count(f"c{k}s0") for k in range(3)} == sent, "the senders stay quiet"
+
+
+def t_a_crossing_in_a_catch_up_step_is_still_sent_before_the_car_stops():
+    wire = Wire()
+    f = field(wire, cars=2)
+    f.start()
+    assert run(f, wire, 600.0, lambda: f.cars[1].lap >= 1)
+    at = f.cars[1].lap
+    f.chequer()
+    tick, crossed = 0, False
+    while f.cars[1].mode != "off" and tick < 5000:
+        tick += 1
+        wire.now += drive.TICK_S
+        f.step(wire.now, drive.TICK_S, post=crossed)            # the crossing falls in a step that posts nothing
+        crossed = crossed or f.cars[1].lap > at
+    assert wire.last("c1s0")["lap"] == at + 1, \
+        f"the crossing reaches the relay although it fell in a step that posts nothing: {wire.last('c1s0')}"
+
+
+def t_a_finished_car_keeps_its_place_in_gt7s_order():
+    wire = Wire()
+    f = field(wire, cars=3)
+    f.positions = True
+    f.start()
+    lead = f.car(TEAMS[0])
+    assert run(f, wire, 600.0, lambda: lead.lap >= 2)
+    order = sorted(f.cars, key=lambda c: -c.odo)
+    f.chequer(done=[order[0].entry])
+    run(f, wire, 2.0)
+    k = TEAMS.index(order[1].entry)
+    assert wire.last(f"c{k}s0")["position"] == 2, \
+        f"the car behind the winner stays P2 in GT7's order after the winner stops: {wire.last(f'c{k}s0')}"
+
+
 def t_a_keep_restart_releases_each_car_by_its_given_gap():
     wire = Wire()
     f = field(wire, cars=3)

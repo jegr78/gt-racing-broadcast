@@ -478,7 +478,9 @@ It never carries connection ids, corrections or who made them.
   Dashboard** in the Stint and Splitscreen scenes (Program in the solo collections). It shows a timing
   tower of up to 20 entries (see **Tower rows** below), the lap against the lap count (or the race timer's
   remaining time), the fastest lap and a track map with each car as a numbered dot in
-  its entry colour. Dots sit on the racing line; in a close pack a dot slides back
+  its entry colour. A car that has finished leaves the map, although GT7 keeps it driving; this holds for
+  every track map, on the Race Control desk and in the Commentator Cockpit too. An estimated
+  car stays, as it does on the tower. Dots sit on the racing line; in a close pack a dot slides back
   along the line to stay readable, never past the car behind, and otherwise lies under
   the dot ahead. Without a racing line for the layout the map stays empty, and the
   overlay asks again every 10 seconds, so a line downloaded later appears without a

@@ -359,7 +359,7 @@ def t_the_registry_has_every_party_and_its_actions():
             "commentator": {"open", "hold", "submit_link", "chat", "fit", "view"},
             "viewer": {"open", "hold", "read"},
             "driver": {"open", "hold", "register"},
-            "drivers": {"register", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop"},
+            "drivers": {"register", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop", "chequer"},
             "probe": {"watch", "mark", "kit", "race_reset", "spectator", "stop_spectator", "check", "report"}}
     for kind, actions in want.items():
         assert kind in REG, f"role {kind} is not registered"
@@ -1978,6 +1978,23 @@ def t_driver_actions_reach_the_field():
     assert role.page()["sending"] == 0
     leftover = role.close()
     assert leftover == [], leftover
+
+
+def t_the_chequered_flag_stops_the_finished_cars_now_and_the_rest_at_the_line():
+    role = drivers_role()
+    role.do("register", {"stints": 1})
+    role.do("start", {})
+    teams = drive.roster(3)
+    rows = [{"entry": teams[0], "finished": True}, {"entry": teams[1], "finished": False}, {"entry": "Gone #9"}]
+    saved = drivers.probes.http_json
+    drivers.probes.http_json = lambda base, path: (200, {"entries": rows}) if path == "/drivers/race" else (404, {})
+    try:
+        out = role.do("chequer", {})
+    finally:
+        drivers.probes.http_json = saved
+    assert out == {"finished": [teams[0]]}, out
+    assert role.field.chequered and role.field.car(teams[0]).mode == "off", "the winner stops at once"
+    assert role.field.car(teams[1]).mode != "off", "a car still on its last lap drives on to the line"
 
 
 def t_the_drivers_thread_sends_and_ends_with_the_role():

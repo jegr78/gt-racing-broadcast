@@ -159,7 +159,7 @@ def t_a_finished_car_keeps_its_final_gap_after_its_data_stops():
     assert _row(race, "B", t)["finished"] and final is not None, race.standings(t)
     t += rd.NO_DATA_S + 5                                                # both senders leave
     row = _row(race, "B", t)
-    assert row["status"] == "no_data", row
+    assert row["finished"] and row["status"] != "no_data", f"a finished car's sender may leave: {row}"
     assert row["gap_s"] == final, f"the final gap stays after the data stops: {row}"
 
 

@@ -142,7 +142,8 @@ class DriversRole(Role):
         entry = self._entry(args.get("entry"))
         self._do(lambda: self._field().pit(entry, float(args.get("seconds", 10))), "pit")
 
-    def _race_order(self):
+    def _race_rows(self):
+        """The relay's race rows of this field's cars, in race order."""
         try:
             status, data = probes.http_json(self.ctx.url("relay"), "/drivers/race")
         except (OSError, http.client.HTTPException) as exc:
@@ -151,7 +152,18 @@ class DriversRole(Role):
         if not rows:
             raise StepError(f"the relay has no race order (HTTP {status})")
         known = {c.entry for c in self._field().cars}
-        return [r["entry"] for r in rows if r.get("entry") in known]
+        return [r for r in rows if r.get("entry") in known]
+
+    def _race_order(self):
+        return [r["entry"] for r in self._race_rows()]
+
+    def act_chequer(self, args):
+        """The chequered flag: the cars the relay counts finished stop sending at once,
+        every other car once it next crosses the line."""
+        self._do(lambda: self._field().chequer(), "chequer")    # first, so no crossing slips past
+        done = [r["entry"] for r in self._race_rows() if r.get("finished") is True]
+        self._do(lambda: self._field().chequer(done), "chequer")
+        return {"finished": done}
 
     def act_box(self, args):
         """Every car drives into its box and waits there for `release`; with `leader_first`
