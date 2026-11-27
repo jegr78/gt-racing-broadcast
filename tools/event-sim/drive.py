@@ -482,7 +482,7 @@ class Field:
             pos = car.odo % length
             waits = self.box_lead not in (None, car.entry) and car.requests and car.requests[0].get("hold")
             if car.requests and not waits and entry_s <= pos < entry_s + speed * dt + 1:
-                if self.box_lead == car.entry:
+                if self.box_lead == car.entry and car.requests[0].get("hold"):
                     self.box_lead = None
                 req = car.requests.pop(0)
                 car.mode = "pit_in"

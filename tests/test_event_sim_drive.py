@@ -332,6 +332,24 @@ def t_a_dropped_leader_does_not_keep_the_field_out_of_the_box():
         "the others box once the leader they wait for has dropped"
 
 
+def t_a_plain_pit_stop_of_the_leader_does_not_lift_the_leader_first_box_call():
+    wire = Wire()
+    f = field(wire, cars=3)
+    f.start()
+    run(f, wire, 5.0)
+    f.pit(TEAMS[0], seconds=2.0)
+    f.box(TEAMS[:3], leader_first=True)
+    held = []
+
+    def watch():
+        for c in f.cars:
+            if c.mode == "pit_in" and c.pit.get("hold") and c.entry not in held:
+                held.append(c.entry)
+        return len(held) == 3
+    assert run(f, wire, 400.0, watch), "every car drives in for the hold"
+    assert held[0] == TEAMS[0], f"the leader's plain stop before its hold keeps the others out: {held}"
+
+
 def t_a_keep_restart_releases_each_car_by_its_given_gap():
     wire = Wire()
     f = field(wire, cars=3)
