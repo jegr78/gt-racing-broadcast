@@ -3,7 +3,9 @@
 the stage layout, chapters.txt and captions.vtt, and the render commands. No video, no
 ffmpeg run; the stage page renders only where Playwright is installed.
 Run: python3 tests/test_event_video.py"""
+import contextlib
 import importlib.util
+import io
 import json
 import math
 import os
@@ -1328,6 +1330,22 @@ def t_the_music_bed_loops_quietly_and_fades_out_at_the_film_s_end():
     assert "m.mp3" not in silent and "-c:v copy" in silent
 
 
+def t_the_playlist_repeats_the_tracks_in_order_until_the_film_is_covered():
+    durs = {"a.mp3": 100.0, "b.mp3": 50.0}
+    assert fr.playlist(["a.mp3", "b.mp3"], durs, 140.0, xfade=3.0) == ["a.mp3", "b.mp3"], \
+        "two tracks with one crossfade cover 147 s"
+    assert fr.playlist(["a.mp3", "b.mp3"], durs, 150.0, xfade=3.0) == ["a.mp3", "b.mp3", "a.mp3"], \
+        "the crossfade eats into the length, so 150 s needs a third track"
+    assert fr.playlist(["a.mp3"], durs, 30.0, xfade=3.0) == ["a.mp3"]
+
+
+def t_the_music_bed_crossfades_each_track_into_the_next():
+    s = " ".join(fr.bed_argv(["ffmpeg"], ["a.mp3", "b.mp3", "a.mp3"], "bed.flac", xfade=3.0))
+    assert s.count("-i a.mp3") == 2 and s.count("-i b.mp3") == 1, s
+    assert "[0:a][1:a]acrossfade=d=3.000[x1];[x1][2:a]acrossfade=d=3.000[x2]" in s, s
+    assert "-map [x2]" in s and s.endswith("bed.flac"), s
+
+
 def t_a_range_request_is_answered_with_the_asked_bytes():
     assert fr.byte_range("bytes=0-99", 1000) == (0, 99)
     assert fr.byte_range("bytes=900-", 1000) == (900, 999)
@@ -1353,6 +1371,47 @@ def t_the_cli_writes_into_runtime_event_video_run_and_reads_times():
     a = cli.parse_args(["/x/r", "--from", "1:30", "--to", "95.5", "--workers", "2"])
     assert (a.start, a.stop, a.workers) == (90.0, 95.5, 2)
     assert cli.parse_args(["/x/r"]).workers == 4
+
+
+def t_the_cli_takes_several_music_tracks_and_refuses_a_missing_one():
+    assert cli.parse_args(["--music", "a.mp3", "--music", "b.mp3", "/x/r"]).music == ["a.mp3", "b.mp3"], \
+        "the option repeats per track, so a record dir after it stays the record dir"
+    with tempfile.TemporaryDirectory() as tmp:
+        rec = os.path.join(tmp, "rec")
+        os.makedirs(rec)
+        with open(os.path.join(rec, "timeline.json"), "w", encoding="utf-8") as fh:
+            json.dump(timeline(), fh)
+        track = os.path.join(tmp, "a.mp3")
+        open(track, "w").close()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = cli.main([rec, "--out", os.path.join(tmp, "out"), "--music", track, "--music", os.path.join(tmp, "gone.mp3")],
+                            render=lambda *a, **k: 0)
+        assert code == 2 and "gone.mp3" in err.getvalue() and "a.mp3" not in err.getvalue(), err.getvalue()
+
+
+def t_an_unusable_music_track_stops_the_render_before_any_capture():
+    calls = []
+    saved = fr.music_bed, fr.transcode_all
+    fr.music_bed = lambda *a, **k: None
+    fr.transcode_all = lambda *a, **k: calls.append("transcode") or ({}, {})
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            code = fr.render(plan(), timeline(), tmp, os.path.join(tmp, "out"), (0, 10), music=["a.mp3", "b.mp3"],
+                             log=lambda *_: None)
+    finally:
+        fr.music_bed, fr.transcode_all = saved
+    assert code == 1 and calls == [], f"the bed is checked before the recording is transcoded: {code} {calls}"
+
+
+def t_an_unreadable_music_track_stops_the_bed_with_its_name():
+    logs = []
+
+    def run(argv, **k):
+        out = "" if argv[-1] == "bad.mp3" else "200.0"
+        return subprocess.CompletedProcess(argv, 0, stdout=out, stderr="")
+    assert fr.music_bed(["good.mp3", "bad.mp3"], 300.0, "/w", ["ffmpeg"], ["ffprobe"], run=run, log=logs.append) is None
+    assert logs and "bad.mp3" in logs[0], logs
 
 
 def t_the_cli_writes_chapters_and_captions_before_any_capture():

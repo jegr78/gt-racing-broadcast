@@ -9,9 +9,9 @@ finished segments, so a killed render resumes and a changed stage renders again 
 new simulation run.
 
 Needs the Playwright Python library with its Chromium, and ffmpeg/ffprobe on PATH (no
-drawtext). The music bed is not committed: pass --music; without it the film is silent.
+drawtext). The music is not committed: pass --music once per track; without it the film is silent.
 
-    runtime/pw-venv/bin/python tools/build-event-video.py RECORD_DIR --music runtime/trailer/assets/the-theme.mp3
+    runtime/pw-venv/bin/python tools/build-event-video.py RECORD_DIR --music a.mp3 --music b.mp3
 """
 import argparse
 import os
@@ -45,7 +45,9 @@ def parse_args(argv):
     ap.add_argument("--workers", type=int, default=4, help="parallel capture workers (default 4)")
     ap.add_argument("--from", dest="start", type=film_seconds, help="render from this film time (s, m:ss)")
     ap.add_argument("--to", dest="stop", type=film_seconds, help="render up to this film time (s, m:ss)")
-    ap.add_argument("--music", help="music bed, looped quietly under the film; without it the film is silent")
+    ap.add_argument("--music", action="append", metavar="TRACK",
+                    help="a music track, once per track: they play quietly in turn under the film with a "
+                         "crossfade and repeat until it ends; without it the film is silent")
     ap.add_argument("--wait-speed", type=float, default=film_plan.WAIT_SPEED,
                     help=f"speed-up of waiting time (default {film_plan.WAIT_SPEED:g})")
     ap.add_argument("--plan-only", action="store_true", help="write chapters.txt and captions.vtt, render nothing")
@@ -85,8 +87,9 @@ def main(argv=None, render=film_render.render):
     except (OSError, ValueError, KeyError) as exc:
         print(f"cannot plan the film: {exc}", file=sys.stderr)
         return 2
-    if args.music and not os.path.isfile(args.music):
-        print(f"no music bed at {args.music}", file=sys.stderr)
+    missing = [m for m in args.music or [] if not os.path.isfile(m)]
+    if missing:
+        print(f"no music track at {', '.join(missing)}", file=sys.stderr)
         return 2
     out = out_dir(args)
     rec = os.path.realpath(args.dir)
