@@ -360,7 +360,7 @@ def t_the_registry_has_every_party_and_its_actions():
             "viewer": {"open", "hold", "read"},
             "driver": {"open", "hold", "register"},
             "drivers": {"register", "register_stint", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop",
-                        "chequer"},
+                        "chequer", "next_lobby", "change"},
             "probe": {"watch", "mark", "kit", "race_reset", "spectator", "stop_spectator", "check", "report"}}
     for kind, actions in want.items():
         assert kind in REG, f"role {kind} is not registered"
@@ -1858,6 +1858,24 @@ def t_the_later_stints_register_when_their_lobby_comes():
     fails(lambda: early.do("lobby", {"stint": 4}), "stint 3 drivers have not registered")
 
 
+def t_the_next_lobby_opens_while_the_old_races_and_each_car_changes_at_its_box():
+    role = drivers_role()
+    role.do("register", {"stints": 2})
+    role.do("start", {})
+    runner = role.runner
+    runner.run(30.0)
+    role.do("next_lobby", {"stint": 2})
+    page = role.page()
+    assert page["next_waiting"] == 3 and page["driving"] == 3, f"both lobbies drive: {page}"
+    fails(lambda: role.do("next_lobby", {"stint": 0}), "counted from 1")
+    role.do("box", {"order": "grid"})
+    role.do("change", {})
+    runner.run(600.0)
+    page = role.page()
+    assert page["next_waiting"] == 0 and {c["driver"] for c in page["cars"]} == \
+        {"Driver 11-2", "Driver 22-2", "Driver 33-2"}, page
+
+
 class HeatRelay(Relay):
     def data(self, invite):
         return {"entries": drive.roster(3), "segments": ["Heat A", "Heat B", "Heat C"]}
@@ -2448,7 +2466,7 @@ def t_the_bundled_events_run_three_lobbies_and_check_each_commentator_on_program
         assert loaded.event.get("stints") == 3, f"{name}: three stints, each its own lobby"
         stints = sorted(c.stint for c in loaded.commentators)
         assert stints == [1, 2, 3], f"{name}: one commentator per stint, not {stints}"
-        lobbies = [s.args.get("stint") for s in loaded.steps if s.role == "drivers" and s.do == "lobby"]
+        lobbies = [s.args.get("stint") for s in loaded.steps if s.role == "drivers" and s.do in ("lobby", "next_lobby")]
         assert {2, 3} <= set(lobbies), f"{name}: the drivers change into the lobbies of stints 2 and 3: {lobbies}"
         checks = " ".join(e for s in loaded.steps for e in s.expect)
         for c in loaded.commentators:
@@ -2710,41 +2728,43 @@ def t_the_full_scenario_plays_qualifying_the_day_before_as_its_own_event():
                           and _after(by, s.id, race.id)), "the race event's new timing link opens again"
 
 
-def t_the_full_scenario_splits_on_the_leaders_box_entry_and_switches_once_every_car_boxed():
+def t_the_full_scenario_splits_on_the_leaders_box_entry_and_each_team_changes_at_its_box_stop():
     steps = _full().steps
     by = {s.id: s for s in steps}
-    swaps = ((2, ("comms1", "comms2"), 12), (3, ("comms2", "comms3"), 14))
+    swaps = ((2, ("comms1", "comms2")), (3, ("comms2", "comms3")))
     nexts = [s for s in steps if s.do == "next"]
     assert len(nexts) == 2, [s.id for s in nexts]
-    for (stint, (out, inn), cars), nxt, prev in zip(swaps, nexts, [None, *nexts], strict=False):
+    for (stint, (out, inn)), nxt, prev in zip(swaps, nexts, [None, *nexts], strict=False):
         box = [s for s in steps if s.role == "drivers" and s.do == "box" and _after(by, nxt.id, s.id)][-1]
         assert box.args.get("leader_first") is True, \
             f"{box.id}: no car boxes before the leader, so the splitscreen runs until the others are in"
-        lobby = [s for s in steps if s.role == "drivers" and s.do == "lobby" and s.args.get("stint") == stint][0]
+        opened = [s for s in steps if s.role == "drivers" and s.do == "next_lobby" and s.args.get("stint") == stint]
+        assert len(opened) == 1 and _after(by, box.id, opened[0].id), \
+            f"the stint {stint} lobby opens while the old one still races, before {box.id}"
         split = [s for s in _chain(by, nxt.id) if s.do == "scene" and s.args.get("scene") == "Split"]
         assert split and _after(by, split[0].id, box.id), f"{nxt.id}: the splitscreen after {box.id}"
         split = split[0]
         leader = by[split.at.ref]
         assert "race.entries[0].status == 'box'" in leader.expect and _after(by, leader.id, box.id), \
             f"{split.id} goes on program once the race leader stands in the box"
+        assert nxt.at.ref == split.id, f"{nxt.id} opens the change window right after the splitscreen"
         warm = [s for s in _chain(by, split.id) if (prev is None or _after(by, s.id, prev.id))
                 and f"relay.status.handover_next.stint == {stint}" in s.expect
                 and "relay.status.feeds[relay.status.handover_next.feed].state == 'serving'" in s.expect]
         assert warm, f"{split.id}: the incoming feed serves before the splitscreen"
-        between = [s for s in _chain(by, nxt.id) if _after(by, s.id, split.id)]
-        boxed = by[nxt.at.ref]
-        assert f"page('drivers').standing == {cars}" in boxed.soft and boxed.timeout == 300, \
-            f"{nxt.id} follows once all {cars} cars stand in the box, after 5 minutes at most without failing"
-        assert not any("standing" in e for s in between for e in s.expect), \
-            "no hard wait for the whole field between the splitscreen and NEXT"
-        feeds = " ".join(e for s in between + [split] for e in s.expect)
-        for channel in (out, inn):
-            assert f"'{channel}' in obs.program_channels" in feeds, f"{split.id}: {channel} on the splitscreen"
-        assert boxed.caption and boxed.focus, f"{boxed.id}: the film captions the wait on the splitscreen"
-        cut = [s for s in steps if s.at.ref == nxt.id and s.do == "scene" and s.args.get("scene") == "Stint"]
-        compounds = [s for s in steps if s.do == "compounds" and cut and s.at.ref == cut[0].id]
-        assert compounds and _after(by, lobby.id, compounds[0].id), \
-            f"Race Control enters the compounds right after {nxt.id} and the cut to the stint, before lobby {stint}"
+        change = [s for s in steps if s.at.ref == nxt.id and s.role == "drivers" and s.do == "change"]
+        assert change, f"the next drivers may leave their box only after {nxt.id}, inside the relay's change window"
+        changed = [s for s in steps if s.at.ref == change[0].id]
+        assert changed and "page('drivers').next_waiting == 0" in changed[0].expect and changed[0].timeout == 300, \
+            "every team changes at its own box stop, bounded to 5 minutes"
+        assert changed[0].caption and changed[0].focus, f"{changed[0].id}: the film captions the changes"
+        cut = [s for s in steps if s.at.ref == changed[0].id and s.do == "scene" and s.args.get("scene") == "Stint"]
+        assert cut and f"'{inn}' in obs.program_channels" in cut[0].expect and \
+            f"'{out}' not in obs.program_channels" in cut[0].expect, f"after the changes the cut shows only {inn}"
+        compounds = [s for s in steps if s.do == "compounds" and s.at.ref == cut[0].id]
+        assert compounds, f"Race Control enters the compounds right after the cut to stint {stint}"
+        assert not [s for s in steps if s.role == "drivers" and s.do == "release" and _after(by, s.id, opened[0].id)
+                    and _after(by, compounds[0].id, s.id)], "no field-wide release at a swap"
 
 
 def t_the_full_scenario_sets_the_race_timer_and_calls_the_final_lap_when_it_runs_out():
@@ -2770,7 +2790,7 @@ def t_the_full_scenario_sets_the_race_timer_and_calls_the_final_lap_when_it_runs
         "the timer runs from the first race lap after Race start"
     final = by["final_lap"]
     due = by[final.at.ref]
-    swap3 = [s for s in steps if s.role == "drivers" and s.do == "lobby" and s.args.get("stint") == 3][0]
+    swap3 = [s for s in steps if s.role == "drivers" and s.do == "next_lobby" and s.args.get("stint") == 3][0]
     assert _after(by, due.id, swap3.id), "the final lap is in stint 3"
     assert any("relay.status.timer.remaining_s" in e for e in by["flag"].soft), \
         "the run reports whether the timer ran out during the last lap"
@@ -2797,7 +2817,7 @@ def t_the_full_scenario_runs_each_stint_lobby_to_its_lap_count():
     assert sheet and all(expect.truth(s, {"sheet": Sheet()})[0] for s in sheet), \
         f"the Sheet check finds the Schedule row by its header: {sheet}"
     late = by[by["swap2_driver"].at.ref]
-    assert "race.lobby_lap >= result('take_plan').laps - 3" in late.expect, \
+    assert "race.lobby_lap >= result('take_plan').laps - 2" in late.expect, \
         f"the swap after the restart waits for the restart lobby's laps, not the race's: {late.expect}"
     take = by["take_plan"]
     assert take.role == "race_control" and _after(by, take.id, "red_flag") \
@@ -2820,7 +2840,7 @@ def t_the_full_scenario_shows_the_dc_snapshot_the_stint_compounds_crew_chat_and_
     assert suspected and suspected[0].do == "hold" and suspected[0].role == "race_control", \
         f"the suspected phase plays in real time under a caption: {[s.id for s in suspected]}"
     sets = [s for s in steps if s.do == "compounds"]
-    bounds = (("race_start", "formation"), ("next2", "lobby2"), ("next3", "lobby3"))
+    bounds = (("race_start", "formation"), ("changed2", "rejoin_dc"), ("changed3", "last_lap"))
     assert len(sets) == len(bounds), [s.id for s in sets]
     for step, (lo, hi) in zip(sets, bounds, strict=True):
         assert _after(by, step.id, lo) and _after(by, hi, step.id) and step.caption, f"{step.id}: at the start of a stint"
@@ -2846,7 +2866,7 @@ def t_the_full_scenarios_driver_page_seats_drive_with_an_approved_code():
     assert field.args.get("now") == [1], "only the stint 1 drivers register before the race"
     for stint in (2, 3):
         reg = [s for s in steps if s.role == "drivers" and s.do == "register_stint" and s.args.get("stint") == stint]
-        lobby = [s for s in steps if s.role == "drivers" and s.do == "lobby" and s.args.get("stint") == stint]
+        lobby = [s for s in steps if s.role == "drivers" and s.do in ("lobby", "next_lobby") and s.args.get("stint") == stint]
         assert len(reg) == 1 and lobby and reg[0].index < lobby[0].index, f"stint {stint} registers before its lobby"
         assert [s for s in steps if reg[0].index < s.index < lobby[0].index and s.do == "approve_all"], \
             f"Race Control approves the stint {stint} drivers before their lobby"
@@ -2863,7 +2883,7 @@ def t_the_full_scenarios_driver_page_seats_drive_with_an_approved_code():
         assert name == drive.driver_name(entry, stint - 1) and name not in decided, name
         assert entry not in checks, f"{entry} is no team a check reads, so the page seat changes no expectation"
         need = [s for s in steps if s.role == "drivers" and
-                (s.do == "start" if stint == 1 else s.do == "lobby" and s.args.get("stint") == stint)][0]
+                (s.do == "start" if stint == 1 else s.do in ("lobby", "next_lobby") and s.args.get("stint") == stint)][0]
         approved = [s for s in steps if reg.index < s.index < need.index and s.role == "race_control" and
                     (s.do in ("approve_drivers", "approve_all") or s.do == "approve_driver" and s.args.get("name") == name)]
         assert approved, f"{name} is approved before {need.id} hands the car its code"

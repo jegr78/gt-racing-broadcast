@@ -1185,8 +1185,18 @@ caption = "The feed of stint 2 runs warm: the Handover area shows it ready"
 focus = ["director"]
 
 [[step]]
-id = "box2"
+id = "open2"
 at = "after:warm2"
+role = "drivers"
+do = "next_lobby"
+args = { stint = 2 }
+expect = ["page('drivers').next_waiting > 0"]
+caption = "The stint 2 lobby opens for the last laps of stint 1: the stint 2 drivers start there, drive lap 1 and wait in the box"
+focus = ["race_control", "program"]
+
+[[step]]
+id = "box2"
+at = "after:open2"
 role = "drivers"
 do = "box"
 args = { leader_first = true, laps = 7 }
@@ -1213,24 +1223,11 @@ timeout = "20s"
 caption = "The race leader is in the box: the director puts the splitscreen on program"
 focus = ["program", "director"]
 
-# NEXT once every running car stands in the box, after 5 minutes at most when the field is
-# spread out: a soft check ends the wait without failing the step.
-[[step]]
-id = "boxed2"
-at = "after:split2"
-role = "api"
-do = "get"
-args = { path = "/drivers/race" }
-expect = ["'comms1' in obs.program_channels",
-          "'comms2' in obs.program_channels"]
-soft = ["page('drivers').standing == 12"]
-timeout = "5m"
-caption = "The splitscreen shows both feeds while the cars box: Comms 1 and Comms 2"
-focus = ["program", "director"]
-
+# NEXT right after the splitscreen: it opens the relay's change window before the first
+# next-lobby car leaves its box.
 [[step]]
 id = "next2"
-at = "after:boxed2"
+at = "after:split2"
 role = "director"
 do = "next"
 expect = ["page('commentator:Comms 2').on_air"]
@@ -1239,8 +1236,27 @@ caption = "The director switches to stint 2: Comms 2 goes on air"
 focus = ["director", "program", "commentator:Comms 1", "commentator:Comms 2"]
 
 [[step]]
-id = "stint2_cut"
+id = "change2"
 at = "after:next2"
+role = "drivers"
+do = "change"
+caption = "Each stint 2 driver leaves the box once the team's stint 1 car stands there"
+focus = ["program", "race_control"]
+
+[[step]]
+id = "changed2"
+at = "after:change2"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["page('drivers').next_waiting == 0"]
+timeout = "5m"
+caption = "The cars leave the box one by one with their stint 2 drivers as their teams' cars arrive"
+focus = ["program", "viewer"]
+
+[[step]]
+id = "stint2_cut"
+at = "after:changed2"
 role = "director"
 do = "scene"
 args = { scene = "Stint" }
@@ -1279,27 +1295,8 @@ expect = ["relay.up"]
 shot = { name = "swaps-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
 
 [[step]]
-id = "lobby2"
-at = "after:shot_swaps_1"
-role = "drivers"
-do = "lobby"
-args = { stint = 2 }
-caption = "The stint 2 drivers join the new lobby"
-focus = ["race_control", "viewer"]
-
-[[step]]
-id = "release2"
-at = "after:lobby2+5s"
-role = "drivers"
-do = "release"
-expect = ["page('drivers').driving == 12"]
-timeout = "4m"
-caption = "The cars leave the box with their stint 2 drivers"
-focus = ["program", "viewer"]
-
-[[step]]
 id = "shot_swaps_2"
-at = "after:release2+3s"
+at = "after:shot_swaps_1+3s"
 role = "api"
 do = "get"
 args = { path = "/status" }
@@ -1623,7 +1620,7 @@ at = "after:desk_race_back2"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
-expect = ["race.lobby_lap >= result('take_plan').laps - 3"]
+expect = ["race.lobby_lap >= result('take_plan').laps - 2"]
 timeout = "12m"
 
 [[step]]
@@ -1677,8 +1674,18 @@ caption = "The feed of stint 3 runs warm: the Handover area shows it ready"
 focus = ["director"]
 
 [[step]]
-id = "box3"
+id = "open3"
 at = "after:warm3"
+role = "drivers"
+do = "next_lobby"
+args = { stint = 3 }
+expect = ["page('drivers').next_waiting > 0"]
+caption = "The stint 3 lobby opens for the last laps of the restart lobby: the stint 3 drivers start there, drive lap 1 and wait in the box"
+focus = ["race_control", "program"]
+
+[[step]]
+id = "box3"
+at = "after:open3"
 role = "drivers"
 do = "box"
 args = { leader_first = true, laps = "${take_plan.laps}" }
@@ -1705,24 +1712,11 @@ timeout = "20s"
 caption = "The race leader is in the box: the director puts the splitscreen on program"
 focus = ["program", "director"]
 
-# NEXT once every running car stands in the box, after 5 minutes at most when the field is
-# spread out: a soft check ends the wait without failing the step.
-[[step]]
-id = "boxed3"
-at = "after:split3"
-role = "api"
-do = "get"
-args = { path = "/drivers/race" }
-expect = ["'comms2' in obs.program_channels",
-          "'comms3' in obs.program_channels"]
-soft = ["page('drivers').standing == 14"]
-timeout = "5m"
-caption = "The splitscreen shows both feeds while the cars box: Comms 2 and Comms 3"
-focus = ["program", "director"]
-
+# NEXT right after the splitscreen: it opens the relay's change window before the first
+# next-lobby car leaves its box.
 [[step]]
 id = "next3"
-at = "after:boxed3"
+at = "after:split3"
 role = "director"
 do = "next"
 expect = ["page('commentator:Comms 3').on_air"]
@@ -1731,8 +1725,27 @@ caption = "The director switches to stint 3: Comms 3 goes on air"
 focus = ["director", "program", "commentator:Comms 2", "commentator:Comms 3"]
 
 [[step]]
-id = "stint3_cut"
+id = "change3"
 at = "after:next3"
+role = "drivers"
+do = "change"
+caption = "Each stint 3 driver leaves the box once the team's stint 2 car stands there"
+focus = ["program", "race_control"]
+
+[[step]]
+id = "changed3"
+at = "after:change3"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["page('drivers').next_waiting == 0"]
+timeout = "5m"
+caption = "The cars leave the box one by one with their stint 3 drivers as their teams' cars arrive"
+focus = ["program", "viewer"]
+
+[[step]]
+id = "stint3_cut"
+at = "after:changed3"
 role = "director"
 do = "scene"
 args = { scene = "Stint" }
@@ -1761,27 +1774,8 @@ do = "view"
 args = { area = "race" }
 
 [[step]]
-id = "lobby3"
-at = "after:desk_stint3"
-role = "drivers"
-do = "lobby"
-args = { stint = 3 }
-caption = "The stint 3 drivers join the new lobby"
-focus = ["race_control", "viewer"]
-
-[[step]]
-id = "release3"
-at = "after:lobby3+5s"
-role = "drivers"
-do = "release"
-expect = ["page('drivers').driving == 14"]
-timeout = "4m"
-caption = "The cars leave the box with their stint 3 drivers"
-focus = ["program", "viewer"]
-
-[[step]]
 id = "stint3"
-at = "after:release3"
+at = "after:desk_stint3"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
