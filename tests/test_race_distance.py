@@ -515,6 +515,52 @@ def t_overlapping_lobbies_switch_each_car_at_its_box_stop():
     assert row["pit_stops"] == 1, row
 
 
+def _early_exit(new_leaves_after_old_stands=True, old_goes_quiet=False, new_laps=0):
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    old, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 10, "Ann")
+    t = _drive(race, [old, rival], [50, 50], 0.0, 60)
+    new = Car(race, "A", "a2", L - 15, "Lea")
+    t = _drive(race, [old, new, rival], [50, 40, 50], t, 4)
+    new.along += new_laps * L                            # laps it drove in the new lobby before boxing
+    new.box = True
+    t = _drive(race, [old, new, rival], [50, None, 50], t, 3)
+    if not new_leaves_after_old_stands:
+        new.box = False
+        t = _drive(race, [old, new, rival], [50, 40, 50], t, 3)
+    old.box = True
+    t = _drive(race, [old, new, rival], [None, None if new.box else 40, 50], t, 6)
+    anchor = _row(race, "A", t)["distance_m"]
+    if new.box:
+        new.box = False                                  # it leaves before NEXT opens the window
+        t = _drive(race, [old, new, rival], [None, 40, 50], t, 3)
+    sending = [new, rival] if old_goes_quiet else [old, new, rival]
+    race.open_change_window(t)
+    t = _drive(race, sending, [40, 50] if old_goes_quiet else [None, 40, 50], t, 7)
+    return _row(race, "A", t), anchor
+
+
+def t_a_next_car_that_left_its_box_just_before_the_window_still_takes_over():
+    row, anchor = _early_exit()
+    assert row["driver"] == "Lea" and row["pit_stops"] == 1, f"the change counts once the window opens: {row}"
+    assert abs(row["distance_m"] - (anchor + 400)) < 25, f"it counts from its box exit, 10 s at 40 m/s: {row}, {anchor}"
+
+
+def t_an_early_box_exit_counts_when_the_old_driver_has_left_the_lobby():
+    row, anchor = _early_exit(old_goes_quiet=True)
+    assert row["driver"] == "Lea" and abs(row["distance_m"] - (anchor + 400)) < 25, \
+        f"the window opens on the old car's last state, standing in its box: {row}, {anchor}"
+
+
+def t_an_early_box_exit_past_lap_2_of_the_new_lobby_is_no_change():
+    row, _anchor = _early_exit(new_laps=3)
+    assert row["driver"] == "Max", f"only a car on lap 1 or 2 of its lobby takes over: {row}"
+
+
+def t_a_next_car_that_left_before_the_old_car_stood_does_not_take_over():
+    row, _anchor = _early_exit(new_leaves_after_old_stands=False)
+    assert row["driver"] == "Max", f"a box exit before the old car stopped is no change: {row}"
+
+
 def t_a_driver_staying_on_continues_into_the_next_lobby():
     race = rd.Race(TRACE, formation=False, multi_lobby=True)
     car, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 10, "Ann")
