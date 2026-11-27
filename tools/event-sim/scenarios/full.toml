@@ -414,8 +414,14 @@ caption = "The producer sets the race: a formation lap and a finish by laps"
 
 # Stop event ended the qualifying invite: the driver page opens the race event's.
 [[step]]
-id = "driver_open"
+id = "producer_away"
 at = "after:race_settings"
+role = "producer"
+do = "close"
+
+[[step]]
+id = "driver_open"
+at = "after:producer_away"
 role = "driver"
 do = "open"
 
@@ -479,8 +485,14 @@ caption = "Race Control corrects the team of Reserve 44 to Delta Sim Team #44 an
 focus = ["race_control", "driver"]
 
 [[step]]
-id = "reject_guest"
+id = "driver_away"
 at = "after:correct_reserve"
+role = "driver"
+do = "close"
+
+[[step]]
+id = "reject_guest"
+at = "after:driver_away"
 role = "race_control"
 do = "reject_driver"
 args = { name = "Guest Driver" }
@@ -554,8 +566,14 @@ expect = ["not page('commentator:Comms 2').on_air"]
 timeout = "20s"
 
 [[step]]
-id = "cockpit3"
+id = "cockpit2_away"
 at = "after:cockpit2"
+role = "commentator:Comms 2"
+do = "close"
+
+[[step]]
+id = "cockpit3"
+at = "after:cockpit2_away"
 role = "commentator:Comms 3"
 do = "open"
 expect = ["not page('commentator:Comms 3').on_air"]
@@ -563,8 +581,14 @@ timeout = "20s"
 
 # The race event has a new timing link.
 [[step]]
-id = "timing_race"
+id = "cockpit3_away"
 at = "after:cockpit3"
+role = "commentator:Comms 3"
+do = "close"
+
+[[step]]
+id = "timing_race"
+at = "after:cockpit3_away"
 role = "viewer"
 do = "open"
 
@@ -580,15 +604,15 @@ timeout = "10s"
 caption = "The director resets the timer that ran in qualifying"
 focus = ["director", "program"]
 
-# The race's length: 21 laps of about 1:45, the two swaps and the red flag, so the timer runs out in the last lap.
+# The race's length up to stint 3's fifth lobby lap, with the two swaps and the red flag, so the timer runs out just before Race Control calls the final lap.
 [[step]]
 id = "timer_set"
 at = "after:timer_reset"
 role = "director"
 do = "timer"
-args = { duration = "0:46:00" }
+args = { duration = "0:33:00" }
 expect = ["relay.get('/timer/data').mode == 'prestart'",
-          "relay.get('/timer/data').duration_s == 2760"]
+          "relay.get('/timer/data').duration_s == 1980"]
 timeout = "10s"
 caption = "The director sets the race timer to the race length"
 focus = ["director", "program"]
@@ -1166,8 +1190,14 @@ caption = "Race Control approves the stint 2 drivers with Approve all"
 focus = ["race_control", "driver"]
 
 [[step]]
-id = "swap1_desk"
+id = "driver_away2"
 at = "after:swap1_approve"
+role = "driver"
+do = "close"
+
+[[step]]
+id = "swap1_desk"
+at = "after:driver_away2"
 role = "race_control"
 do = "view"
 args = { area = "race" }
@@ -1199,7 +1229,7 @@ id = "box2"
 at = "after:open2"
 role = "drivers"
 do = "box"
-args = { leader_first = true, laps = 7 }
+args = { laps = 7 }
 caption = "The cars come into the box at the end of lap 6 of the 7-lap lobby"
 focus = ["race_control", "program"]
 
@@ -1223,8 +1253,8 @@ timeout = "20s"
 caption = "The race leader is in the box: the director puts the splitscreen on program"
 focus = ["program", "director"]
 
-# NEXT right after the splitscreen: it opens the relay's change window before the first
-# next-lobby car leaves its box.
+# NEXT right after the splitscreen opens the relay's change window. A next-lobby car that
+# left on its go signal before it takes over when the window opens.
 [[step]]
 id = "next2"
 at = "after:split2"
@@ -1286,8 +1316,14 @@ do = "view"
 args = { area = "race" }
 
 [[step]]
+id = "cockpit1_away"
+at = "after:desk_stint2"
+role = "commentator:Comms 1"
+do = "close"
+
+[[step]]
 id = "shot_swaps_1"
-at = "after:desk_stint2+3s"
+at = "after:cockpit1_away+3s"
 role = "api"
 do = "get"
 args = { path = "/status" }
@@ -1652,7 +1688,7 @@ do = "approve_all"
 expect = ["result('swap2_approve').approved == 14", "page('race_control').waiting == 0"]
 timeout = "20s"
 caption = "Race Control approves the stint 3 drivers with Approve all"
-focus = ["race_control", "driver"]
+focus = ["race_control"]
 
 [[step]]
 id = "swap2_desk"
@@ -1688,13 +1724,21 @@ id = "box3"
 at = "after:open3"
 role = "drivers"
 do = "box"
-args = { leader_first = true, laps = "${take_plan.laps}" }
+args = { laps = "${take_plan.laps}" }
 caption = "The cars come into the box at the end of the restart lobby's second to last lap"
 focus = ["race_control", "program"]
 
 [[step]]
-id = "leader_box3"
+id = "cockpit3_back"
 at = "after:box3"
+role = "commentator:Comms 3"
+do = "open"
+expect = ["not page('commentator:Comms 3').on_air"]
+timeout = "20s"
+
+[[step]]
+id = "leader_box3"
+at = "after:cockpit3_back"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
@@ -1712,8 +1756,8 @@ timeout = "20s"
 caption = "The race leader is in the box: the director puts the splitscreen on program"
 focus = ["program", "director"]
 
-# NEXT right after the splitscreen: it opens the relay's change window before the first
-# next-lobby car leaves its box.
+# NEXT right after the splitscreen opens the relay's change window. A next-lobby car that
+# left on its go signal before it takes over when the window opens.
 [[step]]
 id = "next3"
 at = "after:split3"
@@ -1774,8 +1818,14 @@ do = "view"
 args = { area = "race" }
 
 [[step]]
-id = "stint3"
+id = "cockpit2_off"
 at = "after:desk_stint3"
+role = "commentator:Comms 2"
+do = "close"
+
+[[step]]
+id = "stint3"
+at = "after:cockpit2_off"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }

@@ -23,7 +23,8 @@ class DriversRole(Role):
     `start`, `pit` (entry, seconds), `box` (order: "race",
     "grid" or a list of entries; leader_first), `lobby` (stint), `release` (gaps), `drop` (entry),
     `rejoin` (entry, seconds), `stop` (entries), `next_lobby` (stint: opens while the current
-    lobby still races), `change` (the next cars take over at their box stop). An entry is its
+    lobby still races), `change` (the broadcast switched stints: a driver staying on and a dropped team's next
+    car go, the stint moves on). An entry is its
     team label or its grid slot."""
     kind = "drivers"
     client_factory = drive.Client
@@ -250,7 +251,8 @@ class DriversRole(Role):
         self._do(lambda: (self._seats_of(stint - 1), self._field().open_next(stint - 1)), "open the next lobby")
 
     def act_change(self, args):
-        """The broadcast switched stints: each next car takes over at its box stop."""
+        """The broadcast switched stints. Each next car goes on its old car's change stop
+        alone; this lets a driver staying on and a dropped team's next car go."""
         self._do(self._field().allow_change, "allow the change")
 
     def act_release(self, args):

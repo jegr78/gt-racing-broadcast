@@ -213,15 +213,19 @@ def t_a_long_action_shows_its_start_and_speeds_up_the_rest():
     assert _at(p, 100.0)["caption"].startswith("Race Control confirms"), "the caption stays on while it speeds"
 
 
-def t_a_long_action_in_a_swap_chapter_plays_in_real_time():
+def t_in_a_swap_chapter_only_the_switch_plays_a_long_action_in_real_time():
     tl = swaps_timeline()
     for st in tl["steps"]:
         if st["id"] == "ok1":
-            st.update(acted=216.0, end=216.0)                      # a split-like action of 15 s
-        elif st["id"] in ("next1", "cut1"):
-            st.update({k: st[k] + 14.0 for k in ("start", "acted", "end")})
+            st.update(acted=236.0, end=236.0)                      # Race Control works through a long list
+        elif st["id"] == "next1":
+            st.update(start=236.0, acted=250.0, end=254.0)         # the switch waits for the on-air change
+        elif st["id"] == "cut1":
+            st.update({k: st[k] + 47.0 for k in ("start", "acted", "end")})
     p = fp.Plan(tl)
-    assert all(p.speed_at(x) == 1 for x in (202.0, 209.0, 215.9)), "a swap step's long action is never sped up"
+    assert p.speed_at(201.0 + fp.MAX_ACTION_S - 0.5) == 1, "a swap step's action starts in real time"
+    assert p.speed_at(225.0) == p.wait_speed, "its long rest is sped up, as elsewhere"
+    assert all(p.speed_at(x) == 1 for x in (238.0, 245.0, 249.9)), "the four-view switch plays in real time"
 
 
 def _run_timeline(actions, chapter=None, swap=False):
@@ -447,6 +451,24 @@ def t_a_recording_s_time_stops_at_its_known_duration():
     p = fp.Plan(timeline(), durations={"pages/driver/page@1.webm": 10.0})
     _, t = _at(p, 60.0)["sources"]["driver"]
     assert t == round(10.0 - 1 / p.fps, 4), f"time stops at the last frame of the file: {t}"
+
+
+def t_a_closed_page_leaves_the_stage_until_it_opens_again():
+    tl = swaps_timeline()
+    for r in tl["recordings"]:
+        if r["view"] == "producer":
+            r["end"] = 50.0
+    tl["recordings"].append(_rec("producer", 350.0, file="pages/producer/page@2.webm"))
+    tl["steps"][-1].update(caption="The producer stops", chapter="Stop", focus=["producer"])
+    p = fp.Plan(tl)
+    assert _present(_at(p, 1.5), "producer"), "the producer is on the stage while its page is open"
+    assert not _present(_at(p, 150.0), "producer") and _at(p, 150.0)["sources"]["producer"] is None, \
+        "a closed page shows nothing and gives its place up"
+    assert _present(_at(p, 360.0), "producer"), "it comes back with its next recording"
+    rec, _t = _at(p, 360.0)["sources"]["producer"]
+    assert p.recordings[rec]["file"] == "pages/producer/page@2.webm"
+    missing = fp.Plan(tl, available=set(range(len(tl["recordings"]))) - {len(tl["recordings"]) - 1})
+    assert not _present(_at(missing, 360.0), "producer"), "a reopened page without its transcode takes no place"
 
 
 def t_a_missing_transcode_of_a_reopened_page_shows_the_earlier_recording():

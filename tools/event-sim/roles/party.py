@@ -64,7 +64,7 @@ class Surface(builtin.PageRole):
         return super().act_open(spec)
 
     def do(self, action, args):
-        if self.pg is None and action != "open":
+        if self.pg is None and action not in ("open", "close"):
             self.act_open({})
         return super().do(action, args)
 
@@ -933,6 +933,8 @@ class RaceControlRole(LiveColumn, Surface):
                 self.pg.wait_for_timeout(seconds * 1000)
         finally:
             tab.close()
+            if rec:
+                rec.page_closed(f"{self.name}:{self.tabs[0]}")
         return {"entry": entry, "rows": rows}
 
     def act_final_lap(self, args):

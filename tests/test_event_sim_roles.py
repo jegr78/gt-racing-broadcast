@@ -347,18 +347,18 @@ def fails(fn, *needles):
 
 # -- every role, every selector ---------------------------------------------------
 def t_the_registry_has_every_party_and_its_actions():
-    want = {"producer": {"open", "hold", "pick_track", "race_settings", "start_event", "stop_event", "relay_restart"},
-            "director": {"open", "hold", "approve_link", "next", "scene", "red_flag",
+    want = {"producer": {"open", "close", "hold", "pick_track", "race_settings", "start_event", "stop_event", "relay_restart"},
+            "director": {"open", "close", "hold", "approve_link", "next", "scene", "red_flag",
                          "show_dashboard", "cue", "chat", "graphic", "pov", "hud", "mode", "start_part",
                          "end_part", "fit", "view", "play", "timer", "timer_key"},
-            "race_control": {"open", "hold", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
+            "race_control": {"open", "close", "hold", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
                              "release", "retire", "rejoin", "estimate", "add_lap", "set_time", "correction",
                              "note", "fit", "confirm_dc", "class_laps", "stint_laps", "take_plan", "view", "reject_driver",
                              "correct_driver", "compound", "compounds", "race_start", "approve_all",
                              "show_standings"},
-            "commentator": {"open", "hold", "submit_link", "chat", "fit", "view"},
-            "viewer": {"open", "hold", "read"},
-            "driver": {"open", "hold", "register"},
+            "commentator": {"open", "close", "hold", "submit_link", "chat", "fit", "view"},
+            "viewer": {"open", "close", "hold", "read"},
+            "driver": {"open", "close", "hold", "register"},
             "drivers": {"register", "register_stint", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop",
                         "chequer", "next_lobby", "change"},
             "probe": {"watch", "mark", "kit", "race_reset", "spectator", "stop_spectator", "check", "report"}}
@@ -574,6 +574,14 @@ def t_a_plain_page_without_a_browser_is_skipped_and_masks_the_links_in_a_shot():
         assert "browser" in str(exc)
     else:
         raise AssertionError("a page without a browser is a skip, which --no-skips can fail")
+    for cls in (builtin.PageRole, party.ProducerRole):
+        role, _, _ = make(cls, "page:x" if cls is builtin.PageRole else None, browser=False)
+        try:
+            role.do("close", {})
+        except roles.Unavailable as exc:
+            assert "browser" in str(exc), exc
+        else:
+            raise AssertionError(f"{cls.__name__}: close without a browser is a skip too")
     role, page, _ = make(builtin.PageRole, "page:x")
     role.do("open", {"path": "/panel"})
     role.shot("p.png")
@@ -2549,12 +2557,31 @@ def t_the_full_scenario_keeps_the_decks_50_shots():
         f"each name stays at its step, role and element: {sorted(set(shots.items()) ^ set(FULL_SHOTS.items()))}"
 
 
+def t_the_full_scenario_closes_pages_while_the_film_does_not_need_them():
+    steps = _full().steps
+    by = {s.id: s for s in steps}
+    closed = {}
+    for s in steps:
+        if s.do == "close":
+            closed[s.role] = s.index
+        elif s.role in closed and s.do != "close":
+            closed.pop(s.role)
+        for e in s.expect:
+            for role in list(closed):
+                assert f"page('{role}')" not in e, f"{s.id} checks {role}, which is closed"
+        if s.shot:
+            assert s.shot.role not in closed, f"{s.id} shoots {s.shot.role}, which is closed"
+    away = {s.role for s in steps if s.do == "close"}
+    assert {"producer", "driver", "commentator:Comms 1", "commentator:Comms 2", "commentator:Comms 3"} <= away, away
+    assert _after(by, "next3", "cockpit3_back"), "Comms 3 is open again before NEXT puts it on air"
+
+
 def t_the_full_scenario_plays_the_twelve_chapters_of_the_storyboard():
     steps = _full().steps
     at = {s.id: s.index for s in steps}
     assert [s.chapter for s in steps if s.chapter] == FULL_CHAPTERS, [s.chapter for s in steps if s.chapter]
     quiet = [s.id for s in steps if (REG[scenario.role_kind(s.role)].recorded or scenario.role_kind(s.role) == "drivers")
-             and s.do not in ("open", "view") and not s.caption]
+             and s.do not in ("open", "close", "view") and not s.caption]
     assert quiet == [], f"every party step the film shows has a caption: {quiet}"
     assert all(s.caption for s in steps if s.chapter), "each chapter opens on a captioned step"
 
@@ -2736,8 +2763,8 @@ def t_the_full_scenario_splits_on_the_leaders_box_entry_and_each_team_changes_at
     assert len(nexts) == 2, [s.id for s in nexts]
     for (stint, (out, inn)), nxt, prev in zip(swaps, nexts, [None, *nexts], strict=False):
         box = [s for s in steps if s.role == "drivers" and s.do == "box" and _after(by, nxt.id, s.id)][-1]
-        assert box.args.get("leader_first") is True, \
-            f"{box.id}: no car boxes before the leader, so the splitscreen runs until the others are in"
+        assert not box.args.get("leader_first") and box.args.get("laps"), \
+            f"{box.id}: each car boxes at the end of its own second to last lap, none drives on behind the leader"
         opened = [s for s in steps if s.role == "drivers" and s.do == "next_lobby" and s.args.get("stint") == stint]
         assert len(opened) == 1 and _after(by, box.id, opened[0].id), \
             f"the stint {stint} lobby opens while the old one still races, before {box.id}"
@@ -2803,7 +2830,7 @@ def t_the_full_scenario_runs_each_stint_lobby_to_its_lap_count():
     counts = by["stint_laps"].args["laps"]
     assert by["stint_laps"].role == "race_control" and sorted(counts) == ["Stint 1", "Stint 2", "Stint 3"], counts
     assert _after(by, by["formation"].id, "stint_laps"), "Race Control sets the counts before the cars leave the grid"
-    boxes = [s for s in steps if s.role == "drivers" and s.do == "box" and s.args.get("leader_first")]
+    boxes = [s for s in steps if s.role == "drivers" and s.do == "box" and s.args.get("laps")]
     assert [b.args.get("laps") for b in boxes] == [counts["Stint 1"], "${take_plan.laps}"], \
         f"the swaps come at the end of the lobby's second to last lap: {[b.args for b in boxes]}"
     sheet = [s for s in by["stint_laps"].soft if "sheet.tab('Schedule')" in s]

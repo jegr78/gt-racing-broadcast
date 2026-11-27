@@ -19,7 +19,7 @@ FPS = 30
 LEAD_IN_S = 2.5          # a captioned step's view is large and still before it acts
 HOLD_S = 3.0             # and stays this long after its action returned
 MIN_CAPTION_S = 6.0
-MAX_ACTION_S = 8.0       # a longer action outside a swap chapter plays this much in real time, the rest sped up
+MAX_ACTION_S = 8.0       # a longer action plays this much in real time, the rest sped up; a four-view switch plays in full
 RUN_SHOWN = 3            # of a run of steps with the same role and action, the later ones play sped up
 SWAP_HOLD_S = 6.0        # the hold of each step in a chapter with a four-view switch
 WAIT_SPEED = 8.0
@@ -159,7 +159,7 @@ def beats(steps, lead_in=LEAD_IN_S, hold=HOLD_S):
         h = SWAP_HOLD_S if swap else hold
         if len(s.get("focus") or ()) == 4:
             h = max(h, s["end"] - s["acted"] + hold)
-        out[s["id"]] = (lead_in, math.inf if swap else MAX_ACTION_S, h, MIN_CAPTION_S, None)
+        out[s["id"]] = (lead_in, math.inf if len(s.get("focus") or ()) == 4 else MAX_ACTION_S, h, MIN_CAPTION_S, None)
     return out
 
 
@@ -462,6 +462,12 @@ class Plan:
                 by[r["view"]].append((r["start"], n))
         return {v: sorted(lst) for v, lst in by.items()}
 
+    def _open_at(self, view, s):
+        """True while a shown recording of `view` runs at source time s (a closed page has an `end`)."""
+        return any(self.recordings[n]["start"] <= s and (self.recordings[n].get("end") is None
+                                                         or s < self.recordings[n]["end"])
+                   for _start, n in self._by_view.get(view, ()))
+
     # time
 
     def speed_at(self, s):
@@ -543,21 +549,19 @@ class Plan:
 
     def _layout_switches(self):
         """[(output time, Layout, from rects, previous Layout, views on the stage)]: the layout
-        at the start of each caption and whenever a view's first recording starts, since a
-        view takes a place on the stage only from then on."""
+        at the start of each caption and whenever a view's recording starts or ends, since a
+        view holds a place on the stage only while its page is open."""
         caps = [s for s in self.steps if s.get("caption")]
         shown = [self._marks[s["id"]]["shown"] for s in caps]
-        opens = {}
-        for r in self.recordings:
-            if r.get("file") and r["view"] in self.views:
-                opens[r["view"]] = min(r["start"], opens.get(r["view"], r["start"]))
-        times = sorted({0.0, *shown, *(self.out_time(a) for a in opens.values() if a > self.t0)})
+        edges = [e for v in self.views for _start, n in self._by_view.get(v, ())
+                 for e in (self.recordings[n]["start"], self.recordings[n].get("end")) if e is not None and e > self.t0]
+        times = sorted({0.0, *shown, *(self.out_time(min(e, self.t1)) for e in edges)})
         switches, layout, present = [], Layout(()), None
         for t in times:
             n = max(0, bisect.bisect_right(shown, t) - 1)
             s = self.src_time(t)
             placed = self._present[n] if caps else list(self.views)
-            now = [v for v in placed if v in opens and opens[v] <= s]
+            now = [v for v in placed if self._open_at(v, s)]
             new = focus_layout(caps[n], layout, now) if caps else Layout(())
             if not new.large and now:
                 new = Layout((now[0],))
@@ -665,6 +669,9 @@ class Plan:
         if k < 0:
             return None
         start, n = recs[k]
+        end = self.recordings[n].get("end")
+        if end is not None and s >= end:
+            return None
         t = s - start
         dur = self.durations.get(self.recordings[n]["file"])
         if dur is not None:

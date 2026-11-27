@@ -103,6 +103,28 @@ def t_a_record_run_records_each_page_at_its_viewport_with_pointer_and_mask():
                                "size": {"width": 390, "height": 844}, "at": 50.0}], rec.recordings
 
 
+def t_close_ends_the_page_and_its_recording_and_open_starts_both_again():
+    now = [50.0]
+    rec = record.Recorder(_tmp(), clock=lambda: now[0])
+    role, page, browser = _role(party.DriverRole, recorder=rec, video=os.path.join(rec.dir, "pages", "driver", "a.webm"))
+    role.do("open", {})
+    context = role.context
+    now[0] = 80.0
+    role.do("close", {})
+    assert context.closed and role.pg is None, "close ends the page's context, which finishes its video"
+    assert rec.recordings[0]["end"] == 80.0, rec.recordings
+    try:
+        role.do("close", {})
+    except roles.StepError as exc:
+        assert "not open" in str(exc), exc
+    else:
+        raise AssertionError("a closed page cannot close again")
+    now[0] = 90.0
+    role.do("open", {})
+    assert len(rec.recordings) == 2 and rec.recordings[1]["at"] == 90.0 and "end" not in rec.recordings[1], \
+        "the reopened page records anew"
+
+
 def t_the_standings_tab_is_its_own_recording_and_stays_open_for_its_hold():
     out = _tmp()
     clock = {"t": 50.0}
@@ -122,7 +144,7 @@ def t_the_standings_tab_is_its_own_recording_and_stays_open_for_its_hold():
     page.add('.dd tr:has(div:text-is("B #2")) button[data-label="Show standings"]', on_click=click)
     assert role.do("show_standings", {"entry": "B #2", "seconds": 8}) == {"entry": "B #2", "rows": 14}
     assert rec.recordings[-1] == {"view": "race_control:standings", "kind": "page", "file": "pages/race_control/b.webm",
-                                  "size": dict(role.viewport), "at": 60.0}, rec.recordings
+                                  "size": dict(role.viewport), "at": 60.0, "end": 60.0}, rec.recordings
     assert tab.closed and page.clock.t - opened["t"] >= 8, "the tab stays in view for the step's hold, then closes"
     fails = []
     for bad in (0, "8", 301):
@@ -218,6 +240,21 @@ def t_the_timeline_lists_steps_and_recording_offsets_since_the_engine_start():
     path = rec.write(tl)
     with open(path, encoding="utf-8") as fh:
         assert json.load(fh) == tl and os.path.basename(path) == "timeline.json"
+
+
+def t_a_closed_page_s_recording_ends_and_a_reopened_one_is_a_new_recording():
+    now = [10.0]
+    rec = record.Recorder(_tmp(), clock=lambda: now[0])
+    page = SimpleNamespace(video=SimpleNamespace(path=lambda: os.path.join(rec.dir, "pages", "producer", "a.webm")))
+    rec.page_opened("producer", page, {"width": 1440, "height": 900})
+    now[0] = 40.0
+    rec.page_closed("producer")
+    now[0] = 90.0
+    page2 = SimpleNamespace(video=SimpleNamespace(path=lambda: os.path.join(rec.dir, "pages", "producer", "b.webm")))
+    rec.page_opened("producer", page2, {"width": 1440, "height": 900})
+    tl = rec.timeline(SimpleNamespace(name="t", steps=[]), [], start=10.0)
+    got = [(r["start"], r.get("end")) for r in tl["recordings"]]
+    assert got == [(0.0, 30.0), (80.0, None)], f"the first recording ends at the close, the second runs on: {got}"
 
 
 def t_a_recording_file_is_named_relative_to_the_record_dir_when_it_can_be():

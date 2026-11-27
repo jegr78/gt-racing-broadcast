@@ -129,6 +129,13 @@ class Recorder:
         path = video.path() if video is not None else None
         self._add(role, "page", path, viewport)
 
+    def page_closed(self, role):
+        """`role`'s page closed: its running recording ends now."""
+        for r in reversed(self.recordings):
+            if r["view"] == role and r["kind"] == "page" and r.get("end") is None:
+                r["end"] = self.clock()
+                return
+
     def program_started(self, path, size=None, at=None):
         """Note the program recording (OBS's own), started at `at` (default now)."""
         self._add("program", "program", path, size, at)
@@ -165,7 +172,9 @@ class Recorder:
                     row[key] = value
             out.append(row)
         recordings = [{"view": r["view"], "kind": r["kind"], "file": r["file"], "size": r["size"],
-                       "start": round(r["at"] - start, 3)} for r in self.recordings]
+                       "start": round(r["at"] - start, 3),
+                       **({"end": round(r["end"] - start, 3)} if r.get("end") is not None else {})}
+                      for r in self.recordings]
         film = {key: getattr(scenario, key) for key in FILM_KEYS if getattr(scenario, key, None) is not None}
         return {"scenario": getattr(scenario, "name", ""), **film, "steps": out, "recordings": recordings}
 
