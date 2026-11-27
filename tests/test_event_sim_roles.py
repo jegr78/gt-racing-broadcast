@@ -2632,7 +2632,6 @@ def t_the_qualifying_timer_holds_the_session_length_before_program_goes_on_air()
 
 
 def t_the_full_scenario_shows_race_control_messages_at_formation_final_lap_and_finish():
-    import stack
     steps = _full().steps
     by = {s.id: s for s in steps}
     rc = [s for s in steps if s.do == "hud" and s.args.get("field") == "racecontrol"]
