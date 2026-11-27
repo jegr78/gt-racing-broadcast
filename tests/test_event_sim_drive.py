@@ -438,6 +438,31 @@ def t_a_finished_car_keeps_its_place_in_gt7s_order():
         f"the car behind the winner stays P2 in GT7's order after the winner stops: {wire.last(f'c{k}s0')}"
 
 
+def t_the_next_lobby_drives_lap_1_and_each_car_takes_over_at_its_box_stop():
+    wire = Wire()
+    f = field(wire, cars=3)
+    f.start()
+    assert run(f, wire, 600.0, lambda: f.car(TEAMS[0]).lap >= 2)
+    f.open_next(1)
+    assert all(c.next is not None for c in f.cars), "every running car gets its next lobby's car"
+    assert run(f, wire, 600.0, lambda: all(c.next.mode == "stand" for c in f.cars)), "each drives lap 1 and boxes"
+    assert all(c.next.lap == 1 for c in f.cars), [c.next.lap for c in f.cars]
+    assert all(c.mode == "drive" and c.active == 0 for c in f.cars), "the old lobby races on meanwhile"
+    f.box()
+    assert run(f, wire, 600.0, lambda: all(c.mode == "stand" for c in f.cars))
+    run(f, wire, 20.0)
+    assert all(c.next is not None and c.next.mode == "stand" for c in f.cars), \
+        "no next car leaves its box before the change is allowed"
+    f.allow_change()
+    assert run(f, wire, 120.0, lambda: all(c.next is None and c.active == 1 and c.mode == "drive" for c in f.cars)), \
+        [(c.entry, c.active, c.mode) for c in f.cars]
+    old = {k: wire.count(f"c{k}s0") for k in range(3)}
+    run(f, wire, 5.0)
+    assert {k: wire.count(f"c{k}s0") for k in range(3)} == old, "the old lobby's senders stop at the change"
+    assert all(wire.last(f"c{k}s1")["speed_kmh"] > 0 for k in range(3)), "the next drivers race on"
+    assert f.stint == 1
+
+
 def t_a_keep_restart_releases_each_car_by_its_given_gap():
     wire = Wire()
     f = field(wire, cars=3)

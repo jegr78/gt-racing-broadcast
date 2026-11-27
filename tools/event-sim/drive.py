@@ -45,6 +45,7 @@ MIN_LENGTH_M = 2 * (PIT_IN_M + BOX_BACK_M)
 MAX_CARS = 15
 PATH_STEP_M = 20.0
 FUEL_CAP = 100.0
+CHANGE_STOP_S = 6.0         # the next car leaves its box this long after its team's old car stood
 DEFAULT_TRACK_M = 1200.0
 
 TEAMS = ("Apex Works #11", "Blue Harbor Racing #22", "Cedar Motorsport #33", "Delta Sim Team #44",
@@ -265,6 +266,8 @@ class Car:
         self.rejoined = False        # joined a new session in this lobby: its lap no longer counts the lobby's
         self.flagged = False         # crossed the line after the chequered flag
         self.flag_sent = False       # ... and that crossing went out: the sender stops
+        self.next = None             # the next lobby's car while this one still races
+        self.owner = None            # on a next car: the old lobby's car it takes over from
 
     @property
     def sender(self):
@@ -296,6 +299,7 @@ class Field:
         self._release = False
         self.box_lead = None         # a leader-first box call: no car enters the pit lane before it
         self.chequered = False
+        self.change_allowed = False  # next cars may leave their box (the broadcast's stint switch)
         self._finish_order = []      # GT7 keeps a finished car at its finishing place
         self.box_station = self.line.length - BOX_BACK_M
         self.errors = 0
@@ -355,6 +359,31 @@ class Field:
                 c.requests.append({"hold": True, "stall": i, "lap": laps - 1 if laps else None})
                 if leader_first and self.box_lead is None:
                     self.box_lead = c.entry
+
+    def open_next(self, stint):
+        """The lobby of 0-based `stint` opens while the current one still races: each running
+        car's next driver starts there on the grid, drives lap 1 and waits in the box. Once
+        `allow_change` came and its team's old car stood CHANGE_STOP_S in the old lobby's
+        box, the next car leaves and takes over; the old sender stops."""
+        if stint < 0:
+            raise DriveError("a stint counts from 1")
+        self.stint, self.change_allowed = stint, False
+        for c in self.cars:
+            if c.mode in ("dropped", "off") or c.next is not None:
+                continue
+            nxt = min(stint, len(c.senders) - 1)
+            if c.senders[nxt] is c.sender:
+                continue                    # a driver staying on changes nothing until the old lobby ends
+            twin = Car(c.k, c.entry, c.senders, c.base, FUEL_CAP, self.gap_m)
+            twin.active, twin.owner = nxt, c
+            twin.mode = "drive"
+            twin.requests = [{"hold": True, "change": True, "stall": 0, "lap": 1}]
+            twin.sender.new_session()
+            c.next = twin
+
+    def allow_change(self):
+        """The broadcast switched stints: each next car may take over at its box stop."""
+        self.change_allowed = True
 
     def lobby(self, stint):
         """The lobby of 0-based `stint` opens: its drivers stand in the box beside the
@@ -435,7 +464,8 @@ class Field:
 
     def snapshot(self):
         return [{"entry": c.entry, "mode": c.mode, "lap": c.lap, "driver": c.driver,
-                 "sending": c.mode not in ("dropped", "off") and c.sender.code is not None}
+                 "sending": c.mode not in ("dropped", "off") and c.sender.code is not None,
+                 "next": c.next.mode if c.next is not None else None}
                 for c in self.cars]
 
     # -- the clock -----------------------------------------------------------------
@@ -450,8 +480,10 @@ class Field:
                 (c for c in self.cars if c.mode not in ("dropped", "off") and c not in self._finish_order),
                 key=lambda c: -c.odo)
             self._places = {c.entry: (k, len(running)) for k, c in enumerate(running, 1)}
-        for car in self.cars:
+        for car in list(self.cars):
             self._step(car, now, dt, post)
+            if car.next is not None:
+                self._step(car.next, now, dt, post)
         if flush:
             self.flush(self.take())
 
@@ -483,9 +515,22 @@ class Field:
         p = car.pit
         if p["stood"] is None:
             p["stood"] = now
+        if p.get("change"):
+            old = car.owner
+            return self.change_allowed and old.mode in ("stand", "off", "dropped") and \
+                (old.mode != "stand" or now - (old.pit["stood"] or now) >= CHANGE_STOP_S)
         if p.get("hold"):
             return self.released_at is not None and "delay" in p and now >= self.released_at + p["delay"]
         return now - p["stood"] >= p["seconds"]
+
+    def _take_over(self, twin):
+        """`twin` leaves its box: it is its team's car from now on, the old one stops."""
+        old = twin.owner
+        old.mode, old.v, old.requests, old.next = "off", 0.0, [], None
+        twin.owner = None
+        self.cars[self.cars.index(old)] = twin
+        if self.box_lead == old.entry:
+            self.box_lead = None
 
     def _step(self, car, now, dt, post=True):
         if car.flag_sent and car.mode != "off":
@@ -530,6 +575,8 @@ class Field:
                     car.lap = 0
                 car.fuel = FUEL_CAP
                 car.mode, car.pit["q"], car.left_at = "pit_out", 0.0, now
+                if car.owner is not None:
+                    self._take_over(car)
         elif car.mode == "pit_out":
             p = car.pit
             accel = car.pace ** 2 / (2 * PIT_IN_M)
@@ -550,7 +597,7 @@ class Field:
         if not post:
             return
         x, z = self.line.at(car.odo, car.lat)
-        place = self._places.get(car.entry, (None, None))
+        place = self._places.get(car.entry, (None, None)) if car.owner is None else (None, None)
         self._post(car.sender, car.lap, speed, x, z, car.fuel, place)
         car.flag_sent = car.flagged
         if car.extra is not None and car.mode == "stand":

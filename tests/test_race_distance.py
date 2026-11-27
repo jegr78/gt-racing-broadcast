@@ -492,6 +492,29 @@ def t_endurance_change_continues_from_the_old_cars_anchor():
     assert row["pit_stops"] == 1, f"the driver change at a stint switch is a pit stop: {row}"
 
 
+def t_overlapping_lobbies_switch_each_car_at_its_box_stop():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    old, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 10, "Ann")
+    t = _drive(race, [old, rival], [50, 50], 0.0, 60)
+    new = Car(race, "A", "a2", L - 15, "Lea")                     # the next lobby opens, old still racing
+    t = _drive(race, [old, new, rival], [50, 40, 50], t, 4)
+    row = _row(race, "A", t)
+    assert row["driver"] == "Max", f"the old driver still counts while the new one drives lap 1: {row}"
+    new.box = True
+    t = _drive(race, [old, new, rival], [50, None, 50], t, 20)    # the new car waits in its box
+    row = _row(race, "A", t)
+    assert row["driver"] == "Max" and row["status"] == "racing", f"a waiting next car changes nothing: {row}"
+    race.open_change_window(t)                                    # NEXT
+    old.box = True
+    t = _drive(race, [old, new, rival], [None, None, 50], t, 3)
+    anchor = _row(race, "A", t)["distance_m"]
+    new.box = False
+    t = _drive(race, [old, new, rival], [None, 40, 50], t, 10)
+    row = _row(race, "A", t)
+    assert row["driver"] == "Lea" and abs(row["distance_m"] - (anchor + 400)) < 25, (row, anchor)
+    assert row["pit_stops"] == 1, row
+
+
 def t_a_driver_staying_on_continues_into_the_next_lobby():
     race = rd.Race(TRACE, formation=False, multi_lobby=True)
     car, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 10, "Ann")

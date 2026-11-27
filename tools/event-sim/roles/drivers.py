@@ -4,7 +4,8 @@ driver. No page: the `driver` page role shows the registration form for one of t
 
 `register` only asks (with `now` only some stints; `register_stint` registers a later
 one before its lobby); Race Control approves on its desk. The other actions are what
-happens on track: `start`, `pit`, `box`, `lobby`, `release`, `drop`, `rejoin`, `stop`."""
+happens on track: `start`, `pit`, `box`, `lobby`, `next_lobby`, `change`, `release`, `drop`,
+`rejoin`, `stop`."""
 import http.client
 
 import drive
@@ -21,7 +22,9 @@ class DriversRole(Role):
     page registers, now: the stints that register at once), `register_stint` (stint),
     `start`, `pit` (entry, seconds), `box` (order: "race",
     "grid" or a list of entries; leader_first), `lobby` (stint), `release` (gaps), `drop` (entry),
-    `rejoin` (entry, seconds), `stop` (entries). An entry is its team label or its grid slot."""
+    `rejoin` (entry, seconds), `stop` (entries), `next_lobby` (stint: opens while the current
+    lobby still races), `change` (the next cars take over at their box stop). An entry is its
+    team label or its grid slot."""
     kind = "drivers"
     client_factory = drive.Client
     runner_factory = drive.Runner
@@ -237,6 +240,19 @@ class DriversRole(Role):
         self._registered_for(stint - 1)
         self._do(lambda: (self._seats_of(stint - 1), self._field().lobby(stint - 1)), "open the lobby")
 
+    def act_next_lobby(self, args):
+        """The `stint` lobby opens while the current one races its last laps: the next
+        drivers start there, drive lap 1 and wait in the box for their team's car."""
+        stint = args.get("stint")
+        if type(stint) is not int or stint < 1:
+            raise StepError("next_lobby needs args.stint, counted from 1")
+        self._registered_for(stint - 1)
+        self._do(lambda: (self._seats_of(stint - 1), self._field().open_next(stint - 1)), "open the next lobby")
+
+    def act_change(self, args):
+        """The broadcast switched stints: each next car takes over at its box stop."""
+        self._do(self._field().allow_change, "allow the change")
+
     def act_release(self, args):
         """The held cars leave the box; with `gaps` (the rows of a race reading, such as
         race right before a red flag) each leaves its gap after the first; a car without
@@ -278,9 +294,11 @@ class DriversRole(Role):
             return {"registered": 0, "cars": []}
         cars = self._do(self.field.snapshot, "report")
         modes = [c["mode"] for c in cars]
+        waiting = [c["next"] for c in cars if c.get("next")]
         return {"registered": self.registered, "cars": cars, "driving": modes.count("drive"),
                 "standing": modes.count("stand"), "sending": sum(1 for c in cars if c["sending"]),
-                "ingest_errors": self.field.errors}
+                "next_driving": waiting.count("drive"), "next_standing": waiting.count("stand"),
+                "next_waiting": len(waiting), "ingest_errors": self.field.errors}
 
     def close(self):
         out = []
