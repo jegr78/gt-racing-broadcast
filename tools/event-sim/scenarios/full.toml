@@ -1253,8 +1253,8 @@ timeout = "20s"
 caption = "The race leader is in the box: the director puts the splitscreen on program"
 focus = ["program", "director"]
 
-# NEXT right after the splitscreen: it opens the relay's change window before the first
-# next-lobby car leaves its box.
+# NEXT right after the splitscreen opens the relay's change window. A next-lobby car that
+# left on its go signal before it takes over when the window opens.
 [[step]]
 id = "next2"
 at = "after:split2"
@@ -1756,8 +1756,8 @@ timeout = "20s"
 caption = "The race leader is in the box: the director puts the splitscreen on program"
 focus = ["program", "director"]
 
-# NEXT right after the splitscreen: it opens the relay's change window before the first
-# next-lobby car leaves its box.
+# NEXT right after the splitscreen opens the relay's change window. A next-lobby car that
+# left on its go signal before it takes over when the window opens.
 [[step]]
 id = "next3"
 at = "after:split3"

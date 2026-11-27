@@ -306,7 +306,7 @@ class Field:
         self._release = False
         self.box_lead = None         # a leader-first box call: no car enters the pit lane before it
         self.chequered = False
-        self.change_allowed = False  # next cars may leave their box (the broadcast's stint switch)
+        self.change_allowed = False  # the broadcast switched stints: a staying driver or a dropped team's next car goes
         self.next_stint = None       # the open next lobby's stint until every team changed
         self._finish_order = []      # GT7 keeps a finished car at its finishing place
         self.box_station = self.line.length - BOX_BACK_M
@@ -397,7 +397,9 @@ class Field:
             c.next = twin
 
     def allow_change(self):
-        """The broadcast switched stints: each next car may take over at its box stop."""
+        """The broadcast switched stints: a driver staying on starts its new session, and the
+        next car of a team whose old car dropped gets its go; the stint moves on once every
+        team changed. The other next cars go on their old car's change stop alone."""
         self.change_allowed = True
         self._advance()
 
@@ -458,7 +460,7 @@ class Field:
         car = self.car(entry)
         if car.mode != "dropped":
             raise DriveError(f"{entry!r} is not dropped")
-        car.active = min(self.stint, len(car.senders) - 1)
+        car.active = max(car.active, min(self.stint, len(car.senders) - 1))   # a car that took over keeps its driver
         car.extra = None
         car.sender.new_session()
         car.lap, car.rejoined = 0, True
@@ -552,17 +554,28 @@ class Field:
                 car.sender.new_session()
             return now - p["restart"] >= CHANGE_STOP_S
         if p.get("change"):
-            old = car.owner
-            if old.mode == "stand" and old.pit.get("stood") is not None:
-                go = old.pit["stood"]                 # the old driver's go signal
-            elif old.mode in ("off", "dropped"):
-                go = p["stood"]
-            else:
-                return False
-            return now >= max(go, p["stood"]) + TYRE_CHANGE_S + max(0.0, car.fill - car.fuel) / REFUEL_LPS
+            if "go" not in p:
+                old = car.owner
+                if old.mode == "stand" and old.pit.get("hold") and old.pit.get("stood") is not None:
+                    p["go"] = old.pit["stood"]        # the old driver stopped for the change: the go signal
+                elif old.mode in ("off", "dropped") and self.change_allowed:
+                    p["go"] = now                     # nobody to give it: the stint switch does
+                else:
+                    return False
+                p["fuel0"] = car.fuel
+            refuel = now - max(p["go"], p["stood"]) - TYRE_CHANGE_S
+            if refuel > 0:
+                car.fuel = min(car.fill, p["fuel0"] + refuel * REFUEL_LPS)
+            return car.fuel >= car.fill
         if p.get("hold"):
             return self.released_at is not None and "delay" in p and now >= self.released_at + p["delay"]
         return now - p["stood"] >= p["seconds"]
+
+    def _box_lap_reached(self, lap):
+        """A rejoined car's counter restarted: it boxes once a car of its lobby that did not
+        rejoin reached `lap`."""
+        return not lap or any(c.lap >= lap for c in self.cars
+                              if not c.rejoined and c.mode not in ("dropped", "off"))
 
     def _take_over(self, twin):
         """`twin` leaves its box: it is its team's car from now on, the old one stops."""
@@ -590,7 +603,8 @@ class Field:
             pos = car.odo % length
             waits = car.requests and (
                 (car.owner is None and self.box_lead not in (None, car.entry) and car.requests[0].get("hold"))
-                or (not car.rejoined and car.lap < (car.requests[0].get("lap") or 0)))
+                or (car.lap < (car.requests[0].get("lap") or 0)
+                    if not car.rejoined else not self._box_lap_reached(car.requests[0].get("lap"))))
             if car.requests and not waits and entry_s <= pos < entry_s + speed * dt + 1:
                 if car.owner is None and self.box_lead == car.entry and car.requests[0].get("hold"):
                     self.box_lead = None

@@ -502,6 +502,74 @@ def t_a_next_car_stands_as_long_as_its_refuelling_takes_from_the_go_signal():
         f"it leaves {wire.now - go:.1f} s after the go, tyres then refuelling take {need:.1f} s"
 
 
+def t_only_the_old_car_s_change_stop_is_the_go_signal():
+    wire, f = _overlap(cars=2)
+    f.open_next(1)
+    assert run(f, wire, 600.0, lambda: all(c.next.mode == "stand" for c in f.cars))
+    f.pit(TEAMS[0], 5.0)
+    f.drop(TEAMS[1])
+    f.rejoin(TEAMS[1], 60.0)
+    run(f, wire, 90.0)
+    assert all(c.next is not None and c.next.mode == "stand" for c in f.cars), \
+        "a plain pit stop or a rejoin stand gives no go"
+
+
+def t_a_next_car_of_a_dropped_team_waits_for_the_stint_switch():
+    wire, f = _overlap(cars=2)
+    f.open_next(1)
+    assert run(f, wire, 600.0, lambda: all(c.next.mode == "stand" for c in f.cars))
+    f.drop(TEAMS[0])
+    run(f, wire, 90.0)
+    assert f.car(TEAMS[0]).next is not None, "nobody gives a dropped team's next driver the go"
+    f.allow_change()
+    assert run(f, wire, 120.0, lambda: f.car(TEAMS[0]).active == 1 and f.car(TEAMS[0]).mode == "drive"), \
+        "the stint switch lets it go"
+
+
+def t_a_car_that_took_over_rejoins_with_its_own_driver():
+    wire, f = _overlap(cars=2)
+    f.open_next(1)
+    f.box()
+    assert run(f, wire, 900.0, lambda: f.car(TEAMS[0]).active == 1 and f.car(TEAMS[0]).mode == "drive")
+    assert f.stint == 0 or f.car(TEAMS[1]).active == 1
+    f.drop(TEAMS[0])
+    f.rejoin(TEAMS[0], 2.0)
+    assert f.car(TEAMS[0]).driver == "D0S1", "it rejoins as the stint 2 driver it already is"
+
+
+def t_a_rejoined_car_boxes_once_the_field_reached_the_box_lap():
+    wire, f = _overlap(cars=3)
+    f.drop(TEAMS[2])
+    f.rejoin(TEAMS[2], 1.0)
+    assert run(f, wire, 60.0, lambda: f.car(TEAMS[2]).mode == "drive")
+    target = max(c.lap for c in f.cars) + 3
+    f.box(laps=target)
+    boxed_at = {}
+    def watch():
+        for c in f.cars:
+            if c.mode in ("pit_in", "stand") and c.entry not in boxed_at:
+                boxed_at[c.entry] = max(x.lap for x in f.cars if not x.rejoined)
+        return len(boxed_at) == 3
+    assert run(f, wire, 1500.0, watch)
+    assert boxed_at[TEAMS[2]] >= target - 1, f"the rejoined car waits for the field's box lap: {boxed_at}"
+
+
+def t_the_next_car_s_fuel_rises_while_it_refuels():
+    wire, f = _overlap(cars=1)
+    f.open_next(1)
+    twin = f.cars[0].next
+    assert run(f, wire, 600.0, lambda: twin.mode == "stand")
+    f.box()
+    levels = []
+    def watch():
+        if twin.mode == "stand":
+            levels.append(wire.last("c0s1")["fuel"])
+        return f.cars[0] is twin and twin.mode != "stand"
+    assert run(f, wire, 900.0, watch)
+    rising = [b for a, b in zip(levels, levels[1:], strict=False) if b > a]
+    assert len(rising) > 20 and levels[0] < 10 < levels[-1], f"the gauge climbs at the refuel rate: {levels[::50]}"
+
+
 def t_the_next_lobby_keeps_the_old_cars_boxing_behind_their_leader():
     wire, f = _overlap(cars=4)
     f.open_next(1)
