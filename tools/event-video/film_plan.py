@@ -85,14 +85,16 @@ def has_cards(timeline):
 
 
 def with_cards(timeline, scenario):
-    """The timeline with the intro, outro and step cards (by step id) of `scenario`, the
-    parsed scenario TOML."""
+    """The timeline with the intro, outro and step cards of `scenario`, the parsed scenario
+    TOML; a card goes on the step of its id only when that step opens the same chapter."""
     out = dict(timeline)
     for key in ("intro", "outro"):
         if scenario.get(key) is not None:
             out[key] = scenario[key]
-    cards = {s.get("id", s.get("do")): s["card"] for s in scenario.get("step") or [] if s.get("card") is not None}
-    out["steps"] = [dict(s, card=cards[s["id"]]) if s.get("id") in cards else s for s in timeline.get("steps") or []]
+    cards = {s.get("id", s.get("do")): (s.get("chapter"), s["card"])
+             for s in scenario.get("step") or [] if s.get("card") is not None}
+    out["steps"] = [dict(s, card=cards[s["id"]][1]) if s.get("chapter") and cards.get(s.get("id"), (None,))[0] == s["chapter"]
+                    else s for s in timeline.get("steps") or []]
     return out
 
 
@@ -404,6 +406,8 @@ class Plan:
                 s["card"] = check_card(s["card"], f"{s['id']} step's")
                 if not s.get("caption"):
                     raise ValueError(f"the {s['id']} step's card needs a caption on its step")
+                if not s.get("chapter"):
+                    raise ValueError(f"the {s['id']} step's card needs a chapter on its step")
         intro, outro = (check_card(timeline[k], k) if timeline.get(k) is not None else None for k in ("intro", "outro"))
         self.recordings = list(timeline.get("recordings") or [])
         self.durations = durations or {}
@@ -631,20 +635,20 @@ class Plan:
     def _make_chapters(self):
         """[(mark, shown, title)]: a chapter with a card is marked at the card's start and
         shows in the chapter bar once the card has gone. The first mark is 0:00."""
-        rows = []
+        rows, first_card = [], False
         for s in self.steps:
             if not s.get("chapter"):
                 continue
             marks = self._marks.get(s["id"], {})
             shown = marks["shown"] if "shown" in marks else self.out_time(s["start"] - self.lead_in)
             if "card" in marks:
+                first_card = first_card or not rows
                 rows.append((marks["card"], max(shown, marks["card"] + CHAPTER_CARD_S), s["chapter"]))
             else:
                 rows.append((shown, shown, s["chapter"]))
         if rows:
             mark, shown, title = rows[0]
-            opens_on_card = self.segments[0].card is not None
-            rows[0] = (0.0, shown if opens_on_card else 0.0, title)
+            rows[0] = (0.0, shown if first_card or self.segments[0].card is not None else 0.0, title)
         return rows
 
     def cues(self):

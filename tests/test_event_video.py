@@ -670,6 +670,14 @@ def t_a_card_on_a_step_without_a_caption_is_refused():
         assert "caption" in str(exc), exc
     else:
         raise AssertionError("a card on an uncaptioned step is refused")
+    tl = cards_timeline()
+    tl["steps"][3]["card"] = SWAP_CARD
+    try:
+        fp.Plan(tl)
+    except ValueError as exc:
+        assert "chapter" in str(exc), exc
+    else:
+        raise AssertionError("a card on a step that opens no chapter is refused")
 
 
 def t_a_caption_still_acting_stops_at_a_card():
@@ -694,6 +702,21 @@ def t_the_first_chapter_lights_up_after_the_intro():
     late = intro + round((fp.CHAPTER_FRESH_S - 0.2) * p.fps)
     assert p.frame(intro)["chapter_fresh"] and p.frame(late)["chapter_fresh"], \
         "the first chapter's highlight runs its full time after the intro"
+
+
+def t_a_first_chapter_with_a_card_later_in_the_film_shows_after_its_card():
+    tl = timeline()
+    steps = {s["id"]: s for s in tl["steps"]}
+    del steps["pick"]["chapter"]
+    steps["switch"]["card"] = SWAP_CARD
+    p = fp.Plan(tl)
+    (start, n, _title), = [x for x in _card_spans(p) if x[2] == SWAP_CARD["title"]]
+    assert start > 0, "the film opens on the recording, not on the card"
+    assert p.frame(start - 1)["chapter"] is None, "the first chapter's title waits for its card"
+    after = start + n
+    assert p.frame(after)["chapter"] == "Driver swap 1" and p.frame(after)["chapter_fresh"], \
+        "the title lights up as new once its card has gone"
+    assert p.chapters()[0] == (0.0, "Driver swap 1"), "chapters.txt still starts at 0:00"
 
 
 def t_a_first_step_that_started_before_its_view_shows_its_caption_from_frame_0():
@@ -729,10 +752,16 @@ intro = { title = "Intro", subtitle = "From the scenario" }
 outro = { title = "Outro", subtitle = "From the scenario" }
 [[step]]
 id = "switch"
+chapter = "Driver swap 1"
 card = { title = "Swap", subtitle = "From the scenario" }
 [[step]]
+do = "pick"
+chapter = "Start the event"
+card = { title = "Start", subtitle = "An id that defaults to its action" }
+[[step]]
 do = "desk"
-card = { title = "Desk", subtitle = "An id that defaults to its action" }
+chapter = "Desk"
+card = { title = "Desk", subtitle = "A chapter the recording does not have" }
 """
 
 
@@ -745,7 +774,8 @@ def t_a_recording_without_cards_takes_them_from_its_scenario_file():
         assert tl["intro"]["title"] == "Intro" and tl["outro"]["title"] == "Outro", "the scenario's intro and outro"
         cards = {s["id"]: s.get("card") for s in tl["steps"]}
         assert cards["switch"] == {"title": "Swap", "subtitle": "From the scenario"}, "a card by step id"
-        assert cards["desk"]["title"] == "Desk", "a step's id defaults to its action, as in the loader"
+        assert cards["pick"]["title"] == "Start", "a step's id defaults to its action, as in the loader"
+        assert not cards["desk"], "a card whose chapter the recorded step does not open stays out"
         assert sum(1 for c in cards.values() if c) == 2, cards
         p = fp.Plan(json.loads(json.dumps(tl)))
         assert [p.frame(i) for i in range(0, p.frames, 7)] == [fp.Plan(tl).frame(i) for i in range(0, p.frames, 7)], \
@@ -761,7 +791,8 @@ def t_a_recording_without_cards_takes_them_from_its_scenario_file():
 
 def t_the_full_scenario_carries_the_film_s_cards():
     with tempfile.TemporaryDirectory() as rec:
-        steps = [_step("track", "producer", 0, 1, 2), _step("start_event", "producer", 3, 4, 5)]
+        steps = [_step("track", "producer", 0, 1, 2, chapter="Qualifying (the day before)"),
+                 _step("start_event", "producer", 3, 4, 5, chapter="Race day: start the event")]
         _write(os.path.join(rec, "timeline.json"), json.dumps({"scenario": "full", "steps": steps, "recordings": []}))
         tl = fp.load_timeline(rec)
     assert tl["intro"] == {"title": "GT Racing Broadcast", "subtitle": "An endurance event from qualifying to the flag"}

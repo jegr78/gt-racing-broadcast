@@ -1116,7 +1116,8 @@ python3 tools/build-event-video.py DIR [--music FILE] [--workers N] [--from T] [
 - Title cards: the intro (5 s), a card before each chapter whose step has one (3 s) and
   the outro (6 s) add film time and play no source time. A recording whose timeline has no
   card takes them from `tools/event-sim/scenarios/<scenario>.toml`, so an older recording
-  gets the current texts.
+  gets the current texts; a step card only lands on a recorded step that opens the same
+  chapter.
 - Outputs under `runtime/event-video/<name of DIR>/` (or `--out`): `event-walkthrough.mp4`,
   `chapters.txt` and `captions.vtt`, plus `work/` with the transcodes and segments.
 - Films, clips and recordings are never committed; the user uploads the film.
