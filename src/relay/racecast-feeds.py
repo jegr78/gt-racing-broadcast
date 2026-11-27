@@ -12379,6 +12379,23 @@ def _push_live_schedule(relay, setup_ctl):
         setup_ctl.set_field("stint", row["stint"])
 
 
+def seed_launch_hud(relay, setup_ctl):
+    """At launch, write the on-air row's Streamer + Stint label into the HUD. In race mode
+    only over a qualifying label the previous event left in the Sheet, so a restart in the
+    middle of a race keeps the label on air, also one the director set by hand."""
+    if getattr(relay, "solo", False) or relay.mode not in ("race", "qualifying"):
+        return
+    if relay.mode == "race":
+        try:
+            label = (setup_ctl.hud.data() or {}).get("stint")
+            quali = {row[2] for row in setup_ctl.qual_source.get_rows()} if setup_ctl.qual_source else set()
+        except Exception:                                # noqa: BLE001  best-effort, like every HUD write
+            return
+        if not label or label not in quali:
+            return
+    _push_live_schedule(relay, setup_ctl)
+
+
 def should_push_live_schedule(result):
     """True when a next_auto() result should trigger _push_live_schedule: a real
     cut (obs_cut) OR a same-URL back-to-back continuation. The DISPLAY stint
@@ -17354,11 +17371,8 @@ def main():
     relay.start()
     if not args.solo:
         relay._reflect(relay.live_feed(), cut=False)     # pre-set Stint visibility/audio for the live feed
-    # Launching straight into qualifying mode: seed the HUD Streamer/Stint from
-    # the qualifying row now (the /mode switch does this live; the launch path
-    # should match so the HUD isn't stale until the first action). Best-effort.
-    if relay.mode == "qualifying" and setup_ctl:
-        _push_live_schedule(relay, setup_ctl)
+    if setup_ctl:
+        seed_launch_hud(relay, setup_ctl)
 
     stop_evt = threading.Event()
     if source is not None:
@@ -17511,10 +17525,12 @@ def main():
         """What the driver dashboard shows beside the race (#1115)."""
         rows = schedule_rows(relay)
         cur = live_schedule_row(rows, relay.on_air_row_idx()) if rows else None
-        remaining, running = public_remaining(timer_store.data() if timer_store else None)
+        timer = timer_store.data() if timer_store else None
+        remaining, running = public_remaining(timer)
         return {"roster": hud_source.roster_details() if hud_source else {},
                 "stint": cur["stint"] if cur else None, "remaining": remaining,
                 "remaining_running": running,
+                "timer_shown": bool(hud_source and timer and timer.get("visible")),
                 "mode": relay.mode, "segment": cur["stint"] if cur and relay.mode == "qualifying" else None,
                 "connections": driver_hub.connections() if relay.mode == "qualifying" else []}
 

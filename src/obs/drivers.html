@@ -363,9 +363,12 @@
   }
   function renderRace(d) {
     const lap = d.lap || {};
+    // A visible HUD timer already shows the time, so the header shows the race lap. An
+    // endurance race's lap count comes from the stint lobbies and stays off air then.
+    const count = lap.count && !(d.timer_shown && d.multi_lobby) ? " / " + lap.count : "";
     document.getElementById("dd-lap").textContent =
-      typeof d.remaining === "number" ? clock(d.remaining)
-      : lap.leader ? "LAP " + lap.leader + (lap.count ? " / " + lap.count : "") : "";
+      typeof d.remaining === "number" && !d.timer_shown ? clock(d.remaining)
+      : lap.leader ? "LAP " + lap.leader + count : "";
     const fl = d.fastest;
     const list = d.classes || [];
     noteLaps(d.entries || []);
@@ -421,7 +424,8 @@
   }
   function renderQualifying(d) {
     // The session line names the segment; a running timer takes the lap line, as in the race.
-    document.getElementById("dd-lap").textContent = typeof d.remaining === "number" ? clock(d.remaining) : "QUALIFYING";
+    document.getElementById("dd-lap").textContent =
+      typeof d.remaining === "number" && !d.timer_shown ? clock(d.remaining) : "QUALIFYING";
     const list = d.classes || [];
     const entries = d.qualifying || [];
     noteLaps(entries);
