@@ -595,6 +595,12 @@ def path_in(runtime_dir):
 
 LOCK_WAIT_S = 2.0
 LOCK_STALE_S = 10.0       # a lock older than this was left by a crashed process
+# Windows refuses to create a file another handle still holds while it is being deleted.
+_DELETE_PENDING = (PermissionError,) if os.name == "nt" else ()
+
+
+def _create_lock(lock):
+    os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
 
 
 @contextlib.contextmanager
@@ -606,8 +612,13 @@ def file_lock(path):
     deadline = time.monotonic() + LOCK_WAIT_S
     while True:
         try:
-            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            _create_lock(lock)
             break
+        except _DELETE_PENDING:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.02)
+            continue
         except FileExistsError:
             with contextlib.suppress(OSError):
                 if time.time() - os.path.getmtime(lock) > LOCK_STALE_S:
