@@ -19,7 +19,7 @@ FPS = 30
 LEAD_IN_S = 2.5          # a captioned step's view is large and still before it acts
 HOLD_S = 3.0             # and stays this long after its action returned
 MIN_CAPTION_S = 6.0
-MAX_ACTION_S = 8.0       # a longer action outside a swap chapter plays this much in real time, the rest sped up
+MAX_ACTION_S = 8.0       # a longer action plays this much in real time, the rest sped up; a four-view switch plays in full
 RUN_SHOWN = 3            # of a run of steps with the same role and action, the later ones play sped up
 SWAP_HOLD_S = 6.0        # the hold of each step in a chapter with a four-view switch
 WAIT_SPEED = 8.0
@@ -159,7 +159,7 @@ def beats(steps, lead_in=LEAD_IN_S, hold=HOLD_S):
         h = SWAP_HOLD_S if swap else hold
         if len(s.get("focus") or ()) == 4:
             h = max(h, s["end"] - s["acted"] + hold)
-        out[s["id"]] = (lead_in, math.inf if swap else MAX_ACTION_S, h, MIN_CAPTION_S, None)
+        out[s["id"]] = (lead_in, math.inf if len(s.get("focus") or ()) == 4 else MAX_ACTION_S, h, MIN_CAPTION_S, None)
     return out
 
 
