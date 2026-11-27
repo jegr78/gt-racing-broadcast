@@ -66,6 +66,31 @@ def final_argv(ffmpeg, concat_list, out, duration, music=None):
     return argv + ["-t", f"{duration:.3f}", "-movflags", "+faststart", out]
 
 
+def playlist(tracks, durations, need, xfade=MUSIC_FADE_S):
+    """The tracks in their order, repeated until they cover `need` seconds with a crossfade
+    between each two."""
+    out, total = [], 0.0
+    while not out or total < need:
+        track = tracks[len(out) % len(tracks)]
+        total += durations[track] - (xfade if out else 0.0)
+        out.append(track)
+    return out
+
+
+def bed_argv(ffmpeg, tracks, out, xfade=MUSIC_FADE_S):
+    """ffmpeg joining the tracks into one music bed, each crossfading into the next."""
+    argv = [*ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error", "-y"]
+    for track in tracks:
+        argv += ["-i", track]
+    chain, last = [], "[0:a]"
+    for k in range(1, len(tracks)):
+        chain.append(f"{last}[{k}:a]acrossfade=d={xfade:.3f}[x{k}]")
+        last = f"[x{k}]"
+    if chain:
+        argv += ["-filter_complex", ";".join(chain), "-map", last]
+    return argv + ["-c:a", "flac", out]
+
+
 def byte_range(header, size, chunk=None):
     """(first, last) of a single `bytes=` range, at most `chunk` bytes long, None without a
     usable header, False when it cannot be satisfied."""
@@ -351,6 +376,24 @@ def worker_main(job_path):
         return 1
 
 
+def music_bed(tracks, need, work, ffmpeg, ffprobe, run=subprocess.run, log=print):
+    """One file playing the tracks in turn for `need` seconds, or None when one is unreadable."""
+    durations = {}
+    for track in tracks:
+        d = probe_duration(ffprobe, track, run=run)
+        if not d or d <= 2 * MUSIC_FADE_S:
+            log(f"cannot use the music track {track}: no duration or shorter than {2 * MUSIC_FADE_S:g} s")
+            return None
+        durations[track] = d
+    bed = os.path.join(work, "music-bed.flac")
+    done = run(bed_argv(ffmpeg, playlist(tracks, durations, need), bed), capture_output=True, text=True,
+               errors="replace")
+    if done.returncode != 0:
+        log(f"building the music bed failed: {done.stderr[-500:]}")
+        return None
+    return bed
+
+
 def render(plan, timeline, rec_dir, out_dir, frames, workers=4, music=None, options=None,
            ffmpeg=("ffmpeg",), ffprobe=("ffprobe",), script=None, log=print):
     """Render frames [a, b) of the film into out_dir; the whole film is FILM, a part is
@@ -359,6 +402,14 @@ def render(plan, timeline, rec_dir, out_dir, frames, workers=4, music=None, opti
     out_dir = os.path.abspath(out_dir)
     work = os.path.join(out_dir, "work")
     media = os.path.join(work, "media")
+    a, b = frames
+    if isinstance(music, (list, tuple)) and len(music) > 1:
+        os.makedirs(work, exist_ok=True)
+        music = music_bed(music, (b - a) / plan.fps, work, list(ffmpeg), list(ffprobe), log=log)
+        if music is None:
+            return 1
+    elif isinstance(music, (list, tuple)):
+        music = music[0] if music else None
     try:
         urls, durations = transcode_all(plan, rec_dir, media, list(ffmpeg), list(ffprobe), workers, log=log)
     except RuntimeError as exc:
@@ -367,7 +418,6 @@ def render(plan, timeline, rec_dir, out_dir, frames, workers=4, music=None, opti
     plan = fp.Plan(timeline, durations=durations, available=set(urls), **options)
     seg_dir = os.path.join(work, "segments", plan_key(timeline, options, durations))
     os.makedirs(seg_dir, exist_ok=True)
-    a, b = frames
     segs = [(x, y, os.path.join(seg_dir, f"seg-{x:07d}-{y:07d}.mp4")) for x, y in segments(a, b)]
     todo = pending(segs)
     codes = []
