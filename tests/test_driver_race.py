@@ -409,12 +409,12 @@ ROSTER = {"A": {"number": "1", "bgColor": "#c00", "textColor": "#fff", "cupTeam"
           "B": {"number": "2", "bgColor": "#00c", "textColor": "#fff", "cupTeam": ""}}
 
 
-def _dash_service(ctx, path=None):
+def _dash_service(ctx, path=None, multi=False):
     path = path or os.path.join(tempfile.mkdtemp(), "driver-race.json")
     dr.write_settings(path, {"formation": False})
     clock = [0.0]
     svc = dr.Service(path, pick=lambda: {"id": "good"}, trace_for=lambda _i: TRACE,
-                     multi_lobby=lambda: False, clock=lambda: clock[0], context=lambda: ctx)
+                     multi_lobby=lambda: multi, clock=lambda: clock[0], context=lambda: ctx)
     return svc, clock, path
 
 
@@ -465,6 +465,13 @@ def t_the_dashboard_says_whether_the_clock_runs_and_how_much_it_is_delayed():
     clock[0] = 16.0
     svc.tick()
     assert svc.dashboard()["remaining_running"] is False, "a paused timer stops the page's clock"
+    ctx["timer_shown"] = True
+    clock[0] = 22.0
+    svc.tick()
+    clock[0] = 28.0
+    svc.tick()
+    assert svc.dashboard()["timer_shown"] is True, "the tower learns that the HUD shows the timer"
+    assert "timer_shown" not in dr.public_view(svc.dashboard()), "the public page has no HUD to defer to"
 
 def t_the_public_timer_is_the_delayed_one_and_only_its_hud_fields():
     ctx = {"roster": ROSTER, "stint": "Stint 1", "remaining": 600, "remaining_running": True, "mode": "race",
@@ -478,6 +485,14 @@ def t_the_public_timer_is_the_delayed_one_and_only_its_hud_fields():
     assert pub["remaining"] == 600, "the page's clock is as old as its timing rows"
     timer = {k for k in pub if k.startswith("remaining") or k in ("end", "duration_s", "server_now", "sync")}
     assert timer == {"remaining", "remaining_running"}, f"only the HUD's remaining time and run state: {timer}"
+
+
+def t_the_dashboard_says_whether_the_race_runs_over_several_lobbies():
+    for multi in (False, True):
+        svc, _clock, _path = _dash_service({"roster": ROSTER, "stint": "Stint 1", "remaining": None,
+                                            "mode": "race"}, multi=multi)
+        svc.tick()
+        assert svc.dashboard()["multi_lobby"] is multi, f"the dashboard carries the lobby mode: {multi}"
 
 
 def t_the_delay_holds_the_dashboard_back():
@@ -1775,6 +1790,14 @@ def t_the_lobby_lap_reaches_the_crew_and_never_the_viewers():
     assert isinstance(d["lobby_lap"], int) and d["lobby_lap"] >= 1, \
         f"the cockpit's dashboard carries GT7's lobby lap: {d.get('lobby_lap')}"
     assert "lobby_lap" not in json.dumps(dr.public_view(d)), "the public timing data never carries it"
+    pub = dr.public_view(d)
+    assert "count" in pub["lap"] and all("laps" in c for c in pub["classes"]), \
+        f"a single-lobby race shows its lap count to the viewers: {pub['lap']}"
+    d = dict(d, multi_lobby=True)
+    pub = dr.public_view(d)
+    assert set(pub["lap"]) == {"leader"} and all("laps" not in c for c in pub["classes"]), \
+        f"in an endurance race the lap counts come from the stint lobbies and stay on the desks: {pub}"
+    assert "multi_lobby" not in pub, "the flag itself stays off the public page"
     desk = dr.with_brands(svc.standings(), {})
     assert desk["lobby_lap"] == d["lobby_lap"] and set(desk["class_count"]) == {c["name"] for c in d["classes"]}, \
         f"GET /drivers/race gives the desks the lobby lap and the class counts: {desk.get('lobby_lap')} {desk.get('class_count')}"

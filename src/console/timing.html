@@ -11,7 +11,9 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 system-ui, sans-serif; }
   header { padding: 14px 16px 10px; background: var(--panel); border-bottom: 3px solid var(--accent); }
-  header > div { max-width: 1100px; margin: 0 auto; }
+  header > div { max-width: 1100px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  #clock { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+  #clock[hidden] { display: none; }
   header h1 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: .02em; }
   #session { margin-top: 4px; color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
   #session .flag { color: #ff6b6b; font-weight: 800; }
@@ -89,8 +91,11 @@
 </head>
 <body>
 <header><div>
-  <h1>Live timing</h1>
-  <div id="session"></div>
+  <div>
+    <h1>Live timing</h1>
+    <div id="session"></div>
+  </div>
+  <div id="clock" hidden></div>
 </div></header>
 <main>
   <section id="league" hidden></section>
@@ -466,14 +471,9 @@
     const parts = [];
     if (quali) parts.push("Qualifying");
     else if (d.lap && d.lap.leader) parts.push("Lap " + d.lap.leader + (d.lap.count ? " / " + d.lap.count : ""));
-    if (typeof d.remaining === "number") parts.push(null);
     if (d.track_name) parts.push(d.track_name);
     if (d.stint) parts.push(d.stint);
-    $("session").replaceChildren(...parts.map(function (p) {
-      const span = el("span", "", p);
-      if (p === null) span.id = "left";
-      return span;
-    }));
+    $("session").replaceChildren(...parts.map(function (p) { return el("span", "", p); }));
     if (d.red_flag) $("session").appendChild(el("span", "flag", "RED FLAG"));
     $("session").appendChild(el("span", "", "")).id = "age";
     tick();
@@ -563,11 +563,11 @@
   // The remaining time counts down locally only while the race timer runs.
   function tick() {
     const since = got ? Math.max(0, (Date.now() - got) / 1000) : 0;
-    const left = $("left");
-    if (left && last) {
+    const clockEl = $("clock");
+    if (clockEl && last) {
       const text = LOGIC.timerText(last.remaining, last.remaining_running, since + dataAge);
-      left.textContent = text ? text + " left" : "";
-      left.hidden = !text;
+      clockEl.textContent = text;
+      clockEl.hidden = !text;
     }
     const ageEl = $("age");
     if (ageEl && got) {

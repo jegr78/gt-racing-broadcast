@@ -334,6 +334,9 @@ def public_view(snap):
     def rows(items):
         return [{k: r[k] for k in _PUBLIC_ROW if k in r} for r in items or ()]
     out = {k: snap[k] for k in _PUBLIC_TOP if k in snap}
+    multi = snap.get("multi_lobby") is True      # its lap counts come from the stint lobbies, a crew matter
+    if multi and isinstance(snap.get("lap"), dict):
+        out["lap"] = {"leader": snap["lap"].get("leader")}
     fl = snap.get("fastest")
     if fl:
         out["fastest"] = {k: fl.get(k) for k in _PUBLIC_LAP}
@@ -341,7 +344,7 @@ def public_view(snap):
         out["fastest"] = None
     if snap.get("classes"):
         out["classes"] = [{"name": c.get("name"), "color": c.get("color"), "lap": c.get("lap"),
-                           "laps": c.get("laps"),
+                           **({} if multi else {"laps": c.get("laps")}),
                            "fastest": {k: c["fastest"].get(k) for k in _PUBLIC_LAP} if c.get("fastest") else None}
                           for c in snap["classes"]]
     if "qualifying" in snap:
@@ -844,6 +847,7 @@ class Service:
         pick = self._pick() or {}
         out = {"v": 1, "mode": ctx.get("mode") or "race", "stint": ctx.get("stint"),
                "remaining": ctx.get("remaining"), "remaining_running": bool(ctx.get("remaining_running")),
+               "timer_shown": bool(ctx.get("timer_shown")),
                "track": pick.get("id"), "track_name": pick.get("track") or None,
                "visible": self._settings()["visible"]}
         race = self._current()
@@ -876,7 +880,7 @@ class Service:
         fl = race.fastest
         out.update({
             "state": st["state"], "red_flag": st["red_flag"] is not None, "lap": st["lap"],
-            "lobby_lap": st["lobby_lap"],
+            "lobby_lap": st["lobby_lap"], "multi_lobby": bool(race.multi_lobby),
             "fastest": self._shown_lap(race, fl, roster),
             "classes": [{"name": name, "color": colors.get(name, ""),
                          "lap": st["class_lap"][name],

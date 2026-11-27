@@ -420,7 +420,10 @@ colour, driver, the `Cup Team` from the [Configuration tab](Sheet-Template), gap
 pit stops, race laps (in endurance also the laps of the current stint lobby), the last
 completed lap time, fuel, each car's position for the track map, the leader's race lap
 against the lap count in race laps (in endurance once the final lobby's car counts; never
-past the count), the remaining time of the race timer and the fastest race lap.
+past the count), the remaining time of the race timer and the fastest race lap. In an
+endurance race the lap counts come from the stint lobbies, so the public page shows the
+leader's lap without them. While the HUD shows the race timer, the tower's header line
+shows the leader's race lap instead of the time, so the time is on air once.
 It never carries connection ids, corrections or who made them.
 
 - **Lap times** are timed by the relay between two crossings of the line and taken
@@ -572,8 +575,8 @@ these columns existed shows them only after a redeploy. It has the
 same delay as the broadcast dashboard. Readers can switch columns on and off, and an
 activity list notes new fastest laps, red flags and the chequered flag.
 
-The remaining time of the [race timer](Race-Timer) shows in the line under the title,
-as `1:02:03 left`, counting down while the timer runs and standing while it is paused.
+The remaining time of the [race timer](Race-Timer) shows as a clock at the right of the
+title, counting down while the timer runs and standing while it is paused.
 Unlike the HUD clock it shows no preset duration before the start. It has the same delay as the table, so the clock is never
 ahead of the order it stands next to. Without a race timer, after a reset, with the
 clock hidden on air or once it has run out, the page shows no time. A

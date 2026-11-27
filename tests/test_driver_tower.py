@@ -111,6 +111,24 @@ def _lap(**kw):
     return dict(CAR, **kw)
 
 
+def t_the_header_leaves_the_time_to_a_visible_hud_timer():
+    got = _tower(_RACE + """
+      const head = () => document.getElementById("dd-lap").textContent;
+      const lap = {leader: 5, count: 20};
+      race(1, [], {remaining: 754, lap: lap}); const timed = head();
+      race(1, [], {remaining: 754, lap: lap, timer_shown: true}); const shown = head();
+      race(1, [], {lap: lap}); const untimed = head();
+      renderQualifying({qualifying: [], remaining: 754, timer_shown: true}); const q = head();
+      return [timed, shown, untimed, q];""")
+    if got is None:
+        return
+    timed, shown, untimed, q = got
+    assert timed == "12:34", f"without the HUD timer the tower keeps the time: {timed}"
+    assert shown == "LAP 5", f"with the HUD timer on air the header shows only the race lap: {shown}"
+    assert untimed == "LAP 5 / 20", f"no timer at all keeps the lap and its count: {untimed}"
+    assert q == "QUALIFYING", f"qualifying names the session while the HUD shows the time: {q}"
+
+
 def t_a_new_lap_shows_for_the_league_seconds_then_the_gap():
     got = _tower(_RACE + f"""
       lastLapS = 5;
@@ -1104,6 +1122,21 @@ def t_the_public_page_groups_by_class_and_filters():
     assert got["bad"]["head"] == "<b>GT4</b>Lap 6 / 18" and got["bad"]["kids"] == 0, \
         f"a class name is plain text: {got['bad']}"
     assert "url" not in got["bad"]["color"], f"a colour that is not one never reaches the style: {got['bad']}"
+
+
+def t_the_public_page_shows_the_race_timer_as_its_own_clock():
+    got = _public("""
+      render({mode: "race", entries: [], lap: {leader: 5}, remaining: 754, remaining_running: false});
+      const shown = [text(document.getElementById("clock")), document.getElementById("clock").hidden,
+                     text(document.getElementById("session"))];
+      render({mode: "race", entries: [], lap: {leader: 5}});
+      return shown.concat([document.getElementById("clock").hidden]);""")
+    if got is None:
+        return
+    clock, hidden, session, gone = got
+    assert clock == "12:34" and hidden is False, f"the race timer stands as a clock of its own: {clock!r} {hidden}"
+    assert "left" not in session and session.startswith("Lap 5"), f"the session line keeps the lap only: {session!r}"
+    assert gone is True, "without a race timer the clock is hidden"
 
 
 def t_the_public_page_remembers_the_class_and_forgets_a_gone_one():

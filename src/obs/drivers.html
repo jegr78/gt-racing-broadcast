@@ -363,8 +363,10 @@
   }
   function renderRace(d) {
     const lap = d.lap || {};
+    // A visible HUD timer already shows the time; the header then shows only the race lap.
     document.getElementById("dd-lap").textContent =
-      typeof d.remaining === "number" ? clock(d.remaining)
+      d.timer_shown && typeof d.remaining === "number" ? (lap.leader ? "LAP " + lap.leader : "")
+      : typeof d.remaining === "number" ? clock(d.remaining)
       : lap.leader ? "LAP " + lap.leader + (lap.count ? " / " + lap.count : "") : "";
     const fl = d.fastest;
     const list = d.classes || [];
@@ -421,7 +423,8 @@
   }
   function renderQualifying(d) {
     // The session line names the segment; a running timer takes the lap line, as in the race.
-    document.getElementById("dd-lap").textContent = typeof d.remaining === "number" ? clock(d.remaining) : "QUALIFYING";
+    document.getElementById("dd-lap").textContent =
+      typeof d.remaining === "number" && !d.timer_shown ? clock(d.remaining) : "QUALIFYING";
     const list = d.classes || [];
     const entries = d.qualifying || [];
     noteLaps(entries);
