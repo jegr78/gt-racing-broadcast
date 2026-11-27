@@ -152,6 +152,7 @@ class _Car:
         self.in_box = False
         self.left_box = False      # this sample left the box
         self.box_exit = None       # (t, lap, s) where it last left the box
+        self.box_since = None      # when its current stand in the box began
         self.counting = False
         self.line = None           # the line station this car counts from
         self.provisional = False   # it counts from the reference line's start until its own crossing
@@ -401,10 +402,11 @@ class Race:
                 ent.lobby_ms = []
                 ent.changed, ent.stint_end, ent.switch_pit = False, None, False
                 ent.change_stop = ent.stall = None
+            for ent in list(self._entries.values()):     # every team reset first: a takeover closes the window when all changed
                 car = self._cars.get(ent.active)
                 if car is not None and car.in_box and ent.distance is not None and not self._out(ent) \
                         and ent.change_anchor is None:
-                    ent.change_anchor, ent.change_stop = ent.distance, car.still_since
+                    ent.change_anchor, ent.change_stop = ent.distance, car.box_since
                     self._early_exit(ent, now)
                 ent.halted = None
 
@@ -1010,11 +1012,12 @@ class Race:
         car.left_box = False
         if car.speed < BOX_SPEED_MPS and car.lateral > BOX_LATERAL_M:
             car.still_since = t if car.still_since is None else car.still_since
-            car.in_box = car.in_box or t - car.still_since >= BOX_HOLD_S
+            if not car.in_box and t - car.still_since >= BOX_HOLD_S:
+                car.in_box, car.box_since = True, car.still_since
         else:
             car.still_since = None
             if car.in_box and car.speed >= BOX_LEAVE_MPS:
-                car.in_box, car.left_box = False, True
+                car.in_box, car.left_box, car.box_since = False, True, None
                 car.box_exit = (t, car.lap, car.s)
 
     def _change(self, ent, car, t):
@@ -1033,7 +1036,7 @@ class Race:
         if car.conn == ent.active:
             if window and car.in_box and ent.change_anchor is None and ent.distance is not None \
                     and not ent.changed:
-                ent.change_anchor, ent.change_stop = ent.distance, car.still_since
+                ent.change_anchor, ent.change_stop = ent.distance, car.box_since
                 self._early_exit(ent, t)
             elif car.left_box and ent.relobby and window and car.lap <= MAX_CHANGE_LAP:
                 if self._start(ent, car, t, ent.change_anchor, car.lap, car.s, from_line=False):
@@ -1051,15 +1054,19 @@ class Race:
     def _early_exit(self, ent, t):
         """A team's next car that left its box once the old car stood, but before the window
         opened, takes over from its box exit."""
-        for other in list(self._cars.values()):
-            exit_ = other.box_exit
-            if other.entry != ent.entry or other.conn == ent.active or exit_ is None \
-                    or ent.change_stop is None or exit_[0] < ent.change_stop or exit_[1] > MAX_CHANGE_LAP:
-                continue
-            if self._start(ent, other, exit_[0], ent.change_anchor, exit_[1], exit_[2], from_line=False):
-                ent.active = other.conn
-                self._changed(ent, t)
+        if ent.change_stop is None:
             return
+        left = [c for c in self._cars.values() if c.entry == ent.entry and c.conn != ent.active
+                and c.box_exit is not None and c.box_exit[0] >= ent.change_stop
+                and c.box_exit[1] <= MAX_CHANGE_LAP and c.s is not None]
+        if not left:
+            return
+        other = max(left, key=lambda c: c.box_exit[0])
+        exit_t, exit_lap, exit_s = other.box_exit
+        if self._start(ent, other, exit_t, ent.change_anchor, exit_lap, exit_s, from_line=False):
+            ent.distance = self._raw(other, other.lap, other.s)     # it drove on since its exit
+            ent.active = other.conn
+            self._changed(ent, t, box_exit=exit_t)
 
     def _rejoin_anchor(self, ent):
         """The leader's distance where its car of the old lobby stopped: the stint end
@@ -1071,14 +1078,15 @@ class Race:
                     if e is not ent and e.distance is not None and not self._out(e)
                     and not self._estimated(e)), default=None)
 
-    def _changed(self, ent, t):
+    def _changed(self, ent, t, box_exit=None):
         """The team took over in the next lobby: one pit stop per stint switch, unless
-        one was already counted since the switch."""
+        one was already counted since the switch. `box_exit` is when the new car left its
+        box, when that was before `t`."""
         if not ent.switch_pit:
             ent.pit_stops += 1
             ent.switch_pit = True
         ent.stint_end = ent.distance + ent.adjust
-        ent.stall = None if ent.change_stop is None else (ent.change_stop, t)
+        ent.stall = None if ent.change_stop is None else (ent.change_stop, t if box_exit is None else box_exit)
         ent.change_anchor, ent.changed, ent.held, ent.relobby = None, True, False, False
         ent.ts.append(t)
         ent.ds.append(ent.distance)

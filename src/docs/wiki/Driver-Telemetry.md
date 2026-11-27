@@ -317,7 +317,7 @@ and says so. Changing the layout mid-event starts the race over.
 In an endurance race each stint switch on air opens a window for driver changes. When
 the team's car stands in the box and the next driver's car then leaves the box of the
 next lobby, the team continues from where the old car stopped. The next driver may
-leave the box a little before the switch: if it left once the old car stood in the box,
+leave the box a little before the switch. If it left once the old car stood in the box,
 on lap 1 or 2 of the new lobby, it takes over when the window opens and counts from its
 box exit. A driver who stays on for the next stint does the same with one sender. Lap 1
 of the new lobby before that never counts. Gaps leave out the time the car ahead stood for its change. A lapped
