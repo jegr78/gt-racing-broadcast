@@ -160,6 +160,7 @@ class DriversRole(Role):
     def act_chequer(self, args):
         """The chequered flag: the cars the relay counts finished stop sending at once,
         every other car once it next crosses the line."""
+        self._do(lambda: self._field().chequer(), "chequer")    # first, so no crossing slips past
         done = [r["entry"] for r in self._race_rows() if r.get("finished") is True]
         self._do(lambda: self._field().chequer(done), "chequer")
         return {"finished": done}

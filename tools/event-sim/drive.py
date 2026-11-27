@@ -263,7 +263,8 @@ class Car:
         self.requests = []
         self.left_at = None
         self.rejoined = False        # joined a new session in this lobby: its lap no longer counts the lobby's
-        self.flagged = False         # crossed the line after the chequered flag: stops after this tick
+        self.flagged = False         # crossed the line after the chequered flag
+        self.flag_sent = False       # ... and that crossing went out: the sender stops
 
     @property
     def sender(self):
@@ -295,6 +296,7 @@ class Field:
         self._release = False
         self.box_lead = None         # a leader-first box call: no car enters the pit lane before it
         self.chequered = False
+        self._finish_order = []      # GT7 keeps a finished car at its finishing place
         self.box_station = self.line.length - BOX_BACK_M
         self.errors = 0
         self.outbox = []
@@ -419,7 +421,10 @@ class Field:
         """The chequered flag is out: the cars in `done` have finished and stop sending,
         every other car stops once it next crosses the line."""
         self.chequered = True
-        self.stop([e for e in done])
+        for car in self._pick(list(done)):
+            if car not in self._finish_order:
+                self._finish_order.append(car)
+        self.stop(list(done))
 
     def stop(self, entries=None):
         """The senders of `entries` (default all) close."""
@@ -441,7 +446,9 @@ class Field:
         if self._release:
             self._release, self.released_at = False, now
         if self.positions:
-            running = sorted((c for c in self.cars if c.mode not in ("dropped", "off")), key=lambda c: -c.odo)
+            running = [c for c in self._finish_order] + sorted(
+                (c for c in self.cars if c.mode not in ("dropped", "off") and c not in self._finish_order),
+                key=lambda c: -c.odo)
             self._places = {c.entry: (k, len(running)) for k, c in enumerate(running, 1)}
         for car in self.cars:
             self._step(car, now, dt, post)
@@ -481,7 +488,7 @@ class Field:
         return now - p["stood"] >= p["seconds"]
 
     def _step(self, car, now, dt, post=True):
-        if car.flagged and car.mode != "off":
+        if car.flag_sent and car.mode != "off":
             car.mode, car.v, car.requests = "off", 0.0, []
         if car.mode in ("dropped", "off"):
             return
@@ -537,12 +544,15 @@ class Field:
             line = math.floor(car.odo / length) * length
             frac = (car.odo - line) / max(car.odo - before, 1e-6)
             self._crossed(car, now - frac * dt)
-            car.flagged = self.chequered
+            if self.chequered and not car.flagged:
+                car.flagged = True
+                self._finish_order.append(car)
         if not post:
             return
         x, z = self.line.at(car.odo, car.lat)
         place = self._places.get(car.entry, (None, None))
         self._post(car.sender, car.lap, speed, x, z, car.fuel, place)
+        car.flag_sent = car.flagged
         if car.extra is not None and car.mode == "stand":
             self._post(car.senders[car.extra], 0, 0.0, x, z, FUEL_CAP, place)
 

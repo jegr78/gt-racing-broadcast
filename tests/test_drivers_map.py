@@ -130,12 +130,14 @@ def t_a_car_that_has_finished_leaves_the_map():
         const svg = node("svg"), map = TrackMap.create(svg);
         await map.sync("suzuka");
         map.draw([{entry: "a", number: "7", pos: 1, x: 10, z: 0, finished: true},
-                  {entry: "b", number: "8", pos: 2, x: 90, z: 0, finished: false}]);
+                  {entry: "b", number: "8", pos: 2, x: 90, z: 0, finished: false},
+                  {entry: "c", number: "9", pos: 3, x: 50, z: 0, finished: true, status: "est"}]);
         return dots(svg);
       })().then(r => console.log(JSON.stringify(r)));""")
     if got is None:
         return
-    assert got == ["8"], f"a car past the chequered flag no longer drives around the map: {got}"
+    assert sorted(got) == ["8", "9"], \
+        f"a car past the chequered flag leaves the map, an estimated one stays as on the tower: {got}"
 
 
 def t_the_line_fetch_goes_through_the_pages_fetch_at_call_time():

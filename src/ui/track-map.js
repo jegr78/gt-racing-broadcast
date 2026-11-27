@@ -77,7 +77,7 @@
       if (!cars || !view) return;
       // A car past the chequered flag has finished; GT7 keeps it driving, the map does not.
       const placedCars = entries.filter(function (e) {
-        return e.finished !== true && typeof e.x === "number" && typeof e.z === "number";
+        return !(e.finished === true && e.status !== "est") && typeof e.x === "number" && typeof e.z === "number";
       });
       const spots = placeDots(line.points.map(function (q) { return project(q[0], q[1]); }),
                               placedCars.map(function (e) { return project(e.x, e.z); }));

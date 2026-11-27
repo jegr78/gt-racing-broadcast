@@ -1605,7 +1605,7 @@ class Race:
                 "lapped": lapped or 0,
                 "status": "retired" if retired else
                           ("est" if self._estimated(e) else
-                           "no_sender" if e.active is None else "no_data") if quiet else
+                           "no_sender" if e.active is None else "no_data") if quiet and (e.finished_at is None or self._estimated(e)) else
                           "waiting" if e.distance is None else
                           "box" if car.in_box else
                           "red_flag" if e.waiting else "racing",
