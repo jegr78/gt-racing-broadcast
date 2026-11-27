@@ -818,7 +818,7 @@ action and acts on the controls a person uses; the drivers have no page.
 | `viewer` | `/console/timing` on the event's timing link | `open`, `read` (cars) |
 | `driver` | `/console/drive` on the event's invite link, 390x844, no console token | `open`, `register` (entry, name, stint when the event registers per stint: its number picks the invite's segment label, the key the `drivers` role uses too; the code the page shows goes to the `drivers` role through `ctx.driver_codes`, never into a result) |
 | `probe` | `tools/probe-stage2.py` as the runbook runs it, and the real `racecast-sender.py` (#1116) | `watch`, `mark` (text), `kit` (sheets into the role's temporary folder), `race_reset`, `spectator` (name, position, cars: the sender with the probe key against a simulated PS5; needs `[event] probe = true`), `stop_spectator`, `check` (entry, segment, name: registers and runs `--check`), `report` (`collect` and `report`; its result is `probe_stage2.facts`) |
-| `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints or segment: one invite label such as `Qualifying`, each driver registering once for it, positions: 0x84 from the road order, skip: `[{entry, stint}]` seats the `driver` page registers; such a seat sends with the code that page showed, and `start` or `lobby` fails while it has none), `start`, `pit` (entry, seconds), `box` (order, leader_first: a car reaching the pit entry before the first of the order drives on another lap, laps: the lobby's lap count, so no car boxes before the end of its lap `laps - 1`, a car that rejoined the lobby at its next pit entry), `lobby` (stint), `release` (gaps: the rows of a race reading, for a keep restart), `drop` (entry), `rejoin` (entry, seconds), `stop` (entries), `chequer` (the cars `/drivers/race` counts finished stop sending at once, every other car once the crossing of the line after the flag went out; finished cars keep their place in the 0x84 order; returns `finished`) |
+| `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints or segment: one invite label such as `Qualifying`, each driver registering once for it, now: the 1-based stints that register at once, the others with `register_stint` before their lobby, which `lobby` refuses to open without, positions: 0x84 from the road order, skip: `[{entry, stint}]` seats the `driver` page registers; such a seat sends with the code that page showed, and `start` or `lobby` fails while it has none), `register_stint` (stint: the drivers `register` left for later), `start`, `pit` (entry, seconds), `box` (order, leader_first: a car reaching the pit entry before the first of the order drives on another lap, laps: the lobby's lap count, so no car boxes before the end of its lap `laps - 1`, a car that rejoined the lobby at its next pit entry), `lobby` (stint), `release` (gaps: the rows of a race reading, for a keep restart), `drop` (entry), `rejoin` (entry, seconds), `stop` (entries), `chequer` (the cars `/drivers/race` counts finished stop sending at once, every other car once the crossing of the line after the flag went out; finished cars keep their place in the 0x84 order; returns `finished`) |
 
 `hold` keeps any page role's page in view for `seconds` (at most 300) inside the action, so
 the film plays that stretch in real time under the step's caption.
@@ -944,15 +944,17 @@ times on a maintainer machine, start and teardown included:
   before (about 14 min, 10 of them on its timer: Start event with the Qualifying option, Comms 1's qualifying link
   submitted and approved, Comms 1 on air, one driver on the invite page and the others as
   a second `drivers:quali` field registered for the `Qualifying` segment, Approve all, a
-  10 min timer the director sets and starts by hand as the cars go out, their laps and
+  10 min timer the director sets before going on air and starts by hand as the cars go out, their laps and
   three added on the desk, the cars in once the timer has run out, Stop event). The race
-  event starts in race mode: one driver on the invite page, one request corrected and one rejected, Approve all for
-  the other 40, intro and trailer, crew chat, the finished qualifying timer reset and the
+  event starts in race mode with only the stint 1 drivers registered: one on the invite page, one request
+  corrected and one rejected, Approve all for the other 14, intro and trailer, crew chat, the finished qualifying timer reset and the
   race timer set to the race length, the stint lobbies' lap counts set on the desk, Race
   start on the grid (the timer runs from the first race lap), every car's compound at each
-  stint's start, formation, a pit stop with its compound, a DC (a held suspected phase, its
+  stint's start, formation with Formation Lap as the HUD's Race Control message (cleared at
+  the start; Final Lap and Chequered Flag at the finish), a pit stop with its compound, a DC (a held suspected phase, its
   standings of before the drop), an estimate, a DNF, a late stream link, before each swap
-  a next-stint driver on the invite page, the cars boxing behind the leader at the end of
+  the next stint's drivers registering with `register_stint` and Approve all, one of them
+  on the invite page before swap 1, the cars boxing behind the leader at the end of
   the lobby's second to last lap, the
   splitscreen once the leader stands in the box and NEXT once every car stands there (a
   soft check bounds that wait to 5 min), the cut back to the stint and the new compounds,
