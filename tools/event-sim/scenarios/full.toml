@@ -604,15 +604,15 @@ timeout = "10s"
 caption = "The director resets the timer that ran in qualifying"
 focus = ["director", "program"]
 
-# The race's length: 21 laps of about 1:45, the two swaps and the red flag, so the timer runs out in the last lap.
+# The race's length up to stint 3's fifth lobby lap, with the two swaps and the red flag, so the timer runs out just before Race Control calls the final lap.
 [[step]]
 id = "timer_set"
 at = "after:timer_reset"
 role = "director"
 do = "timer"
-args = { duration = "0:46:00" }
+args = { duration = "0:33:00" }
 expect = ["relay.get('/timer/data').mode == 'prestart'",
-          "relay.get('/timer/data').duration_s == 2760"]
+          "relay.get('/timer/data').duration_s == 1980"]
 timeout = "10s"
 caption = "The director sets the race timer to the race length"
 focus = ["director", "program"]
