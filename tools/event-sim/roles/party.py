@@ -972,9 +972,12 @@ class RaceControlRole(LiveColumn, Surface):
         return {"status": self._status("Confirm DC", "DC confirmed", before)}
 
     def act_class_laps(self, args):
-        """Set the lap count of a class after the first one (the live column's Class laps row)."""
+        """Set the lap count of a class after the first one (the live column's Class laps row);
+        a count the field already holds is kept, since its input would send nothing."""
         cls = str(args.get("class", ""))
         field = self.sel("input", label=DESK["class_laps"] + cls)
+        if self.control(field, f"Lap count of {cls}").input_value() == str(args.get("laps", "")):
+            return {"kept": True}
         before = self._line()
 
         def enter():
@@ -985,7 +988,8 @@ class RaceControlRole(LiveColumn, Surface):
         return {"status": self._status(f"Lap count of {cls}", f"{cls} lap count saved", before)}
 
     def act_stint_laps(self, args):
-        """Set the lap count of each stint lobby ({label: laps}) in the Race area's Stint laps."""
+        """Set the lap count of each stint lobby ({label: laps}) in the Race area's Stint laps;
+        a count its field already holds is kept, since its input would send nothing."""
         counts = args.get("laps")
         if not isinstance(counts, dict) or not counts:
             raise StepError("stint_laps needs args.laps, e.g. { \"Stint 1\" = 7 }")
@@ -993,8 +997,12 @@ class RaceControlRole(LiveColumn, Surface):
             if type(laps) is not int or laps < 1:
                 raise StepError(f"the lap count of {label} is a whole number from 1, not {laps!r}")
         self.area("race")
+        changed, kept = {}, []
         for label, laps in counts.items():
             field = self.sel("input", label=DESK["class_laps"] + label)
+            if self.control(field, f"Lap count of {label}").input_value() == str(laps):
+                kept.append(label)
+                continue
             before = self._line()
 
             def enter(field=field, label=label, laps=laps):
@@ -1003,7 +1011,8 @@ class RaceControlRole(LiveColumn, Surface):
                 box.press("Tab", timeout=CONTROL_MS)
             self.answered(enter, self.base + "/drivers/race/stint-laps", f"Lap count of {label}")
             self._status(f"Lap count of {label}", f"{label} lap count saved", before)
-        return {"set": dict(counts)}
+            changed[label] = laps
+        return {"set": changed, "kept": kept}
 
     def act_take_plan(self, args):
         """Wait for the red flag's restart plan, enter the `buffer` minutes, and take the

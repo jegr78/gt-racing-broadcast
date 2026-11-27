@@ -262,6 +262,7 @@ class Car:
         self.pit = None
         self.requests = []
         self.left_at = None
+        self.rejoined = False        # joined a new session in this lobby: its lap no longer counts the lobby's
 
     @property
     def sender(self):
@@ -341,7 +342,8 @@ class Field:
         """Each car drives into the box at its next pit entry and waits for `release`;
         `entries` sets the box order, the first one furthest forward. With `leader_first`
         a car reaching the pit entry before the first of them drives on another lap. In a
-        lobby of `laps` laps each car boxes at the end of its lap `laps - 1`."""
+        lobby of `laps` laps each car boxes at the end of its lap `laps - 1`, a car that
+        rejoined the lobby at its next pit entry."""
         self.released_at, self._release = None, False
         self.box_lead = None
         for i, c in enumerate(self._pick(entries)):
@@ -360,6 +362,7 @@ class Field:
             if c.mode != "stand" or not c.pit.get("hold"):
                 continue
             nxt = min(stint, len(c.senders) - 1)
+            c.rejoined = False
             if c.senders[nxt] is c.sender:
                 c.lap = 0
                 c.sender.new_session()
@@ -403,7 +406,7 @@ class Field:
         car.active = min(self.stint, len(car.senders) - 1)
         car.extra = None
         car.sender.new_session()
-        car.lap = 0
+        car.lap, car.rejoined = 0, True
         lap_start = math.floor(car.odo / self.line.length) * self.line.length
         car.odo = lap_start + self.box_station
         car.lat, car.v, car.mode = BOX_LAT_M, 0.0, "stand"
@@ -483,7 +486,7 @@ class Field:
             pos = car.odo % length
             waits = car.requests and (
                 (self.box_lead not in (None, car.entry) and car.requests[0].get("hold"))
-                or car.lap < (car.requests[0].get("lap") or 0))
+                or (not car.rejoined and car.lap < (car.requests[0].get("lap") or 0)))
             if car.requests and not waits and entry_s <= pos < entry_s + speed * dt + 1:
                 if self.box_lead == car.entry and car.requests[0].get("hold"):
                     self.box_lead = None

@@ -1235,6 +1235,8 @@ def t_race_control_confirms_a_dc_and_sets_a_class_lap_count():
                         "GT4 lap count saved")
     assert role.do("class_laps", {"class": "GT4", "laps": 5}) == {"status": "GT4 lap count saved"}
     assert laps.value == "5"
+    assert role.do("class_laps", {"class": "GT4", "laps": 5}) == {"kept": True}, \
+        "a count the field already holds sends no change, so the step keeps it without a request"
     fails(lambda: role.do("class_laps", {"class": "GT3", "laps": 5}), "Lap count of GT3")
 
 
@@ -1245,8 +1247,11 @@ def t_race_control_sets_each_stints_lap_count_on_the_desk():
     two = _desk_change(page, '.dd input[aria-label="Lap count of Stint 2"]', "/drivers/race/stint-laps",
                        "Stint 2 lap count saved")
     out = role.do("stint_laps", {"laps": {"Stint 1": 7, "Stint 2": 8}})
-    assert out == {"set": {"Stint 1": 7, "Stint 2": 8}}, out
+    assert out == {"set": {"Stint 1": 7, "Stint 2": 8}, "kept": []}, out
     assert (one.value, two.value) == ("7", "8"), "each stint's field holds its count"
+    out = role.do("stint_laps", {"laps": {"Stint 1": 7, "Stint 2": 9}})
+    assert out == {"set": {"Stint 2": 9}, "kept": ["Stint 1"]}, \
+        f"a count the field already holds is kept without a request: {out}"
     assert page.clicks[0] == '.navbtn[data-area="race"]', "the stint laps are in the Race area"
     fails(lambda: role.do("stint_laps", {"laps": {"Stint 3": 5}}), "Lap count of Stint 3")
     fails(lambda: role.do("stint_laps", {"laps": {"Stint 1": 0}}), "a whole number from 1")
@@ -1928,7 +1933,8 @@ def t_a_leader_first_box_call_names_the_first_of_the_order():
         "a lobby of 7 laps boxes the cars at the end of lap 6"
     out = role.do("box", {"order": "grid", "laps": 7})
     assert out["laps"] == 7, out
-    fails(lambda: role.do("box", {"order": "grid", "laps": 1}), "laps is a whole number from 2")
+    assert role.do("box", {"order": "grid", "laps": 1})["laps"] == 1, "a restart plan of one lap boxes at its end"
+    fails(lambda: role.do("box", {"order": "grid", "laps": 0}), "laps is a whole number from 1")
 
 
 def t_driver_actions_reach_the_field():

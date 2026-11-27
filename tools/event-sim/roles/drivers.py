@@ -162,8 +162,8 @@ class DriversRole(Role):
         if not isinstance(leader_first, bool):
             raise StepError(f"box: leader_first is true or false, not {leader_first!r}")
         laps = args.get("laps")
-        if laps is not None and (type(laps) is not int or laps < 2):
-            raise StepError(f"box: laps is a whole number from 2 (the lobby's lap count), not {laps!r}")
+        if laps is not None and (type(laps) is not int or laps < 1):
+            raise StepError(f"box: laps is a whole number from 1 (the lobby's lap count), not {laps!r}")
         if order == "race":
             entries = self._race_order()
         elif order == "grid":
