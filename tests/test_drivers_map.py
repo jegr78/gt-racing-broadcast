@@ -124,6 +124,20 @@ def t_the_map_draws_the_line_and_a_labelled_dot_per_placed_car():
         f"the line, then the number or else the position on each car with a spot: {got}"
 
 
+def t_a_car_that_has_finished_leaves_the_map():
+    got = _node(_DOM + _src("ui", "track-map.js") + r"""
+      (async function () {
+        const svg = node("svg"), map = TrackMap.create(svg);
+        await map.sync("suzuka");
+        map.draw([{entry: "a", number: "7", pos: 1, x: 10, z: 0, finished: true},
+                  {entry: "b", number: "8", pos: 2, x: 90, z: 0, finished: false}]);
+        return dots(svg);
+      })().then(r => console.log(JSON.stringify(r)));""")
+    if got is None:
+        return
+    assert got == ["8"], f"a car past the chequered flag no longer drives around the map: {got}"
+
+
 def t_the_line_fetch_goes_through_the_pages_fetch_at_call_time():
     got = _node(_DOM + _src("ui", "track-map.js") + r"""
       const inner = fetch;

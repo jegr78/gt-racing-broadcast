@@ -1789,6 +1789,15 @@ soft = ["relay.status.timer.remaining_s == 0"]
 timeout = "5m"
 
 [[step]]
+id = "chequer"
+at = "after:flag"
+role = "drivers"
+do = "chequer"
+expect = ["result('chequer').finished"]
+caption = "Each car stops sending as it crosses the finish line and leaves the track map"
+focus = ["race_control", "program"]
+
+[[step]]
 id = "shot_chequered_1"
 at = "after:flag+3s"
 role = "api"

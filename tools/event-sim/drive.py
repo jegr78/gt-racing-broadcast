@@ -263,6 +263,7 @@ class Car:
         self.requests = []
         self.left_at = None
         self.rejoined = False        # joined a new session in this lobby: its lap no longer counts the lobby's
+        self.flagged = False         # crossed the line after the chequered flag: stops after this tick
 
     @property
     def sender(self):
@@ -293,6 +294,7 @@ class Field:
         self.released_at = None
         self._release = False
         self.box_lead = None         # a leader-first box call: no car enters the pit lane before it
+        self.chequered = False
         self.box_station = self.line.length - BOX_BACK_M
         self.errors = 0
         self.outbox = []
@@ -413,6 +415,12 @@ class Field:
         car.pit = {"seconds": float(seconds), "stall": 0, "stop": PIT_IN_M,
                    "start_odo": car.odo - PIT_IN_M, "stood": None}
 
+    def chequer(self, done=()):
+        """The chequered flag is out: the cars in `done` have finished and stop sending,
+        every other car stops once it next crosses the line."""
+        self.chequered = True
+        self.stop([e for e in done])
+
     def stop(self, entries=None):
         """The senders of `entries` (default all) close."""
         for c in self._pick(entries):
@@ -473,6 +481,8 @@ class Field:
         return now - p["stood"] >= p["seconds"]
 
     def _step(self, car, now, dt, post=True):
+        if car.flagged and car.mode != "off":
+            car.mode, car.v, car.requests = "off", 0.0, []
         if car.mode in ("dropped", "off"):
             return
         length = self.line.length
@@ -527,6 +537,7 @@ class Field:
             line = math.floor(car.odo / length) * length
             frac = (car.odo - line) / max(car.odo - before, 1e-6)
             self._crossed(car, now - frac * dt)
+            car.flagged = self.chequered
         if not post:
             return
         x, z = self.line.at(car.odo, car.lat)
