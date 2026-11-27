@@ -809,13 +809,13 @@ action and acts on the controls a person uses; the drivers have no page.
 | Role (`role =`) | Surface | Actions (`do =`) |
 |---|---|---|
 | `producer` | Control Center `/` | `open`, `pick_track` (track), `race_settings` (formation, finish_mode, laps), `start_event` (stint, qualifying), `stop_event`, `relay_restart` |
-| `director` | Director Panel `/panel` | `open`, `approve_link` (stint; `area = "schedule"` approves it in the Schedule area's pending list, which also holds the stint on air and a qualifying link), `next`, `scene` (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode` (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name), `play` (media: intro, trailer or outro; returns at the end of the loop the clip plays, from OBS's `mediaDuration` and `mediaCursor` read after the air light: the panel shows no media state and the clips loop), `timer` (duration H:MM:SS, typed into the Timer SET… prompt), `view` (area) |
+| `director` | Director Panel `/panel` | `open`, `approve_link` (stint; `area = "schedule"` approves it in the Schedule area's pending list, which also holds the stint on air and a qualifying link), `next`, `scene` (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode` (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name), `play` (media: intro, trailer or outro; returns at the end of the loop the clip plays, from OBS's `mediaDuration` and `mediaCursor` read after the air light: the panel shows no media state and the clips loop), `timer` (duration H:MM:SS, typed into the Timer SET… prompt), `timer_key` (key: START or RESET), `view` (area) |
 | `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers` (one by one), `approve_all` (Approve all waiting; result `approved`, `skipped`, `names`), `reject_driver` (name), `correct_driver` (name, entry, stint: changed on the waiting request, then approved), `compound` (entry, code), `compounds` (code, skip: every entry of the tyre table; result `changed`, and `kept` for an entry already on it, whose select sends nothing), `race_start`, `show_standings` (entry, seconds: the frozen standings tab of its disconnect event, kept in view `seconds` (default 8) once it lists rows, then closed; result `rows`), `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason), `set_time` and `add_lap` (entry, time; qualifying mode), `note` (text, target), `confirm_dc` (entry), `class_laps` (class, laps), `view` (area) |
 | `commentator:<crew name>` | `/cockpit` with that person's token; the name must be in `[[event.commentators]]` or a Commentator of a `[sheet.tabs] Crew`, checked at load | `open`, `submit_link` (url, stint), `chat` (text) |
 | `viewer` | `/console/timing` on the event's timing link | `open`, `read` (cars) |
 | `driver` | `/console/drive` on the event's invite link, 390x844, no console token | `open`, `register` (entry, name, stint when the event registers per stint: its number picks the invite's segment label, the key the `drivers` role uses too; the code the page shows goes to the `drivers` role through `ctx.driver_codes`, never into a result) |
 | `probe` | `tools/probe-stage2.py` as the runbook runs it, and the real `racecast-sender.py` (#1116) | `watch`, `mark` (text), `kit` (sheets into the role's temporary folder), `race_reset`, `spectator` (name, position, cars: the sender with the probe key against a simulated PS5; needs `[event] probe = true`), `stop_spectator`, `check` (entry, segment, name: registers and runs `--check`), `report` (`collect` and `report`; its result is `probe_stage2.facts`) |
-| `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints, positions: 0x84 from the road order, skip: `[{entry, stint}]` seats the `driver` page registers; such a seat sends with the code that page showed, and `start` or `lobby` fails while it has none), `start`, `pit` (entry, seconds), `box` (order), `lobby` (stint), `release` (gaps: the rows of a race reading, for a keep restart), `drop` (entry), `rejoin` (entry, seconds), `stop` (entries) |
+| `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints or segment: one invite label such as `Qualifying`, each driver registering once for it, positions: 0x84 from the road order, skip: `[{entry, stint}]` seats the `driver` page registers; such a seat sends with the code that page showed, and `start` or `lobby` fails while it has none), `start`, `pit` (entry, seconds), `box` (order, leader_first: a car reaching the pit entry before the first of the order drives on another lap), `lobby` (stint), `release` (gaps: the rows of a race reading, for a keep restart), `drop` (entry), `rejoin` (entry, seconds), `stop` (entries) |
 
 `hold` keeps any page role's page in view for `seconds` (at most 300) inside the action, so
 the film plays that stretch in real time under the step's caption.
@@ -936,15 +936,24 @@ times on a maintainer machine, start and teardown included:
   final lap in the third lobby; asserts the ranking, `no_data` then `dc` (the recording's
   event suspected, then confirmed, and DC on the public timing), the swaps (driver and pit
   stop count) and the finish.
-- `full` (about 36 min on GitHub's runner, real time): the deck's race day with 14 cars on a
-  Suzuka-length lap: Comms 1's qualifying link submitted and approved, one driver on the
-  invite page, one request corrected and one rejected, Approve all for the other 40, intro and
-  trailer, crew chat, qualifying, the race timer set to the race length, Race start on the
-  grid (the timer runs from the first race lap), every car's compound at each stint's start,
-  formation, a pit stop with its compound, a DC (a held suspected phase, its standings of
-  before the drop), an estimate, a DNF, a late stream link, before each swap a next-stint
-  driver on the invite page and a held splitscreen once the incoming feed serves, a red flag
-  with a keep restart, a pit stop with a compound change, the final lap, the outro. Its steps carry
+- `full` (about 36 min on GitHub's runner plus about 14 min of qualifying, real time): the
+  deck's race day with 14 cars on a Suzuka-length lap, after a qualifying event the day
+  before (about 14 min, 10 of them on its timer: Start event with the Qualifying option, Comms 1's qualifying link
+  submitted and approved, Comms 1 on air, one driver on the invite page and the others as
+  a second `drivers:quali` field registered for the `Qualifying` segment, Approve all, a
+  10 min timer the director sets and starts by hand as the cars go out, their laps and
+  three added on the desk, the cars in once the timer has run out, Stop event). The race
+  event starts in race mode: one driver on the invite page, one request corrected and one rejected, Approve all for
+  the other 40, intro and trailer, crew chat, the finished qualifying timer reset and the
+  race timer set to the race length, Race
+  start on the grid (the timer runs from the first race lap), every car's compound at each
+  stint's start, formation, a pit stop with its compound, a DC (a held suspected phase, its
+  standings of before the drop), an estimate, a DNF, a late stream link, before each swap
+  a next-stint driver on the invite page, the cars boxing behind the leader, the
+  splitscreen once the leader stands in the box and NEXT once every car stands there (a
+  soft check bounds that wait to 5 min), the cut back to the stint and the new compounds,
+  a red flag with a keep restart, a pit stop with a compound change, the final lap called
+  when the race timer runs out, the outro. Its steps carry
   the walkthrough film's twelve chapters, captions and focus; `tests/test_event_sim_roles.py`
   holds the 50 shot names to their steps, roles and elements, not to their content. It
   runs in the workflow; locally it exceeds the 2 GiB E2E unit. Its 50 screenshots carry

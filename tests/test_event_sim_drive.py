@@ -290,6 +290,66 @@ def t_box_holds_every_car_until_release_and_the_next_lobby_takes_over():
     assert [c.entry for c in order] == TEAMS[:3], "cars leave in the order they arrived, each by its gap"
 
 
+def _box_entries(leader_first):
+    """(order the cars drove into the pit lane, per car the time it stood) for a box call
+    made just after the leader passed the pit entry."""
+    wire = Wire()
+    f = field(wire, cars=3)
+    f.start()
+    entry_s = f.box_station - drive.PIT_IN_M
+    lead = f.car(TEAMS[0])
+    assert run(f, wire, 60.0, lambda: entry_s + 5 < lead.odo % f.line.length < entry_s + 40)
+    f.box(TEAMS[:3], leader_first=leader_first)
+    entered, stood = [], {}
+
+    def watch():
+        for c in f.cars:
+            if c.mode != "drive" and c.entry not in entered:
+                entered.append(c.entry)
+            if c.mode == "stand" and c.entry not in stood:
+                stood[c.entry] = wire.now
+        return len(stood) == 3
+    assert run(f, wire, 120.0, watch), "every car stands in the box"
+    return entered, stood
+
+
+def t_a_box_call_with_leader_first_lets_no_car_into_the_pit_lane_before_the_leader():
+    entered, stood = _box_entries(leader_first=True)
+    assert entered[0] == TEAMS[0] and min(stood, key=stood.get) == TEAMS[0], \
+        f"the leader drives in first though it had just passed the pit entry: {entered}"
+    entered, _ = _box_entries(leader_first=False)
+    assert entered[0] != TEAMS[0], f"without it the cars behind the leader box first: {entered}"
+
+
+def t_a_dropped_leader_does_not_keep_the_field_out_of_the_box():
+    wire = Wire()
+    f = field(wire, cars=3)
+    f.start()
+    run(f, wire, 5.0)
+    f.box(TEAMS[:3], leader_first=True)
+    f.drop(TEAMS[0])
+    assert run(f, wire, 80.0, lambda: all(c.mode == "stand" for c in f.cars[1:])), \
+        "the others box once the leader they wait for has dropped"
+
+
+def t_a_plain_pit_stop_of_the_leader_does_not_lift_the_leader_first_box_call():
+    wire = Wire()
+    f = field(wire, cars=3)
+    f.start()
+    run(f, wire, 5.0)
+    f.pit(TEAMS[0], seconds=2.0)
+    f.box(TEAMS[:3], leader_first=True)
+    held = []
+
+    def watch():
+        for c in f.cars:
+            if c.mode == "pit_in" and c.pit.get("hold") and c.entry not in held:
+                held.append(c.entry)
+        return len(held) == 3
+    assert run(f, wire, 400.0, watch), "every car drives in for the hold"
+    assert held[0] == TEAMS[0], f"the leader's plain stop before its hold keeps the others out: {held}"
+
+
 def t_a_keep_restart_releases_each_car_by_its_given_gap():
     wire = Wire()
     f = field(wire, cars=3)

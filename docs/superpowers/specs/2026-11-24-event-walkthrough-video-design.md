@@ -117,14 +117,14 @@ The order is the order of `full`. New steps are marked **new**.
 
 | # | Chapter | What happens | Large |
 |---|---|---|---|
-| 1 | Start the event | Producer picks the track, sets the race, starts the event | Control Center |
-| 2 | First link | **new:** Comms 1 submits the stream link, the director approves it and feed A runs warm (auto-arm) | Cockpit, Director |
-| 3 | Drivers sign up | **new:** a driver registers on the invite page; the others follow. Race Control approves, **new:** corrects one registration, **new:** rejects one | Driver, Race Control |
-| 4 | On air: qualifying | **new:** intro, **new:** trailer, then program with Comms 1. Race Control adds qualifying laps, the public page ranks them | Program, Director, then Race Control, Timing |
-| 5 | Race start | Director switches to race mode and starts the part (the relay allows a race part only in race mode). Formation lap, start | Program, Timing |
+| 1 | Qualifying (the day before) | Producer picks the track and starts the qualifying event (Start event with the Qualifying option). **new:** Comms 1 submits the stream link, the director approves it and feed A runs warm (auto-arm) | Control Center, Cockpit, Director |
+| 2 | On air: qualifying (the day before) | Program with Comms 1, the cockpit on air. Drivers register for qualifying (one on the invite page), Race Control approves them. The director sets a 10 minute timer and starts it as the session starts; the cars drive their laps and Race Control adds laps, the public page ranks them. The timer runs out, the cars come in, the producer stops the event | Program, Cockpit, Driver, Race Control, Timing |
+| 3 | Race day: start the event | The next day the producer starts the race event and sets the race | Control Center |
+| 4 | Drivers sign up | **new:** a driver registers on the invite page; the others follow. Race Control approves, **new:** corrects one registration, **new:** rejects one | Driver, Race Control |
+| 5 | Race start | **new:** intro, **new:** trailer, program with Comms 1, the qualifying timer reset, the race timer and the part start. Formation lap, start | Program, Director, Timing |
 | 6 | Stint 1 at the desk | Pit stop and **new:** tyre compound confirmed. A disconnect: suspected, confirmed, marked for rejoin. A sender stops: estimate behind another car. A retirement | Race Control, Timing |
 | 7 | Next commentator | Comms 2 submits late, the director approves, the incoming feed runs warm | Cockpit, Director |
-| 8 | Driver swap 1 | **new:** the next driver requests telemetry for stint 2 on the invite page and Race Control approves it. Cars box, splitscreen, new lobby, release, switch to stint 2 | Driver, Race Control; at the switch the four quarters: Director, Program, Cockpit Comms 1, Cockpit Comms 2 |
+| 8 | Driver swap 1 | **new:** the next driver requests telemetry for stint 2 on the invite page and Race Control approves it. Cars box, splitscreen once the leader stands in the box, switch to stint 2 once every car stands there (5 minutes at most), Race Control enters the compounds, new lobby, release | Driver, Race Control; at the switch the four quarters: Director, Program, Cockpit Comms 1, Cockpit Comms 2 |
 | 9 | Stint 2 at the desk | The disconnected car rejoins a lap down. Red flag, cars to the box, restart with kept gaps. **new:** pit stop with a compound change | Race Control, Program |
 | 10 | Driver swap 2 | As chapter 8, to stint 3, with Comms 2 handing over to Comms 3 | as chapter 8 |
 | 11 | The finish | Final lap called, chequered flag, result, fastest lap | Race Control, Timing |

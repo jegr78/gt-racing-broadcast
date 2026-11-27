@@ -15,9 +15,10 @@ UNGAPPED_STEP_S = 1.0    # cars without a gap (lapped) leave after the last, thi
 
 @register
 class DriversRole(Role):
-    """`register` (cars, stints, positions: GT7's 0x84 position from the road order, skip:
-    [{entry, stint}] seats the `driver` page registers), `start`, `pit` (entry, seconds), `box` (order: "race",
-    "grid" or a list of entries), `lobby` (stint), `release` (gaps), `drop` (entry),
+    """`register` (cars, stints or segment: one invite label such as Qualifying, positions:
+    GT7's 0x84 position from the road order, skip: [{entry, stint}] seats the `driver`
+    page registers), `start`, `pit` (entry, seconds), `box` (order: "race",
+    "grid" or a list of entries; leader_first), `lobby` (stint), `release` (gaps), `drop` (entry),
     `rejoin` (entry, seconds), `stop` (entries). An entry is its team label or its grid slot."""
     kind = "drivers"
     client_factory = drive.Client
@@ -54,7 +55,7 @@ class DriversRole(Role):
             raise StepError(f"the drivers could not {what}: {type(exc).__name__}: {exc}") from None
 
     def act_register(self, args):
-        """Every driver of `stints` (default: all) registers on the invite."""
+        """Every driver of `stints` (default: all), or of the one `segment`, registers on the invite."""
         if self.field is not None:
             raise StepError("the drivers registered already")
         event = self.ctx.event
@@ -67,6 +68,13 @@ class DriversRole(Role):
             data = self.client.data(invite)
             entries = list(data.get("entries") or [])[:int(args.get("cars") or drive.MAX_CARS)]
             segments = list(data.get("segments") or [])
+            if "segment" in args:
+                if args.get("stints") not in (None, 1):
+                    raise StepError(f"register: a named segment is one stint, not stints {args['stints']!r}")
+                if args["segment"] not in segments:
+                    raise StepError(f"the invite has no segment {args['segment']!r} "
+                                    f"(it offers {', '.join(segments) or 'none'})")
+                segments = [args["segment"]]
             if not entries:
                 raise StepError("the invite lists no entries: the roster ([event] cars) is empty")
             stints = int(args.get("stints") or len(segments) or 1)
@@ -146,8 +154,12 @@ class DriversRole(Role):
         return [r["entry"] for r in rows if r.get("entry") in known]
 
     def act_box(self, args):
-        """Every car drives into its box and waits there for `release`."""
+        """Every car drives into its box and waits there for `release`; with `leader_first`
+        none enters the pit lane before the first of the order."""
         order = args.get("order", "race")
+        leader_first = args.get("leader_first", False)
+        if not isinstance(leader_first, bool):
+            raise StepError(f"box: leader_first is true or false, not {leader_first!r}")
         if order == "race":
             entries = self._race_order()
         elif order == "grid":
@@ -156,7 +168,7 @@ class DriversRole(Role):
             entries = [self._entry(e) for e in order]
         else:
             raise StepError("box order is 'race', 'grid' or a list of entries")
-        self._do(lambda: self._field().box(entries), "box")
+        self._do(lambda: self._field().box(entries, leader_first), "box")
         return {"order": entries or [c.entry for c in self._field().cars]}
 
     def act_lobby(self, args):

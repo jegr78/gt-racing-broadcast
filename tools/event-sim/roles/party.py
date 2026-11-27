@@ -186,21 +186,34 @@ class Surface(builtin.PageRole):
 
     def answered(self, act, path, what):
         """Run `act` and return the page's own request to a route ending in `path` once
-        it is answered (a console page sends it below `/console`)."""
+        it is answered (a console page sends it below `/console`). The answer may come
+        during `act` or up to CONTROL_MS after it; `act` keeps its own timeouts."""
         with self.timed("request", what):
             return self._answered(act, path, what)
 
     def _answered(self, act, path, what):
+        got = []
+
+        def seen(resp):
+            if not got and urlsplit(resp.url).path.endswith(path):
+                got.append(resp)
+        self.pg.on("response", seen)
         try:
-            with self.pg.expect_response(lambda r: urlsplit(r.url).path.endswith(path),
-                                         timeout=CONTROL_MS) as info:
-                act()
-            resp = info.value
+            act()
+            begin = self.clock()
+            while not got and self.clock() - begin < CONTROL_MS / 1000:
+                self.pg.wait_for_timeout(POLL_MS)
         except StepError:
             raise
-        except Exception as exc:  # Playwright's text says what the click or the wait met
+        except Exception as exc:  # Playwright's text says what the act met
             detail = builtin.redact(str(exc).splitlines()[0] if str(exc) else type(exc).__name__, self.ctx.secrets)
             raise StepError(f"{what}: the page sent no request to {path} ({detail})") from None
+        finally:
+            self.pg.remove_listener("response", seen)
+        if not got:
+            raise StepError(f"{what}: the page sent no request to {path} within {CONTROL_MS / 1000:g}s "
+                            "of the action")
+        resp = got[0]
         if resp.status >= 400:
             raise StepError(f"{what}: {path} answered HTTP {resp.status}")
         return resp
@@ -484,7 +497,7 @@ class DirectorRole(LiveColumn, CrewChat, Surface):
     (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode`
     (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text,
     target, level), `chat` (text, name), `play` (media: intro, trailer or outro), `timer`
-    (duration as H:MM:SS), `view` (area), `fit`."""
+    (duration as H:MM:SS), `timer_key` (key: START or RESET), `view` (area), `fit`."""
     kind = "director"
     vocab_stint_actions = ("approve_link",)   # their `stint` is a label of the Configuration Stints column
     path, ready = "/panel", selectors.READY["DIRECTOR"]
@@ -654,6 +667,18 @@ class DirectorRole(LiveColumn, CrewChat, Surface):
                                              "/timer/set/" + duration, "Timer SET"), duration)
         self.until(lambda: f"duration {duration}" in self.text(self.sel("timer_info")), f"the timer's duration {duration}")
         return {"duration": duration}
+
+    TIMER_KEYS = {"START": "/timer/start", "RESET": "/timer/reset"}
+
+    def act_timer_key(self, args):
+        """START or RESET in the HUD area's Timer keys."""
+        key = args.get("key")
+        if key not in self.TIMER_KEYS:
+            raise StepError(f"timer_key: key is {' or '.join(self.TIMER_KEYS)}, not {key!r}")
+        self.area("hud")
+        self.answered(lambda: self.click(self.sel("timer_key", label=key), f"Timer {key}"),
+                      self.TIMER_KEYS[key], f"Timer {key}")
+        return {"key": key}
 
     def act_start_part(self, args):
         """Start the next broadcast Part: OBS goes live after the typed confirmation."""
