@@ -18,6 +18,7 @@ SIM = os.path.join(ROOT, "tools", "event-sim")
 for _p in (SIM, os.path.join(SIM, "fakes"), os.path.join(ROOT, "src", "scripts"), os.path.join(ROOT, "tools")):
     sys.path.insert(0, _p)
 import drive  # noqa: E402
+import expect  # noqa: E402
 import engine  # noqa: E402
 import gt7_tracks  # noqa: E402
 import roles  # noqa: E402
@@ -2705,6 +2706,16 @@ def t_the_full_scenario_runs_each_stint_lobby_to_its_lap_count():
     boxes = [s for s in steps if s.role == "drivers" and s.do == "box" and s.args.get("leader_first")]
     assert [b.args.get("laps") for b in boxes] == [counts["Stint 1"], "${take_plan.laps}"], \
         f"the swaps come at the end of the lobby's second to last lap: {[b.args for b in boxes]}"
+    sheet = [s for s in by["stint_laps"].soft if "sheet.tab('Schedule')" in s]
+    records = [{"URL": "", "Streamer": "", "Stint": f"Stint {n}", "Laps": str(counts[f"Stint {n}"])} for n in (1, 2, 3)]
+
+    class Sheet(expect.Probe):
+        calls = ("tab",)
+
+        def tab(self, name):
+            return records
+    assert sheet and all(expect.truth(s, {"sheet": Sheet()})[0] for s in sheet), \
+        f"the Sheet check finds the Schedule row by its header: {sheet}"
     late = by[by["swap2_driver"].at.ref]
     assert "race.lobby_lap >= result('take_plan').laps - 3" in late.expect, \
         f"the swap after the restart waits for the restart lobby's laps, not the race's: {late.expect}"

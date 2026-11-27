@@ -637,7 +637,7 @@ role = "race_control"
 do = "stint_laps"
 args = { laps = { "Stint 1" = 7, "Stint 2" = 12, "Stint 3" = 5 } }
 expect = ["row(race.stints, 'stint', 'Stint 2').laps == 12"]
-soft = ["row(sheet.tab('Schedule'), 'stint', 'Stint 2').laps == '12'"]
+soft = ["row(sheet.tab('Schedule'), 'Stint', 'Stint 2').laps == '12'"]
 timeout = "30s"
 caption = "Race Control sets each stint lobby's lap count"
 focus = ["race_control"]
