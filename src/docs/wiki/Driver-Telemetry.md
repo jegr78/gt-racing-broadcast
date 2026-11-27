@@ -475,7 +475,7 @@ It never carries connection ids, corrections or who made them.
 ![Driver dashboard overlay with timing tower, fastest lap and track map](images/driver-dashboard.png)
 
 - **OBS overlay** `http://127.0.0.1:8088/drivers`: the browser source **Driver
-  Dashboard** in the Stint scene (Program in the solo collections). It shows a timing
+  Dashboard** in the Stint and Splitscreen scenes (Program in the solo collections). It shows a timing
   tower of up to 20 entries (see **Tower rows** below), the lap against the lap count (or the race timer's
   remaining time), the fastest lap and a track map with each car as a numbered dot in
   its entry colour. Dots sit on the racing line; in a close pack a dot slides back

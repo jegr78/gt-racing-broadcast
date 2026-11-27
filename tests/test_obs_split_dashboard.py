@@ -21,8 +21,13 @@ def t_the_splitscreen_shows_the_driver_dashboard_as_the_stint_scene_does():
     ref = next(i for i in stint if i["name"] == "Driver Dashboard")
     for key in ("pos", "bounds", "bounds_type", "scale", "visible"):
         assert item.get(key) == ref.get(key), f"the same full frame as in the Stint scene: {key} {item.get(key)}"
-    assert names.index("Splitscreen HUD Overlay") < names.index("Driver Dashboard") < names.index("Splitscreen Labels"), \
-        f"above the HUD like in the Stint scene, below the CURRENT/NEXT labels: {names}"
+    def layers(items):          # OBS draws a group as one layer and skips its backup copies
+        return [i["name"] for i in items if not i.get("group_item_backup")]
+    split_layers, stint_layers = layers(split), layers(stint)
+    assert split_layers.index("Driver Dashboard") + 1 == split_layers.index("Split HUD"), \
+        f"right under the splitscreen HUD group: {split_layers}"
+    assert stint_layers.index("Driver Dashboard") + 1 == stint_layers.index("Stint HUD"), \
+        f"as in the Stint scene, under its HUD group: {stint_layers}"
     assert len({i["id"] for i in split}) == len(split), "scene item ids stay unique"
 
 

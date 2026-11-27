@@ -1591,8 +1591,8 @@
                         "private_settings": {}
                     },
                     {
-                        "name": "Driver Dashboard",
-                        "source_uuid": "0ad0fee0-0000-4000-8000-000000000004",
+                        "name": "Splitscreen Labels",
+                        "source_uuid": "0ad0fee0-0000-4000-8000-000000000002",
                         "visible": true,
                         "locked": true,
                         "rot": 0.0,
@@ -1604,8 +1604,8 @@
                         "crop_top": 0,
                         "crop_right": 0,
                         "crop_bottom": 0,
-                        "id": 33,
-                        "group_item_backup": false,
+                        "id": 23,
+                        "group_item_backup": true,
                         "pos": {
                             "x": 0.0,
                             "y": 0.0
@@ -1630,8 +1630,8 @@
                         "private_settings": {}
                     },
                     {
-                        "name": "Splitscreen Labels",
-                        "source_uuid": "0ad0fee0-0000-4000-8000-000000000002",
+                        "name": "Driver Dashboard",
+                        "source_uuid": "0ad0fee0-0000-4000-8000-000000000004",
                         "visible": true,
                         "locked": true,
                         "rot": 0.0,
@@ -1643,8 +1643,8 @@
                         "crop_top": 0,
                         "crop_right": 0,
                         "crop_bottom": 0,
-                        "id": 23,
-                        "group_item_backup": true,
+                        "id": 33,
+                        "group_item_backup": false,
                         "pos": {
                             "x": 0.0,
                             "y": 0.0
