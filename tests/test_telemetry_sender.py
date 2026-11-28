@@ -247,6 +247,57 @@ def t_status_line_reports_the_rate_of_the_last_interval():
     assert 59.0 <= rate <= 61.0, f"the status reports the interval's packet rate: {status[0]}"
 
 
+class _Sink:
+    def __init__(self):
+        self.got, self.stats = [], {"posted": 0, "dropped": 0, "post_failed": 0}
+
+    def put(self, data):
+        self.got.append(data)
+
+
+def t_the_sender_forwards_every_packet_to_each_app_and_a_dead_one_stops_nothing():
+    apps = [_udp(), _udp()]
+    for a in apps:
+        a.settimeout(1)
+    dead = ("127.0.0.1", 0)
+    sink, said = _Sink(), []
+    sender = snd.Sender(sink, listen=0, bind="127.0.0.1",
+                        forward=[apps[0].getsockname(), dead, apps[1].getsockname()], say=said.append)
+    tx = _udp()
+    packets = [bytes([n]) * 300 for n in range(5)]
+    try:
+        for data in packets:
+            tx.sendto(data, sender.sock.getsockname())
+            assert sender.receive_once(), "the packet arrives"
+        got = [[a.recvfrom(4096)[0] for _ in packets] for a in apps]
+    finally:
+        for sock in apps + [tx]:
+            sock.close()
+        sender.close()
+    assert got == [packets, packets], "each app gets every packet byte-identical, in order"
+    assert sink.got == packets, "the relay upload gets everything though one app is dead"
+    per = sender.forward_stats
+    assert [per[t]["sent"] for t in sender.forward] == [5, 0, 5], per
+    assert per[dead]["failed"] == 5 and sender.stats["forwarded"] == 10, (per, sender.stats)
+    assert sum("127.0.0.1:0" in line for line in said) == 1, f"a dead app is named once: {said}"
+
+
+def t_cli_takes_forward_more_than_once():
+    seen = {}
+
+    class Refuse(snd.Sender):
+        def __init__(self, *_a, forward=None, **_k):
+            seen["forward"] = forward
+            raise OSError("stop here")
+    real, snd.Sender = snd.Sender, Refuse
+    try:
+        code = snd.main(["--url", "u", "--key", "k", "--name", "n", "--forward", "127.0.0.1:20777",
+                         "--forward", "192.0.2.9:33740"])
+    finally:
+        snd.Sender = real
+    assert code == 2 and seen["forward"] == [("127.0.0.1", 20777), ("192.0.2.9", 33740)], seen
+
+
 def t_cli_refuses_listen_with_forward_and_bad_names():
     out = io.StringIO()
     old = sys.stderr
@@ -1135,6 +1186,36 @@ def t_check_in_listen_mode_skips_the_heartbeat():
         f"listen mode: heartbeat skipped, 60 packets at 60/s, check output:\n{text}"
     assert sender.stats["heartbeats"] == 0, "listen mode leaves the console to the other app"
     assert up.pending() == 0, "packets of a check are counted, never queued for upload"
+
+
+def t_check_reports_each_forward_target_and_fails_on_a_dead_one():
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None,
+                      opener=lambda req, timeout: _Reply(b'{"ok": true}'))
+    said, clock = [], [0.0]
+    app = _udp()
+    app.settimeout(0.2)
+    sender = snd.Sender(up, listen=0, bind="127.0.0.1", forward=[app.getsockname(), ("127.0.0.1", 0)],
+                        say=said.append, clock=lambda: clock[0])
+    other = _udp()
+    for _ in range(60):
+        other.sendto(b"\0" * 296, ("127.0.0.1", sender.sock.getsockname()[1]))
+    real = sender.receive_once
+
+    def receive_once():
+        got = real()
+        clock[0] += 1 / 60
+        return got
+    sender.receive_once = receive_once
+    try:
+        code = snd.self_check(sender, up, duration=1.0, say=said.append)
+    finally:
+        sender.close()
+        other.close()
+        app.close()
+    line = next((x for x in said if " forward: " in x), "")
+    assert code == 1 and "forward: FAIL" in line and "sent 60, failed 0" in line \
+        and "127.0.0.1:0 sent 0, failed 60" in line, f"the check names each app, the dead one fails it: {said}"
+    assert said[-1] == "RESULT: FAIL (forward)", said[-1]
 
 
 def t_sender_stats_carry_the_post_latency_the_relay_keeps():

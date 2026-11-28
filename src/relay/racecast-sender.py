@@ -13,8 +13,8 @@ A maintainer probe run takes --key and --name instead of --code.
 
 Modes:
   default     heartbeat the console, receive on UDP 33740
-  --forward   also pass every packet unchanged to HOST:PORT (SimHub or GT Race
-              Engineer on this PC)
+  --forward   also pass every packet unchanged to HOST:PORT (SimHub, GT Race Engineer,
+              a dashboard on another device); repeat it for several apps
   --listen    no heartbeat: read the packets another app forwards to this port (SimHub)
   --console   the PlayStation's IP address, needed on an iPhone
   --check     test heartbeat, receive and upload for 12 s, send no telemetry, then
@@ -387,7 +387,11 @@ class Sender:
         self.console = console
         self._pinned = console is not None        # --console: never searched again
         self.listen = listen
-        self.forward = forward
+        # Each app gets its own socket, so an ICMP error from a dead one never reaches another.
+        self.forward = [tuple(t) for t in ([forward] if isinstance(forward, tuple) else forward or [])]
+        self._fwd = {t: socket.socket(socket.AF_INET, socket.SOCK_DGRAM) for t in self.forward}
+        self.forward_stats = {t: {"sent": 0, "failed": 0} for t in self.forward}
+        self._fwd_warned = set()
         self.console_port = console_port
         self.say = say
         self.clock = clock
@@ -405,7 +409,6 @@ class Sender:
         self.bind_addr = bind
         self._swept = False              # a search went address by address
         self.sock.settimeout(0.5)
-        self.fwd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) if forward else None
         self.stats = dict.fromkeys(("received", "forwarded", "interruptions", "heartbeats",
                                     "oversized"), 0)
         uploader.extra_stats = lambda: dict(self.stats)
@@ -488,13 +491,28 @@ class Sender:
         self._last_rx = now
         self.stats["received"] += 1
         self.up.put(data)
-        if self.fwd is not None:
+        for target, sock in self._fwd.items():
             try:
-                self.fwd.sendto(data, self.forward)
-                self.stats["forwarded"] += 1
-            except OSError:
-                pass  # the local app is not listening; the relay still gets everything
+                sock.sendto(data, target)
+            except OSError as exc:
+                self.forward_stats[target]["failed"] += 1
+                if target not in self._fwd_warned:
+                    self._fwd_warned.add(target)
+                    self.say("forward to %s failed: %s (the relay and the other apps still get "
+                             "everything)" % (_target(target), exc))
+                continue
+            self.forward_stats[target]["sent"] += 1
+            self.stats["forwarded"] += 1
         return True
+
+    def forward_summary(self):
+        """One "HOST:PORT sent N, failed M" part per forward target."""
+        return ", ".join("%s sent %d, failed %d" % (_target(t), c["sent"], c["failed"])
+                         for t, c in self.forward_stats.items())
+
+    def close(self):
+        for sock in [self.sock, *self._fwd.values()]:
+            sock.close()
 
     def check_relatch(self):
         """Search the console again when a discovered one stays silent (new IP)."""
@@ -534,9 +552,10 @@ class Sender:
             self.check_relatch()
             if status and now >= next_status:
                 rate = (self.stats["received"] - rx_mark[1]) / (now - rx_mark[0])
-                self.say("received %.1f/s, posted %d, dropped %d, upload failures %d" % (
+                self.say("received %.1f/s, posted %d, dropped %d, upload failures %d%s" % (
                     rate, self.up.stats["posted"], self.up.stats["dropped"],
-                    self.up.stats["post_failed"]))
+                    self.up.stats["post_failed"],
+                    "; forward " + self.forward_summary() if self.forward else ""))
                 rx_mark = (now, self.stats["received"])
                 next_status = now + STATUS_EVERY_S
         stop.set()
@@ -586,6 +605,9 @@ def self_check(sender, up, duration=CHECK_S, say=_say):
         low = "" if rate >= CHECK_MIN_HZ else " (GT7 sends about 60/s: a weak Wi-Fi or a busy device?)"
         results.append(("receive", "OK" if rate >= CHECK_MIN_HZ else "FAIL",
                         "%d packets%s, %.1f/s, %s%s" % (received, where, rate, sizes, low)))
+    if sender.forward:
+        stuck = [t for t, c in sender.forward_stats.items() if received and not c["sent"]]
+        results.append(("forward", "FAIL" if stuck else "OK", sender.forward_summary()))
     ok, text, took = up.check()
     results.append(("relay", "OK" if ok else "FAIL",
                     text + ("" if took is None else ", post %.0f ms" % (took * 1000))))
@@ -594,6 +616,10 @@ def self_check(sender, up, duration=CHECK_S, say=_say):
     failed = [part for part, verdict, _t in results if verdict == "FAIL"]
     say("RESULT: OK, ready for the session" if not failed else "RESULT: FAIL (%s)" % ", ".join(failed))
     return 1 if failed else 0
+
+
+def _target(target):
+    return "%s:%d" % target
 
 
 def _hostport(value):
@@ -618,9 +644,9 @@ def main(argv=None):
                                        "digits, spaces, _ . -")
     parser.add_argument("--console", help="PlayStation IP: needed on an iPhone, elsewhere "
                                           "when discovery does not find it")
-    parser.add_argument("--forward", type=_hostport, metavar="HOST:PORT",
-                        help="also pass every packet to this local app (SimHub, "
-                             "GT Race Engineer)")
+    parser.add_argument("--forward", type=_hostport, metavar="HOST:PORT", action="append",
+                        help="also pass every packet to this app (SimHub, GT Race Engineer, "
+                             "a dashboard on another device); repeat for several apps")
     parser.add_argument("--listen", type=int, metavar="PORT",
                         help="no heartbeat: read packets another app forwards to PORT")
     parser.add_argument("--bind", help="local address to receive on (default: the interface "
@@ -662,7 +688,7 @@ def main(argv=None):
         except KeyboardInterrupt:
             return 1
         finally:
-            sender.sock.close()
+            sender.close()
     stop = threading.Event()
     poster = threading.Thread(target=up.run, args=(stop,), daemon=True)
     poster.start()

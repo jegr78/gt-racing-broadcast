@@ -64,7 +64,7 @@ serves the sender script of the running relay.
 
 - header `X-Driver-Code: D1:...`
 - optional header `X-Sender-Stats`: a JSON object of integer counters the sender
-  reports (`received`, `forwarded`, `posted`, `dropped`, `post_failed`,
+  reports (`received`, `forwarded` (packets sent, summed over every `--forward` target), `posted`, `dropped`, `post_failed`,
   `interruptions`, `heartbeats`) and the median and 95th percentile of its last 200
   post round trips in milliseconds (`post_ms_p50`, `post_ms_p95`, kept within 0 to 60000); other keys are
   ignored
