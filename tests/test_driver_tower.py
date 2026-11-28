@@ -747,6 +747,19 @@ _BOX = """
 """
 
 
+def t_the_overlay_map_draws_the_qualifying_cars_by_place():
+    got = _tower("""
+      const calls = [];
+      map.draw = function (entries, opts) { calls.push([entries.map(e => e.entry), opts || null]); };
+      renderRace({mode: "race", entries: [{pos: 1, entry: "R #1", number: "1", x: 1, z: 1}]});
+      renderQualifying({mode: "qualifying", qualifying: [{pos: 1, entry: "Q #7", best_ms: 90000, x: 2, z: 2}]});
+      return calls;""")
+    if got is None:
+        return
+    assert got == [[["R #1"], None], [["Q #7"], {"byPlace": True}]], \
+        f"the race draws its entries in running order, qualifying its rows by place on the line: {got}"
+
+
 def t_the_rendered_tower_follows_its_box():
     entries = [dict(CAR, entry=f"T #{i}", number=str(i), pos=i, gap_s=float(i)) for i in range(1, 31)]
     quali = [{"pos": i, "entry": f"T #{i}", "best_ms": 100000 + i, "gap_ms": i} for i in range(1, 31)]

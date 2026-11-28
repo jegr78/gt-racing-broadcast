@@ -1,8 +1,10 @@
 /* The driver dashboard's track map, shared by the overlay (/drivers), the Race Control desk
    and the cockpit's timing area. TrackMap.create(svg) draws into an SVG with viewBox
-   0 0 100 100 and returns {sync(track), draw(entries)}: sync loads the picked layout's line
+   0 0 100 100 and returns {sync(track), draw(entries, opts)}: sync loads the picked layout's line
    from /drivers/line on a track change and asks again while it is missing; draw puts one
-   dot per entry with x and z on the line, labelled with its number or else its position. */
+   dot per entry with x and z on the line, labelled with its number or else its position.
+   Entries come in running order; with opts.byPlace (qualifying) the map orders them by
+   their place on the line instead. */
 (function () {
   "use strict";
   const SVG = "http://www.w3.org/2000/svg";
@@ -11,9 +13,8 @@
   function safeColor(c, fallback) {
     return /^(#[0-9a-fA-F]{3,8}|rgba?\([0-9., ]+\)|[a-zA-Z]+)$/.test(c || "") ? c : fallback;
   }
-  // Each dot sits on the line at its car's spot (spots in running order). One that would cover a
-  // dot ahead slides back by up to one and a half dot widths, never past the next car's spot, else it overlaps.
-  function placeDots(line, spots) {
+  // Distance along a closed line: its length, the point at a distance, a point's distance.
+  function along(line) {
     const n = line.length, cum = [0];
     for (let i = 1; i <= n; i++) {
       const a = line[i - 1], b = line[i % n];
@@ -39,7 +40,13 @@
       }
       return best;
     }
-    const st = spots.map(station), placed = [];
+    return {total: total, at: at, station: station};
+  }
+  // Each dot sits on the line at its car's spot (spots in running order). One that would cover a
+  // dot ahead slides back by up to one and a half dot widths, never past the next car's spot, else it overlaps.
+  function placeDots(line, spots) {
+    const path = along(line), total = path.total, at = path.at;
+    const st = spots.map(path.station), placed = [];
     function free(q) { return placed.every(function (o) { return Math.hypot(o[0] - q[0], o[1] - q[1]) >= CLEAR; }); }
     return st.map(function (s, i) {
       const gap = i + 1 < st.length ? ((s - st[i + 1]) % total + total) % total : Infinity;
@@ -73,14 +80,19 @@
       cars = document.createElementNS(SVG, "g");
       svg.appendChild(cars);
     }
-    function draw(entries) {
+    function draw(entries, opts) {
       if (!cars || !view) return;
       // A car past the chequered flag has finished; GT7 keeps it driving, the map does not.
-      const placedCars = entries.filter(function (e) {
+      let placedCars = entries.filter(function (e) {
         return !(e.finished === true && e.status !== "est") && typeof e.x === "number" && typeof e.z === "number";
       });
-      const spots = placeDots(line.points.map(function (q) { return project(q[0], q[1]); }),
-                              placedCars.map(function (e) { return project(e.x, e.z); }));
+      const shape = line.points.map(function (q) { return project(q[0], q[1]); });
+      if (opts && opts.byPlace) {
+        const station = along(shape).station;
+        placedCars = placedCars.map(function (e) { return [e, station(project(e.x, e.z))]; })
+          .sort(function (a, b) { return b[1] - a[1]; }).map(function (p) { return p[0]; });
+      }
+      const spots = placeDots(shape, placedCars.map(function (e) { return project(e.x, e.z); }));
       const dots = placedCars.map(function (e, i) { return [e, spots[i]]; });
       cars.replaceChildren(...dots.reverse().map(function (item) {   // the car ahead is drawn last, on top
         const e = item[0], p = item[1];

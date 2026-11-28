@@ -589,6 +589,11 @@ def t_qualifying_rows_carry_each_live_car_s_place_on_the_track():
     assert (rows["A"]["x"], rows["A"]["z"]) == (12.5, -3.0), f"a live car stands where it drives: {rows['A']}"
     assert rows["B"]["x"] is None and rows["B"]["z"] is None, "a quiet sender's car leaves the map, its time stays"
     assert rows["C"]["x"] is None, "a sample without a place puts no car on the map"
+    twice = [{"entry": "A", "segment": "Q1", "name": "Ann", "latest": {"best_ms": 90500, "t": 9.0, "x": 1.0, "z": 1.0}},
+             {"entry": "A", "segment": "Q1", "name": "Max", "latest": {"best_ms": 90500, "t": 4.0, "x": 5.0, "z": 5.0}}]
+    assert dr.qualifying(twice, "Q1", ROSTER)[0]["x"] == 1.0, "of two live senders the newer sample places the car"
+    far = dr.qualifying(conns, "Q1", ROSTER, in_area=lambda x, z: isinstance(x, float) and x < 10)
+    assert far[0]["entry"] == "A" and far[0]["x"] is None, "a place off the line's area puts no car on the map"
 
 
 def t_qualifying_rows_carry_the_interval_and_the_last_lap():
@@ -691,6 +696,20 @@ def t_the_qualifying_dashboard_and_desk_carry_classes_and_the_fastest_lap():
     pub = dr.public_view(d)
     assert pub["qualifying"][1]["class_gap_ms"] == 700 and pub["classes"][0]["fastest"] is None, pub
     assert "fastest" not in pub, f"the public activity list notes no pole lap as a fastest lap: {pub}"
+
+
+def t_the_qualifying_map_places_only_cars_on_the_picked_line():
+    first = TRACE[0]
+    conns = [{"entry": "A", "segment": "Q1", "name": "a",
+              "latest": {"best_ms": 90000, "x": first["x"], "z": first["z"]}},
+             {"entry": "B", "segment": "Q1", "name": "b",
+              "latest": {"best_ms": 91000, "x": first["x"] + 5000.0, "z": first["z"]}}]
+    ctx = {"roster": ROSTER, "stint": "Q1", "mode": "qualifying", "segment": "Q1", "connections": conns}
+    svc, _clock, _path = _dash_service(ctx)
+    svc.tick()
+    rows = {r["entry"]: r for r in svc.dashboard()["qualifying"]}
+    assert rows["A"]["x"] == first["x"] and rows["B"]["x"] is None, \
+        f"a sender 5 km off the picked line drives elsewhere and gets no dot: {rows}"
 
 
 def t_a_qualifying_time_stays_when_its_sender_goes_quiet():

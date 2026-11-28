@@ -1018,7 +1018,9 @@ function drawTimingMap(d) {
   if (!window.TrackMap) return;
   timingMapView = timingMapView || TrackMap.create($('timingMap'));
   const cars = (d.mode === 'qualifying' ? d.qualifying : d.entries) || [];
-  timingMapView.sync(d.track || null).then(function () { timingMapView.draw(cars); applyMap(); });
+  timingMapView.sync(d.track || null).then(function () {
+    timingMapView.draw(cars, {byPlace: d.mode === 'qualifying'}); applyMap();
+  });
 }
 // Shown over the crew chat on request, remembered per browser; no toggle while there is no line.
 const MAP_KEY = 'cockpit_track_map';

@@ -1377,7 +1377,7 @@
       var r = await raceCall;
       markStale(!!r);
       if (r) renderRace(r);
-      if (r && map) map.sync(r.track || null).then(function () { map.draw(mapCars(r)); });
+      if (r && map) map.sync(r.track || null).then(function () { map.draw(mapCars(r), {byPlace: r.mode === "qualifying"}); });
       var rec = await recCall;
       if (renderRecording(rec) && r) renderRace(r);
       var rd = await call("/drivers/readiness", undefined, true);
