@@ -1210,8 +1210,6 @@ class Race:
                              if e.active is not None and not self._out(e)) == 1 \
             or bool(late) and all(e.finished_at is not None or self._quiet(e, t) or self._out(e)
                                   for e in self._entries.values())
-        if self._finished:
-            self._cut_quiet(t)
 
     def _lobby_lead_lap(self, now, entries=None):
         """The highest GT7 counter among the final lobby's running cars (of `entries`)."""
