@@ -946,8 +946,7 @@ class Service:
         for row in rows:
             if row.get("status") == "no_data" and row.get("entry") in dc:
                 row["status"] = "dc"
-                if "x" in row:
-                    row["x"] = row["z"] = None
+                row["x"] = row["z"] = None
 
     def line(self):
         """The picked layout's line for the track map, at most LINE_POINTS points;

@@ -1129,8 +1129,9 @@ def t_a_confirmed_disconnect_reads_dc_on_the_dashboard_until_data_returns():
     del rec._silent["A"]
     wall[0] += 1
     svc.tick()
-    back = svc.dashboard()["entries"][0]
-    assert back["status"] != "dc" and back["x"] is not None, f"a returned car is back on the map: {back}"
+    for where, back in (("overlay and cockpit", svc.dashboard()["entries"][0]),
+                        ("desks", svc.standings()["entries"][0])):
+        assert back["status"] != "dc" and back["x"] is not None, f"a returned car is back on the {where} map: {back}"
 
 def t_a_new_event_on_a_running_relay_drops_every_action_and_rotates_the_recording():
     ctx = {"roster": ROSTER, "stint": "Q1", "remaining": None, "mode": "race", "segment": "Q1"}
