@@ -400,9 +400,10 @@ def t_finished_car_raises_nothing():
     with tempfile.TemporaryDirectory() as d:
         h = _Rec(d)
         try:
-            rows = [_srow("1", quiet_s=9.0, finished=True), _srow("2", quiet_s=9.0)]
-            h.rec.observe(_st("final_lap", rows), {}, 1000.0)
-            assert [e["entry"] for e in _events(h)] == ["2"], _events(h)
+            rows = [_srow("1", quiet_s=9.0, finished=True), _srow("2", quiet_s=9.0, status="no_data")]
+            h.rec.observe(_st("finishing", rows), {}, 1000.0)
+            assert [e["entry"] for e in _events(h)] == ["2"], \
+                f"a car already quiet before the flag reads no_data and is still a suspicion: {_events(h)}"
         finally:
             h.close()
 

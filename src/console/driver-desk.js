@@ -578,7 +578,7 @@
     var finish = button("Finish", "warn", "finish", function () { act("/drivers/race/finish", {}, "Race finished"); });
     // GT7's finish countdown ended the session before every car took the flag (#1397).
     var finishDue = el("div", {cls: "due", hidden: "",
-      text: "No car short of the flag has sent for 30 s: GT7's finish countdown is over. Press Finish to freeze their gaps."});
+      text: "The cars short of the flag stopped sending, so GT7's finish countdown is over. Press Finish to freeze their gaps."});
     // The panel has its own RED FLAG for cover and banner; here it only holds the race.
     var redFlag = button(fullRedFlag ? "RED FLAG" : "Hold race (red flag)", "alarm", "red", async function () {
       if (!fullRedFlag) return act("/drivers/race/red-flag", {}, "Race held for a red flag");

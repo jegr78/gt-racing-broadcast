@@ -317,11 +317,13 @@ and says so. Changing the layout mid-event starts the race over.
   the relay. A car that crossed just before the leader runs one more lap. The race timer never ends a race. **Finish** freezes the order at once.
   Once the leader has the flag, GT7 runs the lobby's race finish countdown (30 to 180 s)
   and then ends the session, so cars still on their last lap may never see the flag.
-  From the leader's flag on, a car that goes quiet is no disconnect: no suspicion opens,
-  and every screen keeps its last gap and lap instead of `No data`. When no car short
-  of the flag has sent for 30 s, both desks remind you to press **Finish**, which
-  freezes those cars where their data stopped: their laps, their gap, and on the lead
-  lap when they were on it. After the
+  From the leader's flag on, a car that goes quiet is no disconnect. No suspicion opens,
+  and every screen keeps its last gap and lap instead of `No data`. A car already quiet
+  before the flag stays a disconnect suspicion. When no car short of the flag has sent
+  for 30 s, both desks remind you to press **Finish**. It freezes those cars where their
+  data stopped, with their laps and their gap, and on the lead lap when they were on it.
+  A race that ends by itself, when the last running car takes its flag, freezes them
+  the same way. After the
   leader's flag the order is laps first, then who completed them first, so a lapped
   car that takes the flag stays behind a car on the lead lap that is still running.
   Cars still running on the same lap keep following the road until each finishes,

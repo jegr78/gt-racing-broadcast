@@ -1933,7 +1933,7 @@ shot = { name = "chequered-2", role = "viewer" }
 
 [[step]]
 id = "countdown_end"
-at = "after:shot_chequered_2+5s"
+at = "after:chequer"
 role = "drivers"
 do = "stop"
 expect = ["relay.get('/drivers/race').state == 'finishing'"]

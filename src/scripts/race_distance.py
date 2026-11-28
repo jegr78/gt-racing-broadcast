@@ -629,11 +629,10 @@ class Race:
 
     def finish(self, now):
         self._advance(now)
+        self._cut_quiet(now)
         for ent in self._entries.values():
             if ent.finished_at is None and not self._out(ent) \
                     and (ent.active is not None or self._estimated(ent)):
-                if self._short_of_flag(ent):
-                    ent.cut_at = self._cars[ent.active].t
                 ent.finished_at = now
         self._finished = True
         self._settle_stoppage(max((c.t for c in self._cars.values() if c.t is not None), default=now))
@@ -1115,6 +1114,8 @@ class Race:
                 ent.finished_at = t
                 self._finished = all(e.finished_at is not None or self._quiet(e, t) or self._out(e)
                                      for e in self._entries.values())
+                if self._finished:
+                    self._cut_quiet(t)
             return
         if self.multi_lobby and self._final_car(ent):
             # GT7 ends the final lobby on the road, which after a red flag restart need
@@ -1209,6 +1210,8 @@ class Race:
                              if e.active is not None and not self._out(e)) == 1 \
             or bool(late) and all(e.finished_at is not None or self._quiet(e, t) or self._out(e)
                                   for e in self._entries.values())
+        if self._finished:
+            self._cut_quiet(t)
 
     def _lobby_lead_lap(self, now, entries=None):
         """The highest GT7 counter among the final lobby's running cars (of `entries`)."""
@@ -1248,11 +1251,18 @@ class Race:
         return car is None or car.t is None or now - car.t > NO_DATA_S
 
     def _short_of_flag(self, ent):
-        """A running car with data after the leader's flag that has not taken its own:
+        """A car still sending when the leader took the flag that has not taken its own:
         when it goes quiet, GT7's finish countdown ended the session, not a disconnect."""
-        car = self._cars.get(ent.active)
+        last = self._last(ent)
         return self._finishing_at is not None and ent.finished_at is None and ent.distance is not None \
-            and not self._estimated(ent) and car is not None and car.t is not None
+            and not self._estimated(ent) and not ent.held and not ent.waiting \
+            and last is not None and last[0] >= self._flag_at - NO_DATA_S
+
+    def _cut_quiet(self, now):
+        """Freeze the quiet cars short of the flag where their counted data ends."""
+        for e in self._entries.values():
+            if not self._out(e) and self._short_of_flag(e) and now - self._last(e)[0] > NO_DATA_S:
+                e.cut_at, e.finished_at = self._last(e)[0], now
 
     def _cut_laps(self, ent):
         """The laps the order counts; a car the countdown cut short also completes the lap
@@ -1268,7 +1278,7 @@ class Race:
         """After the leader's flag: no car short of its flag has sent for FINISH_REMIND_S."""
         if self._finishing_at is None or self._finished:
             return False
-        short = [self._cars[e.active].t for e in self._entries.values()
+        short = [self._last(e)[0] for e in self._entries.values()
                  if not self._out(e) and self._short_of_flag(e)]
         return bool(short) and all(now - t >= FINISH_REMIND_S for t in short)
 
@@ -1416,7 +1426,8 @@ class Race:
     def _time_behind(self, ahead, ent, now=None):
         """Seconds `ent` is behind `ahead` by distance history, also when lapped; None
         without a running time (red flag) or history for that distance, and with `now`
-        also while `ahead` is quiet (its history is stale)."""
+        also while `ahead` is quiet (its history is stale), unless it finished or GT7's
+        finish countdown cut it short."""
         if ahead.distance is None or ent.distance is None:
             return None
         if ent.cut_at is not None:
@@ -1438,7 +1449,8 @@ class Race:
             return None if reached is None else max(0.0, self._racing(ent.finished_at) - reached)
         if ent.waiting or ahead.waiting:
             return None                            # no running time while a red flag holds them
-        if now is not None and self._quiet(ahead, now) and self._finishing_at is None:
+        if now is not None and self._quiet(ahead, now) \
+                and ahead.finished_at is None and not self._short_of_flag(ahead):
             return None
         at = ent.distance + ent.adjust - ahead.adjust
         last = self._last(ahead) if ahead.finished_at is not None else None

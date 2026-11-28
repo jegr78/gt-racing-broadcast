@@ -397,6 +397,46 @@ def t_after_the_countdown_the_cars_short_of_the_flag_keep_their_last_gap():
     assert not race.standings(t + 300)["finish_due"]
 
 
+def t_a_car_gone_before_the_flag_stays_no_data_and_gets_no_lap():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=3)
+    a, b, c = Car(race, "A", "a", -10), Car(race, "B", "b", -20), Car(race, "C", "c", -30)
+    t = _drive(race, [a, b, c], [52, 50, 34], 0.0, 2 * L / 52)
+    gone = _row(race, "C", t)
+    t = _drive(race, [a, b], [52, 50], t, 2 * L / 52 + 1)          # C stopped sending a lap ago
+    assert race.standings(t)["state"] == "finishing"
+    assert _row(race, "C", t)["status"] == "no_data", "a car gone before the flag is still no data"
+    t = _drive(race, [a, b], [None, 50], t, 1)
+    assert not race.standings(t + 1)["finish_due"], "the countdown just started"
+    race.finish(t + 60)
+    c = _row(race, "C", t + 60)
+    assert c["laps"] == gone["laps"] and c["lapped"] >= 2, f"no lap for a car gone before the flag: {c}"
+
+
+def t_a_race_that_finishes_by_itself_freezes_the_cut_cars_too():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=3)
+    a, b, c = Car(race, "A", "a", -10), Car(race, "B", "b", -20), Car(race, "C", "c", -400)
+    t = _drive(race, [a, b, c], [52, 50, 50], 0.0, 4 * L / 52 + 1)
+    assert race.standings(t)["state"] == "finishing"
+    live = _row(race, "C", t)
+    t = _drive(race, [a, b], [None, 50], t, 12)                   # C cut short, B takes its flag later
+    st = race.standings(t)
+    c = _row(race, "C", t)
+    assert st["state"] == "finished" and c["finished"] and c["lapped"] == live["lapped"], \
+        f"the cut car is frozen whichever way the race ends: {st['state']} {c} vs {live}"
+
+
+def t_an_early_finish_credits_no_lap_to_a_car_still_sending():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=3)
+    a, c = Car(race, "A", "a", -10), Car(race, "C", "c", -30)
+    t = _drive(race, [a, c], [52, 34], 0.0, 4 * L / 52 + 1)
+    before = _row(race, "C", t)
+    t = _drive(race, [a, c], [None, 34], t, 2)
+    race.finish(t)
+    after = _row(race, "C", t)
+    assert after["laps"] == before["laps"] and after["lapped"] >= before["lapped"] >= 1, \
+        f"a car still sending keeps the laps it completed: {before} -> {after}"
+
+
 def t_the_finish_reminder_waits_while_a_car_short_of_the_flag_still_sends():
     race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=3)
     a, b = Car(race, "A", "a", -10), Car(race, "B", "b", -20)
