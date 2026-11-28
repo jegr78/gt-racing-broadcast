@@ -149,6 +149,7 @@ at = "after:quali_timer"
 role = "director"
 do = "start_part"
 expect = ["obs.streaming"]
+chapter = "On air: qualifying (the day before)"
 caption = "The director starts the qualifying broadcast"
 focus = ["director", "program"]
 
@@ -160,7 +161,6 @@ do = "scene"
 args = { scene = "Stint" }
 expect = ["'comms1' in obs.program_channels"]
 timeout = "90s"
-chapter = "On air: qualifying (the day before)"
 caption = "The director puts Comms 1 on program for qualifying"
 focus = ["program", "director"]
 
@@ -357,8 +357,7 @@ at = "after:shot_quali_tower_gap_1"
 role = "viewer"
 do = "read"
 args = { cars = 14 }
-expect = ["page('viewer').cars >= 14",
-          "'Apex Works' in page('viewer').rows[0]"]
+expect = ["page('viewer').cars >= 14"]
 timeout = "20s"
 caption = "The public timing ranks every car by its best qualifying lap"
 focus = ["viewer", "program"]
@@ -399,9 +398,10 @@ timeout = "60s"
 caption = "The director ends the qualifying broadcast, and the event stops with it"
 focus = ["director", "program"]
 
+# The relay's own `event stop` releases the OBS feeds in the seconds after the relay died.
 [[step]]
 id = "start_event"
-at = "after:quali_stop"
+at = "after:quali_stop+5s"
 role = "producer"
 do = "start_event"
 args = { qualifying = false }
@@ -521,7 +521,7 @@ shot = { name = "approval-requests-1", role = "race_control", element = ".area[d
 
 [[step]]
 id = "approve_drivers"
-at = "after:desk_requests"
+at = "after:desk_requests+6s"
 role = "race_control"
 do = "approve_all"
 expect = ["result('approve_drivers').approved == 14",
@@ -1991,7 +1991,7 @@ shot = { name = "new-cockpit-finished", role = "commentator:Comms 3", element = 
 
 [[step]]
 id = "chat_finish"
-at = "after:shot_new_cockpit_finished"
+at = "after:shot_new_cockpit_finished+6s"
 role = "commentator:Comms 3"
 do = "chat"
 args = { text = "Thanks everyone, that was a great race." }

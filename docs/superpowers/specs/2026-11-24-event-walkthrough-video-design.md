@@ -109,8 +109,9 @@ in the normal CI, real league data or real race footage.
   factor that fits a long wait into 20 s of film (#1377). No stretch is cut out: positions
   never jump.
 - A screenshot of a page element taller than the viewport disturbs that page's recording
-  for a moment. The recording run notes each shot's window, and the film shows the page's
-  frame from before it until the page has settled.
+  for a moment. The recording run notes each element shot's window, and the film shows the
+  page's frame from before it until the page has settled (close shots share one frame), or
+  until a captioned step acts on that page; the full scenario leaves 6 s for that.
 - The film starts once the views of the first caption have opened, so it opens on them.
 - The film has no length limit.
 - The title cards add film time and play no source time: the intro 5 s, a chapter's card

@@ -501,6 +501,34 @@ def t_a_screenshot_s_window_shows_the_frame_before_it():
     assert p._source("director", 70.2)[1] == 20.2, "another view plays through the shot"
 
 
+def t_close_screenshots_hold_one_frame_from_before_the_first():
+    tl = timeline()
+    tl["shots"] = [{"view": "race_control", "start": 70.0, "end": 70.5},
+                   {"view": "race_control", "start": 71.0, "end": 71.5}]
+    p = fp.Plan(tl)
+    held = round(70.0 - fp.SHOT_LEAD_S - 0.6, 4)
+    for s in (70.2, 72.9, 71.5 + fp.SHOT_SETTLE_S - 0.1):
+        assert p._source("race_control", s)[1] == held, f"overlapping windows hold one frame at {s}"
+
+
+def t_a_screenshot_hold_ends_where_the_next_action_on_its_page_starts():
+    tl = timeline()
+    tl["steps"].insert(5, _step("desk2", "race_control", 81.0, 82.0, 83.0, caption="Race Control acts again"))
+    tl["shots"] = [{"view": "race_control", "start": 79.5, "end": 80.0}]
+    p = fp.Plan(tl)
+    assert p._source("race_control", 80.5)[1] == round(79.5 - fp.SHOT_LEAD_S - 0.6, 4), "held after the shot"
+    assert p._source("race_control", 81.2)[1] == round(81.2 - 0.6, 4), "the next captioned action plays live"
+
+
+def t_a_screenshot_hold_never_reaches_before_its_recording():
+    tl = timeline()
+    tl["shots"] = [{"view": "director", "start": 50.1, "end": 50.4}]
+    p = fp.Plan(tl)
+    rec, t = p._source("director", 51.0)
+    assert p.recordings[rec]["file"] == "pages/director/page@second.webm" and t == 0.0, \
+        f"a shot right after a reopen holds the new recording's first frame: {(rec, t)}"
+
+
 def t_a_missing_transcode_of_a_reopened_page_shows_the_earlier_recording():
     tl = timeline()
     second = len(tl["recordings"]) - 1

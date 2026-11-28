@@ -856,7 +856,9 @@ def t_a_screenshot_notes_its_window_for_the_film():
     role.do("open", {})
     ctx.recorder = Rec()
     role.shot("desk.png", ".area")
-    assert shots == ["race_control"], f"a shot in a record run tells the recorder which page it took: {shots}"
+    role.shot("page.png")
+    assert shots == ["race_control"], \
+        f"an element shot, which may resize the page, tells the recorder; a viewport shot does not: {shots}"
 
 
 def t_redact_hides_tokens_invites_and_timing_links():
@@ -2502,7 +2504,9 @@ def t_the_bundled_events_run_three_lobbies_and_check_each_commentator_on_program
         free = [s.get("id") for s in raw["step"] if s["role"].split(":")[0] not in ("api", "obs", "stream", "relay")
                 and not str(s.get("at", "")).startswith("after:")]
         assert free == [], f"{name}: without a browser these steps would not be skipped with their chain: {free}"
-        assert loaded.steps[-1].do in _ENDS, f"{name}: the step that ends the event is the last step"
+        last = loaded.steps[-1]
+        assert last.do == "stop_event" or last.do == "end_part" and "not relay.up" in last.expect, \
+            f"{name}: the step that ends the event is the last step, an end_part only when it stops the relay"
         assert all(s.expect for s in loaded.steps if s.role == "api"), f"{name}: every probe step asserts something"
 
 
@@ -2565,6 +2569,23 @@ FULL_CHAPTERS = ["Qualifying (the day before)", "On air: qualifying (the day bef
 
 def _full():
     return scenario.load(os.path.join(SIM, "scenarios", "full.toml"), REG)
+
+
+def t_no_captioned_action_follows_an_element_shot_of_its_page_at_once():
+    with open(os.path.join(SIM, "scenarios", "full.toml"), "rb") as fh:
+        steps = tomllib.load(fh)["step"]
+    by = {s["id"]: s for s in steps}
+    close = []
+    for s in steps:
+        at = str(s.get("at", ""))
+        if not at.startswith("after:") or not s.get("caption"):
+            continue
+        ref, _, off = at[len("after:"):].partition("+")
+        shot = by[ref].get("shot")
+        if isinstance(shot, dict) and shot.get("element") and (shot.get("role") or by[ref]["role"]) == s["role"]:
+            if float(off.rstrip("s") or 0) < 6:
+                close.append(s["id"])
+    assert close == [], f"an element shot disturbs its page's recording for a moment; leave 6 s: {close}"
 
 
 def t_the_full_scenario_keeps_the_decks_50_shots():
