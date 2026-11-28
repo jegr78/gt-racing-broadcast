@@ -2770,6 +2770,13 @@ WEBHOOK_LAPS_OUTDATED_ERROR = ("webhook script outdated: writing the Schedule La
 WEBHOOK_LAPS_NO_COLUMN_ERROR = ("the Schedule tab has no Laps column: add a Laps header to write "
                                 "stint lap counts (wiki: Sheet-Template)")
 WEBHOOK_LAPS_VERSION = 8
+WEBHOOK_CLASS_LAPS_OUTDATED_ERROR = ("webhook script outdated: writing a Schedule Laps <Class> cell needs "
+                                     "the v9 script (wiki: Sheet-Webhook)")
+WEBHOOK_CLASS_LAPS_NO_COLUMN_ERROR = ("the Schedule tab has no Laps <Class> column for this class: add one to "
+                                      "write class lap counts (wiki: Sheet-Template)")
+WEBHOOK_CLASS_LAPS_VERSION = 9
+# Each class count is its own pending save per row: "schedule_laps:<Class>".
+CLASS_LAPS_PREFIX = "schedule_laps:"
 # A stint lap count is its own pending save, so a Sheet that cannot take it holds no other field of the row.
 LAPS_TARGET = "schedule_laps"
 
@@ -7657,6 +7664,7 @@ class ScheduleSource:
         self.rows = []
         self.laps = {}
         self.class_laps = {}
+        self.class_headers = []
         self.last_ok = None
         self.last_error = None
         # Pending panel saves (spec 2026-10-06): applied after every refresh so a
@@ -7757,8 +7765,24 @@ class ScheduleSource:
                     out.setdefault(line, {})[cls] = int(cell)
         return out
 
+    @staticmethod
+    def _parse_class_headers(text):
+        """The class names of the `Laps <Class>` header columns, in sheet order."""
+        rows = list(csv.reader(io.StringIO(text)))
+        return [h.strip()[5:].strip() for h in (rows[0] if rows else [])
+                if (h or "").strip()[:5].lower() == "laps " and h.strip()[5:].strip()]
+
+    def class_name(self, cls):
+        """`cls` as the Schedule's `Laps <Class>` header spells it, else trimmed; None when empty."""
+        if not isinstance(cls, str) or not cls.strip():
+            return None
+        cls = cls.strip()
+        with self.lock:
+            known = list(self.class_headers) + [c for cl in self.class_laps.values() for c in cl]
+        return next((c for c in known if c.lower() == cls.lower()), cls)
+
     def class_laps_at(self, idx):
-        """The `Laps <Class>` cells of schedule row `idx` (0-based)."""
+        """The class lap counts of schedule row `idx` (0-based), desk saves first."""
         with self.lock:
             return dict(self.class_laps.get(self.rows[idx][3]) or {}) if 0 <= idx < len(self.rows) else {}
 
@@ -7777,9 +7801,18 @@ class ScheduleSource:
         with self.lock:
             rows = list(self.rows)
             laps = dict(self.laps)
+            class_laps = {line: dict(cl) for line, cl in self.class_laps.items()}
         states = self._pending.states(self._laps_target) if self._pending and self._laps_target else {}
+        class_states = {t[len(CLASS_LAPS_PREFIX):]: self._pending.states(t)
+                        for t in self._class_targets()}
         return [{"row": line, "stint": stint, "laps": laps.get(line),
-                 "sync": states.get(line, (None, None))[0]} for _u, _n, stint, line in rows]
+                 "sync": states.get(line, (None, None))[0],
+                 "class_laps": class_laps.get(line, {}),
+                 "class_sync": {cls: st[line][0] for cls, st in class_states.items() if line in st}}
+                for _u, _n, stint, line in rows]
+
+    def _class_targets(self):
+        return self._pending.targets(CLASS_LAPS_PREFIX) if self._pending is not None and self._laps_target else []
 
     @staticmethod
     def _parse_csv(text):
@@ -7797,6 +7830,7 @@ class ScheduleSource:
             rows = self._parse_rows(text, self.allow_local)
             self._fetched_laps = self._parse_laps(text)
             self._fetched_class_laps = self._parse_class_laps(text)
+            self._fetched_class_headers = self._parse_class_headers(text)
             if not rows:
                 self.last_error = ("Sheet reachable, but no channel IDs found "
                                    "(correct tab name? a column with UC… IDs / watch URLs? sharing?)")
@@ -7812,7 +7846,8 @@ class ScheduleSource:
             with self.lock:
                 self.rows = rows
                 self.laps = getattr(self, "_fetched_laps", {})
-                self.class_laps = getattr(self, "_fetched_class_laps", {})
+                self.class_laps = {line: dict(cl) for line, cl in getattr(self, "_fetched_class_laps", {}).items()}
+                self.class_headers = list(getattr(self, "_fetched_class_headers", []))
                 self.items = [u for u, _n, _s, _l in rows]
                 self.last_ok = time.time()
                 self.last_error = None
@@ -7821,6 +7856,11 @@ class ScheduleSource:
                     self._pending.reconcile(self._pending_target, shown)
                     if self._laps_target:
                         self._pending.reconcile(self._laps_target, shown)
+                    for t in self._class_targets():
+                        cls = t[len(CLASS_LAPS_PREFIX):]
+                        self._pending.reconcile(t, {l: ("", "", "", "", cls,
+                                                        str((self.class_laps.get(l) or {}).get(cls, "")))
+                                                    for _u, _n, _s, l in rows})
                     self._apply_pending_locked()
             try:
                 with open(self.cache_path, "w", encoding="utf-8") as fh:
@@ -7834,6 +7874,8 @@ class ScheduleSource:
             self._pending.expire(self._pending_target)
             if self._laps_target:
                 self._pending.expire(self._laps_target)
+            for t in self._class_targets():
+                self._pending.expire(t)
         return False
 
     def load_initial(self, template=None):
@@ -7918,6 +7960,13 @@ class ScheduleSource:
                 self.laps[row] = int(fields["laps"])
             else:
                 self.laps.pop(row, None)
+        for t in self._class_targets():
+            for row, fields in self._pending.overlay(t).items():
+                cls = fields.get("class") or t[len(CLASS_LAPS_PREFIX):]
+                if fields.get("class_laps"):
+                    self.class_laps.setdefault(row, {})[cls] = int(fields["class_laps"])
+                elif cls in self.class_laps.get(row, {}):
+                    del self.class_laps[row][cls]
 
     def apply_pending(self):
         with self.lock:
@@ -8519,16 +8568,26 @@ class SetupControl(PushHealth):
             self.push_url, payload, expected_action,
             timeout=WEBHOOK_ASYNC_SAVE_TIMEOUT_S, attempts=WEBHOOK_ASYNC_SAVE_ATTEMPTS,
             budget_s=WEBHOOK_ASYNC_SAVE_BUDGET_S)
-        if "laps" in payload:
+        if "class_laps" in payload:
+            if ok and _webhook_version(body) < WEBHOOK_CLASS_LAPS_VERSION:
+                return False, WEBHOOK_CLASS_LAPS_OUTDATED_ERROR
+            if not ok and "no Laps " in (err or ""):
+                return False, WEBHOOK_CLASS_LAPS_NO_COLUMN_ERROR
+        elif "laps" in payload:
             if ok and _webhook_version(body) < WEBHOOK_LAPS_VERSION:
                 return False, WEBHOOK_LAPS_OUTDATED_ERROR
             if not ok and "no Laps column" in (err or ""):
                 return False, WEBHOOK_LAPS_NO_COLUMN_ERROR
         return ok, err
 
+    def _source(self, target):
+        if target.startswith(CLASS_LAPS_PREFIX):
+            return self._save_sources.get(LAPS_TARGET)
+        return self._save_sources.get(target)
+
     def _queue_save(self, target, row, fields):
         self.saves.put(target, row, fields)
-        src = self._save_sources.get(target)
+        src = self._source(target)
         if src is not None and hasattr(src, "apply_pending"):
             src.apply_pending()
         self._ensure_worker()
@@ -8563,6 +8622,9 @@ class SetupControl(PushHealth):
         target, row, fields, rev = job
         if target == "pov":
             payload, action = {"action": "pov", **fields}, "pov"
+        elif target.startswith(CLASS_LAPS_PREFIX):
+            payload, action = {"action": "schedule", "row": row, "class": fields.get("class", ""),
+                               "class_laps": fields.get("class_laps", "")}, "schedule"
         else:
             payload, action = {"action": "schedule", "row": row}, "schedule"
             if target == "qualifying":
@@ -8585,13 +8647,14 @@ class SetupControl(PushHealth):
             outdated = webhook_error_permanent(err)
             if outdated:
                 self._mark_push_failed(err)
-            hold = outdated or err in (WEBHOOK_LAPS_OUTDATED_ERROR, WEBHOOK_LAPS_NO_COLUMN_ERROR)
+            hold = outdated or err in (WEBHOOK_LAPS_OUTDATED_ERROR, WEBHOOK_LAPS_NO_COLUMN_ERROR,
+                                       WEBHOOK_CLASS_LAPS_OUTDATED_ERROR, WEBHOOK_CLASS_LAPS_NO_COLUMN_ERROR)
             state = self.saves.done(target, row, rev, ok=False, err=err, hold=hold)
             if state == pending_saves.LOCAL and key not in self._was_local:
                 self._was_local.add(key)
                 LOG.warning("sheet save %s kept in relay, not in the sheet yet: %s",
                             self._save_label(target, row), err)
-        src = self._save_sources.get(target)
+        src = self._source(target)
         if src is not None and hasattr(src, "apply_pending"):
             src.apply_pending()
         return True
@@ -8766,6 +8829,24 @@ class SetupControl(PushHealth):
             return {"error": "row is not a stint of the Schedule"}
         self._queue_save(LAPS_TARGET, row, {"laps": "" if laps is None else str(laps)})
         return {"ok": True, "row": row, "pending": True}
+
+    def schedule_class_laps(self, row, cls, laps):
+        """Set one class's lap count of a race Schedule row's stint lobby, or clear it with
+        None: live in the relay at once, written to its `Laps <Class>` cell in the background."""
+        if not self.push_url:
+            return {"error": "webhook not configured: set RACECAST_SHEET_PUSH_URL "
+                             "in the active profile or .env (wiki: Sheet-Webhook)"}
+        if laps is not None and (type(laps) is not int or not 0 < laps <= 999):
+            return {"error": "laps is a whole number from 1 to 999, or null"}
+        src = self._save_sources.get(LAPS_TARGET)
+        name = src.class_name(cls) if src is not None and hasattr(src, "class_name") else None
+        if not name:
+            return {"error": "class is required"}
+        if type(row) is not int or src is None or row not in {r[3] for r in src.get_rows()}:
+            return {"error": "row is not a stint of the Schedule"}
+        self._queue_save(CLASS_LAPS_PREFIX + name, row,
+                         {"class": name, "class_laps": "" if laps is None else str(laps)})
+        return {"ok": True, "row": row, "class": name, "pending": True}
 
     def qualifying_set(self, row, url=None, name=None, stint=None):
         """Write the qualifying row. Same payload, but targeting the Qualifying

@@ -14,7 +14,7 @@ CONFIRMED = "confirmed"
 # wait, so a row cannot stay pinned when the sheet stores a value differently.
 CONFIRM_GRACE_S = 120.0
 
-_FIELDS = ("url", "name", "stint", "laps")
+_FIELDS = ("url", "name", "stint", "laps", "class", "class_laps")
 
 
 class _Entry:
@@ -138,6 +138,11 @@ class PendingSaves:
                     del self._entries[(t, row)]
                     dropped.append(row)
         return sorted(dropped)
+
+    def targets(self, prefix):
+        """The targets that start with *prefix* and hold an entry."""
+        with self._lock:
+            return sorted({t for t, _row in self._entries if t.startswith(prefix)})
 
     def retryable(self):
         """`local` entries a recovery may push again (not held by an outdated script)."""
