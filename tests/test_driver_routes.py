@@ -3317,6 +3317,114 @@ def _audit_of(srv):
         return [_json.loads(line) for line in fh]
 
 
+class _MsgHud(_Hud):
+    """The HUD's Race Control message and its Configuration vocabulary."""
+    def __init__(self):
+        self.msg = ""
+
+    def data(self):
+        return {"raceControl": self.msg}
+
+    def vocab(self):
+        return {"racecontrol": ["Formation Lap", "Final Lap", "Chequered Flag", "Driver Swaps"]}
+
+
+class _MsgCtl:
+    def __init__(self, hud):
+        self.hud, self.calls = hud, []
+
+    def set_field(self, key, value, now=None):
+        self.calls.append((key, value))
+        if value and value not in self.hud.vocab()["racecontrol"]:
+            return {"error": f"not in the Configuration vocabulary: {value!r}"}
+        self.hud.msg = value
+        return {"ok": True, "field": key, "value": value}
+
+
+def t_race_control_sets_the_hud_message_with_shortcuts_and_from_the_vocabulary():
+    hud = _MsgHud()
+    ctl = _MsgCtl(hud)
+    srv, port, _path, _hub = _serve(solo=False, hud_source=hud, setup_ctl=ctl)
+    rc, director, alice = g._tok("dave"), g._tok("bob"), g._tok("alice")
+    audit = driver_race.audit_path_for(srv.race_svc._path)
+    try:
+        race = json.loads(_req(port, f"/console/race-control/drivers/race?t={rc}")[1])
+        assert race["hud_messages"] == hud.vocab()["racecontrol"] and race["hud_message"] == "", \
+            f"the desk offers the league's messages and shows the one on air: {race.get('hud_messages')}"
+        st, text, _h = _post(port, f"/console/race-control/drivers/race/formation-lap?t={rc}", {})
+        assert st == 200 and hud.msg == "Formation Lap", (st, text, hud.msg)
+        with open(audit, encoding="utf-8") as fh:
+            last = json.loads(fh.read().splitlines()[-1])
+        assert (last["who"], last["action"], last["text"]) == ("race_control:dave", "hud_message", "Formation Lap"), last
+        st, text, _h = _post(port, f"/console/race-control/drivers/race/hud-message?t={rc}", {"text": "Driver Swaps"})
+        assert st == 200 and hud.msg == "Driver Swaps", "any message of the vocabulary, like the director's"
+        st, text, _h = _post(port, f"/console/race-control/drivers/race/hud-message?t={rc}", {"text": ""})
+        assert st == 200 and hud.msg == "", "an empty text clears it"
+        for bad in ({"text": "Invented"}, {}, {"text": 5}):
+            st, text, _h = _post(port, f"/console/race-control/drivers/race/hud-message?t={rc}", bad)
+            assert st == 400 and hud.msg == "", (bad, st, text)
+        assert _post(port, f"/console/drivers/race/hud-message?t={alice}", {"text": "Final Lap"})[0] == 403, \
+            "a commentator never puts a message on air"
+        st, text, _h = _post(port, f"/console/drivers/race/final-lap?t={director}", {})
+        assert st == 200 and hud.msg == "Final Lap", f"Final lap also shows it on the HUD: {st} {text} {hud.msg!r}"
+        assert json.loads(text)["state"] == srv.race_svc.standings()["state"]
+    finally:
+        srv.shutdown()
+
+
+class _States:
+    def __init__(self):
+        self.state, self.logged = None, []
+
+    def race_state(self):
+        return self.state
+
+    def log(self, who, action, **fields):
+        self.logged.append((who, action, fields.get("text")))
+
+
+def t_the_hud_message_follows_the_race_by_itself():
+    hud = _MsgHud()
+    ctl, race = _MsgCtl(hud), _States()
+    auto = g.m.HudMessageAuto(ctl, hud, race)
+    hud.msg = "Formation Lap"
+    for state in (None, "waiting", "waiting"):
+        race.state = state
+        auto.observe()
+    assert hud.msg == "Formation Lap", "the formation lap stays until the race counts"
+    race.state = "racing"
+    auto.observe()
+    assert hud.msg == "" and race.logged[-1] == ("race", "hud_message", ""), \
+        f"the leader on the line clears Formation Lap: {hud.msg!r} {race.logged}"
+    hud.msg = "Driver Swaps"
+    race.state = "final_lap"
+    auto.observe()
+    race.state = "finishing"
+    auto.observe()
+    assert hud.msg == "Driver Swaps", "another message is never replaced"
+    hud.msg, race.state = "Final Lap", "final_lap"
+    auto.observe()
+    race.state = "finishing"
+    auto.observe()
+    assert hud.msg == "Chequered Flag", f"the leader's flag turns Final Lap into Chequered Flag: {hud.msg!r}"
+    race.state = "finished"
+    auto.observe()
+    assert hud.msg == "Chequered Flag", "Chequered Flag stays until someone clears it"
+    race.state = "racing"
+    auto.observe()
+    hud.msg, race.state = "Formation Lap", "final_lap"
+    auto.observe()
+    assert hud.msg == "Formation Lap", "only the step into the counting race clears it, not a later change"
+    calls = len(ctl.calls)
+    ctl.hud.vocab = lambda: {"racecontrol": ["Final Lap"]}
+    hud.msg, race.state = "Final Lap", "final_lap"
+    auto.observe()
+    race.state = "finishing"
+    auto.observe()
+    assert hud.msg == "Final Lap" and len(ctl.calls) == calls, \
+        "without Chequered Flag in the vocabulary Final Lap stays"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

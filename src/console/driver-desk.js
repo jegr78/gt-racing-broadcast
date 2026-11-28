@@ -539,6 +539,36 @@
       });
     }
     var finalLap = button("Final lap", "warn", null, function () { act("/drivers/race/final-lap", {}, "Final lap"); });
+    // Race Control's HUD message (#1384): the shortcut, any message of the league's
+    // vocabulary, and Clear. Formation Lap clears and Final Lap turns into Chequered
+    // Flag by itself; the Director Panel keeps its own message controls.
+    var formation = button("Formation Lap", "", null, function () {
+      act("/drivers/race/formation-lap", {}, "Formation Lap on the HUD");
+    });
+    var hudMsg = el("select", {"aria-label": "HUD Race Control message"});
+    var hudKey = null;
+    hudMsg.addEventListener("change", function () {
+      act("/drivers/race/hud-message", {text: hudMsg.value}, hudMsg.value ? hudMsg.value + " on the HUD" : "HUD message cleared");
+    });
+    var hudClear = button("Clear message", "", null, function () {
+      act("/drivers/race/hud-message", {text: ""}, "HUD message cleared");
+    });
+    var hudRow = el("div", {cls: "row", hidden: ""}, [el("span", {cls: "muted", text: "HUD message"}), formation, hudMsg, hudClear]);
+    function renderHudMessage(r) {
+      var list = Array.isArray(r.hud_messages) ? r.hud_messages : null;
+      hudRow.hidden = !fullRedFlag || !list;
+      if (hudRow.hidden) return;
+      var key = JSON.stringify(list);
+      if (key !== hudKey && document.activeElement !== hudMsg) {
+        hudKey = key;
+        hudMsg.replaceChildren.apply(hudMsg, [opt("", "No message")].concat(list.map(function (m) { return opt(m, m); })));
+      }
+      var on = typeof r.hud_message === "string" ? r.hud_message : "";
+      if (document.activeElement !== hudMsg) {
+        if (on && list.indexOf(on) < 0) hudMsg.appendChild(opt(on, on));
+        hudMsg.value = on;
+      }
+    }
     var finish = button("Finish", "warn", "finish", function () { act("/drivers/race/finish", {}, "Race finished"); });
     // The panel has its own RED FLAG for cover and banner; here it only holds the race.
     var redFlag = button(fullRedFlag ? "RED FLAG" : "Hold race (red flag)", "alarm", "red", async function () {
@@ -1118,6 +1148,7 @@
         el("div", {cls: "row finish"}, [mode, laps, finalLap, finish]),
         classLapRow,
         el("div", {cls: "row red"}, [redFlag, restart, release]),
+        hudRow,
         redBanner, planRow, msgs.live, lastChange],
       race: [el("div", {cls: "row", style: "flex-wrap: nowrap"}, [raceStart, startNote]), unlockRow, raceNote, raceTable, stintBox, evTitle,
         el("div", {cls: "row"}, [el("label", {cls: "check"}, [soundBox, el("span", {cls: "muted", text: "Sound on suspicion"})])]),
@@ -1198,6 +1229,7 @@
       if (document.activeElement !== laps) laps.value = s.lap_count || "";
       laps.hidden = mode.value !== "laps" || Array.isArray(r.stints);
       renderClassLaps(r, !laps.hidden);
+      renderHudMessage(r);
       renderStints(r);
       renderPlan(r);
       var red = r.red_flag;

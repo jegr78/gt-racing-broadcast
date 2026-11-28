@@ -690,13 +690,12 @@ focus = ["program", "viewer"]
 [[step]]
 id = "rc_formation"
 at = "after:formation"
-role = "director"
-do = "hud"
-args = { field = "racecontrol", value = "Formation Lap" }
+role = "race_control"
+do = "formation_lap"
 expect = ["relay.get('/setup/data').fields.racecontrol == 'Formation Lap'"]
 timeout = "20s"
-caption = "The director shows Formation Lap as the Race Control message on the HUD"
-focus = ["director", "program"]
+caption = "Race Control shows Formation Lap on the HUD with one click"
+focus = ["race_control", "program"]
 
 [[step]]
 id = "shot_formation_1"
@@ -729,13 +728,13 @@ timeout = "6m"
 [[step]]
 id = "rc_go"
 at = "after:racing"
-role = "director"
-do = "hud"
-args = { field = "racecontrol", value = "" }
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
 expect = ["relay.get('/setup/data').fields.racecontrol == ''"]
 timeout = "20s"
-caption = "The director clears the Race Control message as the race starts"
-focus = ["director", "program"]
+caption = "Formation Lap leaves the HUD by itself as the race starts"
+focus = ["program", "race_control"]
 
 [[step]]
 id = "shot_start_1"
@@ -1860,26 +1859,16 @@ id = "final_lap"
 at = "after:last_lap"
 role = "race_control"
 do = "final_lap"
-expect = ["race.state in ['final_lap', 'finishing', 'finished']"]
+expect = ["race.state in ['final_lap', 'finishing', 'finished']",
+          "relay.get('/setup/data').fields.racecontrol == 'Final Lap'"]
 timeout = "30s"
 chapter = "The finish"
-caption = "Race Control calls the final lap"
+caption = "Race Control calls the final lap, and Final Lap shows on the HUD with it"
 focus = ["race_control", "viewer"]
 
 [[step]]
-id = "rc_final"
-at = "after:final_lap"
-role = "director"
-do = "hud"
-args = { field = "racecontrol", value = "Final Lap" }
-expect = ["relay.get('/setup/data').fields.racecontrol == 'Final Lap'"]
-timeout = "20s"
-caption = "The director shows Final Lap on the HUD"
-focus = ["director", "program"]
-
-[[step]]
 id = "shot_finallap_2"
-at = "after:rc_final+3s"
+at = "after:final_lap+3s"
 role = "api"
 do = "get"
 args = { path = "/status" }
@@ -1916,13 +1905,13 @@ focus = ["race_control", "program"]
 [[step]]
 id = "rc_flag"
 at = "after:chequer"
-role = "director"
-do = "hud"
-args = { field = "racecontrol", value = "Chequered Flag" }
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
 expect = ["relay.get('/setup/data').fields.racecontrol == 'Chequered Flag'"]
 timeout = "20s"
-caption = "The director shows Chequered Flag on the HUD"
-focus = ["director", "program"]
+caption = "With the leader's flag, Final Lap turns into Chequered Flag by itself"
+focus = ["program", "race_control"]
 
 [[step]]
 id = "shot_chequered_1"

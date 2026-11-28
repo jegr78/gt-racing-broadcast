@@ -725,6 +725,9 @@ AUTO_COVER_POLL_S = 5                     # how often the auto-cover tick evalua
 AUTO_COVER_SETTLE_S = 12                  # source_state must persist this long before the cover raises
 STANDBY_COVER_SOURCE = "Standby Cover"    # the #378 cover source in the Stint scene
 RED_FLAG_BANNER = "Red Flag - Race Suspended"   # the HUD banner of the panel's RED FLAG
+FORMATION_MESSAGE = "Formation Lap"             # the desks' shortcuts for the HUD's Race Control message
+FINAL_LAP_MESSAGE = "Final Lap"
+CHEQUERED_MESSAGE = "Chequered Flag"
 RED_FLAG_MIN_S = 2.0                            # one Race Control red flag change per person
 
 
@@ -15118,6 +15121,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     out["start_timer"] = timer_store is not None and out.get("start_timer") is not False
                     auto = getattr(relay, "timer_autostart", None)
                     out["start_pending"] = bool(auto and auto.pending())
+                    if hud_source is not None and hasattr(hud_source, "vocab"):
+                        out["hud_messages"] = list(hud_source.vocab().get("racecontrol", []))
+                        out["hud_message"] = hud_source.data().get("raceControl") or ""
                     sched = getattr(relay, "race_source", None)
                     if not relay.solo and sched is not None and hasattr(sched, "stint_laps"):
                         out["stints"] = sched.stint_laps()
@@ -15911,12 +15917,32 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             return self._send({"ok": False, "error": str(exc)}, 400)
                     if action == "recording" or p[2:] == ["recording", "event"]:
                         return self._recording_post(p[3] if len(p) == 4 else None, body, who)
+                    if action in ("formation-lap", "hud-message"):
+                        text = FORMATION_MESSAGE if action == "formation-lap" else body.get("text")
+                        if not isinstance(text, str):
+                            return self._send({"ok": False, "error": "text is the message, or empty to clear"}, 400)
+                        if not setup_ctl or hud_source is None:
+                            return self._send({"ok": False, "error": "no Setup tab control"}, 409)
+                        if text and text not in hud_source.vocab().get("racecontrol", []):
+                            return self._send({"ok": False, "error": f"not in the Configuration vocabulary: {text!r}"}, 400)
+                        driver_race_svc.log(who, "hud_message", text=text)
+                        res = setup_ctl.set_field("racecontrol", text)
+                        if res.get("error"):
+                            return self._send({"ok": False, "error": res["error"]}, 400)
+                        relay.rc_red_flag_banner = False    # the desk's message now
+                        return self._send({"ok": True, "race": driver_race_svc.standings()})
                     commands = {"final-lap": driver_race_svc.final_lap,
                                 "finish": driver_race_svc.finish, "reset": driver_race_svc.reset,
                                 "new-event": driver_race_svc.new_event}
                     if action in commands:
                         commands[action](who)
-                        return self._send({"ok": True, "state": driver_race_svc.standings()["state"]})
+                        out = {"ok": True, "state": driver_race_svc.standings()["state"]}
+                        if action == "final-lap" and setup_ctl and hud_source is not None \
+                                and FINAL_LAP_MESSAGE in hud_source.vocab().get("racecontrol", []):
+                            driver_race_svc.log(who, "hud_message", text=FINAL_LAP_MESSAGE)
+                            out["banner"] = setup_ctl.set_field("racecontrol", FINAL_LAP_MESSAGE).get("error") or "ok"
+                            relay.rc_red_flag_banner = False
+                        return self._send(out)
                     # Race Control actions (#1113), with the desk's identity (#1114).
                     svc, b = driver_race_svc, body
                     actions = {
@@ -16549,7 +16575,34 @@ def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
     return store
 
 
-def dashboard_ticks(relay, race_svc, stop_evt, every, league=None, live=None, timer_autostart=None):
+class HudMessageAuto:
+    """The HUD's Race Control message follows the race (#1384): Formation Lap clears when
+    the race starts counting, Final Lap becomes Chequered Flag when the leader takes the
+    flag. Any other message is left alone; each change is audited as the race's."""
+
+    def __init__(self, setup_ctl, hud, race_svc):
+        self._ctl, self._hud, self._race = setup_ctl, hud, race_svc
+        self._prev = None
+
+    def observe(self):
+        state = self._race.race_state()
+        prev, self._prev = self._prev, state
+        if state == prev or state is None:
+            return
+        msg = self._hud.data().get("raceControl") or ""
+        if state in driver_race.COUNTING and prev not in driver_race.COUNTING and msg == FORMATION_MESSAGE:
+            self._set("")
+        elif state in ("finishing", "finished") and prev not in ("finishing", "finished") \
+                and msg == FINAL_LAP_MESSAGE and CHEQUERED_MESSAGE in self._hud.vocab().get("racecontrol", []):
+            self._set(CHEQUERED_MESSAGE)
+
+    def _set(self, text):
+        self._race.log("race", "hud_message", text=text)
+        self._ctl.set_field("racecontrol", text)
+
+
+def dashboard_ticks(relay, race_svc, stop_evt, every, league=None, live=None, timer_autostart=None,
+                    hud_auto=None):
     """Advance the driver dashboard snapshots, hand the newest one to the league live
     sender and the race state to the race timer's autostart and the league result
     export until stop_evt; a failure warns once per distinct error and never touches
@@ -16572,6 +16625,12 @@ def dashboard_ticks(relay, race_svc, stop_evt, every, league=None, live=None, ti
                 relay._tick_ok("race timer autostart")
             except Exception as e:  # noqa: BLE001
                 relay._warn_tick_error("race timer autostart", e)
+        if hud_auto is not None:
+            try:
+                hud_auto.observe()
+                relay._tick_ok("hud message")
+            except Exception as e:  # noqa: BLE001
+                relay._warn_tick_error("hud message", e)
         if league is None:
             continue
         try:
@@ -17665,7 +17724,9 @@ def main():
     relay.timer_autostart = TimerAutostart(timer_store, race_svc) if timer_store else None
     threading.Thread(target=dashboard_ticks, daemon=True,
                      args=(relay, race_svc, stop_evt, driver_race.SNAPSHOT_EVERY_S, league_exporter,
-                           league_live, relay.timer_autostart)).start()
+                           league_live, relay.timer_autostart,
+                           HudMessageAuto(setup_ctl, hud_source, race_svc)
+                           if setup_ctl and hud_source is not None else None)).start()
     threading.Thread(target=stint_switch_watch, daemon=True, args=(
         relay, race_svc, stop_evt,
         lambda: driver_race.read_settings(driver_race.path_in(runtime))["lap_count"]),
