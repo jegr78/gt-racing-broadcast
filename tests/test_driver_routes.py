@@ -1296,10 +1296,10 @@ def t_the_stint_watch_passes_the_class_counts_of_the_row_on_air():
         while got != [{"GT4": 40}] and time.monotonic() < deadline:
             time.sleep(0.01)
         Source.counts[0] = {"GT4": 39}
-        while got[-1] != {"GT4": 39} and time.monotonic() < deadline:
+        while got[-1:] != [{"GT4": 39}] and time.monotonic() < deadline:
             time.sleep(0.01)
         relay.idx = 2
-        while got[-1] != {} and time.monotonic() < deadline:
+        while got[-1:] != [{}] and time.monotonic() < deadline:
             time.sleep(0.01)
     finally:
         stop.set()
