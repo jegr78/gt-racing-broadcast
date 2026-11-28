@@ -202,12 +202,13 @@ def t_the_race_control_map_shows_the_desks_undelayed_rows():
     got = _node(_fn(desk, "mapCars") + r"""
       const r = {mode: "race", class_colors: {GT3: "#0a0"},
                  entries: [{entry: "a", class: "GT3", x: 1, z: 2}, {entry: "b", class: "GT4", x: 3, z: 4}]};
-      console.log(JSON.stringify([mapCars(r), mapCars(Object.assign({}, r, {mode: "qualifying"}))]));""")
+      const q = Object.assign({}, r, {mode: "qualifying", qualifying: [{entry: "b", pos: 1, x: 3, z: 4}]});
+      console.log(JSON.stringify([mapCars(r), mapCars(q)]));""")
     if got is not None:
         race, quali = got
         assert [(e["entry"], e["pos"], e["class_color"]) for e in race] == [("a", 1, "#0a0"), ("b", 2, "")], \
             f"each row in running order with its class ring: {race}"
-        assert quali == [], f"qualifying shows the line only, as on the overlay: {quali}"
+        assert [e["entry"] for e in quali] == ["b"], f"qualifying shows its rows by best lap: {quali}"
     mount = desk[desk.index("function mount("):]
     assert 'root.querySelector("[data-track-map]")' in mount and "window.TrackMap" in mount, \
         "the desk draws a map only where its page has one"
@@ -215,6 +216,13 @@ def t_the_race_control_map_shows_the_desks_undelayed_rows():
         "the map follows the race table's own /drivers/race answer"
     assert "data-track-map" in _src("racecontrol", "race-control.html")
     assert "data-track-map" not in _src("director", "director-panel.html"), "the Director Panel has no map"
+
+
+def t_the_overlay_map_shows_the_qualifying_cars():
+    page = _src("obs", "drivers.html")
+    quali = _fn(page, "renderQualifying")
+    assert "const entries = d.qualifying || [];" in quali and "map.draw(entries);" in quali, \
+        "the overlay's map draws the qualifying rows, as the race draws its entries"
 
 
 def t_the_cockpit_map_follows_the_delayed_dashboard():
@@ -233,7 +241,7 @@ def t_the_cockpit_map_follows_the_delayed_dashboard():
     if got is None:
         return
     assert got["race"] == ["3"] and got["asked"] == ["/drivers/line"], f"the dashboard's cars on its track: {got}"
-    assert got["quali"] == [], f"qualifying shows the line only, as on the overlay: {got}"
+    assert got["quali"] == ["3"], f"qualifying shows its cars too: {got}"
     poll = _fn(page, "pollTiming")
     assert "drawTimingMap(d);" in poll and "j('/drivers/dashboard')" in poll, \
         "the map draws from the same delayed answer as the timing table"

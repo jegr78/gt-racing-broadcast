@@ -354,6 +354,10 @@ def public_view(snap):
     return out
 
 
+def _finite(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
 def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None, laps=None, now=0.0,
                known=None):
     """Rank the running segment's entries by GT7 best lap: [{pos, entry, number,
@@ -372,12 +376,15 @@ def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None
 
     def lap(ms):
         return ms if type(ms) is int and max(0, min_ms) < ms < MAX_LAP_MS else None
+    place = {}
     for c in connections:
         if not c.get("live", True):
             continue
         if segment is not None and c.get("segment") not in (segment, None):
             continue
         latest = c.get("latest")
+        if latest and _finite(latest.get("x")) and _finite(latest.get("z")):
+            place[c["entry"]] = (latest["x"], latest["z"])
         cur = best.get(c["entry"])
         if cur is None and len(best) >= MAX_QUALI:
             continue
@@ -408,10 +415,11 @@ def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None
     rows = []
     for i, (e, (ms, name, last, at)) in enumerate(order):
         ahead = order[i - 1][1][0] if i else None
+        x, z = place.get(e, (None, None))
         rows.append(dict(_viewer_entry({"entry": e, "driver": name}, roster), pos=i + 1, best_ms=ms,
                          gap_ms=None if ms is None or pole is None else ms - pole,
                          interval_ms=None if ms is None or ahead is None else ms - ahead,
-                         last_lap_ms=last, last_lap_at=at))
+                         last_lap_ms=last, last_lap_at=at, x=x, z=z))
     return rows
 
 

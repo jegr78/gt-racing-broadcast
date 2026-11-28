@@ -1012,12 +1012,12 @@ function timingTyre(e) {
   s.textContent = code;
   return {node: s};
 }
-// The track map from the same delayed answer as the table; qualifying shows the line only, as the overlay.
+// The track map from the same delayed answer as the table, in qualifying the rows by best lap.
 let timingMapView = null;
 function drawTimingMap(d) {
   if (!window.TrackMap) return;
   timingMapView = timingMapView || TrackMap.create($('timingMap'));
-  const cars = d.mode === 'qualifying' ? [] : (d.entries || []);
+  const cars = (d.mode === 'qualifying' ? d.qualifying : d.entries) || [];
   timingMapView.sync(d.track || null).then(function () { timingMapView.draw(cars); applyMap(); });
 }
 // Shown over the crew chat on request, remembered per browser; no toggle while there is no line.

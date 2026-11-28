@@ -578,6 +578,19 @@ def t_qualifying_ranks_the_running_segment_by_best_lap():
         ("B", "Ann", 90100), ("A", "Max", 90500)], f"impossible and quiet senders are ignored: {rows}"
 
 
+def t_qualifying_rows_carry_each_live_car_s_place_on_the_track():
+    conns = [
+        {"entry": "A", "segment": "Q1", "name": "Max", "latest": {"best_ms": 90500, "x": 12.5, "z": -3.0}},
+        {"entry": "B", "segment": "Q1", "name": "Ann", "live": False, "latest": {"best_ms": 90100, "x": 1.0, "z": 2.0}},
+        {"entry": "C", "segment": "Q1", "name": "Bo", "latest": {"best_ms": 91000}},
+    ]
+    seen = {"B": (90100, "Ann", 90100, 1.0)}
+    rows = {r["entry"]: r for r in dr.qualifying(conns, "Q1", ROSTER, seen=seen)}
+    assert (rows["A"]["x"], rows["A"]["z"]) == (12.5, -3.0), f"a live car stands where it drives: {rows['A']}"
+    assert rows["B"]["x"] is None and rows["B"]["z"] is None, "a quiet sender's car leaves the map, its time stays"
+    assert rows["C"]["x"] is None, "a sample without a place puts no car on the map"
+
+
 def t_qualifying_rows_carry_the_interval_and_the_last_lap():
     conns = [
         {"entry": "A", "segment": "Q1", "name": "Max", "latest": {"best_ms": 90500, "last_ms": 91200}},

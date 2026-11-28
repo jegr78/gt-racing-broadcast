@@ -95,7 +95,7 @@ so the race controls never scroll away:
   background; a row the Sheet has not taken yet says so.
 - **Track map** on top of the right column, above the crew chat: each car as a numbered
   dot on the layout's racing line, from the race table's own live data without the
-  dashboard delay; in qualifying only the line. It stays hidden until the relay has the
+  dashboard delay; in qualifying each car with a live sender. It stays hidden until the relay has the
   line for the picked layout, and dims with the tables while the relay does not answer.
   On a phone it sits in the **Chat** tab above the chats.
 - **Race start** in the Race area takes two clicks. Pressed once the cars stand on the

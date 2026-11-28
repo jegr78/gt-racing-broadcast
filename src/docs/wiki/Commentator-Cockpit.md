@@ -22,7 +22,7 @@ The cockpit uses the frame of the [Race Control desk](Console#race-control-desk)
   the relay has the racing line for the picked layout, **Map** in the crew chat's header
   lays the **track map** over the crew chat: each car as a numbered dot on the line, from
   the same delayed data as the timing, without the cars that have finished; in qualifying
-  only the line. **Hide map** brings
+  each car with a live sender. **Hide map** brings
   the crew chat back. The broadcast chat never moves. The map starts hidden, and the
   browser remembers your choice. On a phone the same button sits in the **Chat** tab.
 - **Below 1440 px** the areas show as letters (T, S, G, N), so the timing keeps every
