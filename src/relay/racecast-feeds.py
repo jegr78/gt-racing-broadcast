@@ -2770,6 +2770,8 @@ WEBHOOK_LAPS_OUTDATED_ERROR = ("webhook script outdated: writing the Schedule La
 WEBHOOK_LAPS_NO_COLUMN_ERROR = ("the Schedule tab has no Laps column: add a Laps header to write "
                                 "stint lap counts (wiki: Sheet-Template)")
 WEBHOOK_LAPS_VERSION = 8
+WEBHOOK_MISSING_ERROR = ("webhook not configured: set RACECAST_SHEET_PUSH_URL "
+                         "in the active profile or .env (wiki: Sheet-Webhook)")
 WEBHOOK_CLASS_LAPS_OUTDATED_ERROR = ("webhook script outdated: writing a Schedule Laps <Class> cell needs "
                                      "the v9 script (wiki: Sheet-Webhook)")
 WEBHOOK_CLASS_LAPS_NO_COLUMN_ERROR = ("the Schedule tab has no Laps <Class> column for this class: add one to "
@@ -7754,9 +7756,9 @@ class ScheduleSource:
         rows = list(csv.reader(io.StringIO(text)))
         cols = []
         for i, h in enumerate(rows[0] if rows else []):
-            h = (h or "").strip()
-            if h[:5].lower() == "laps ":
-                cols.append((i, h[5:].strip()))
+            h = " ".join((h or "").split())
+            if h[:5].lower() == "laps " and h[5:]:
+                cols.append((i, h[5:]))
         out = {}
         for line, r in enumerate(rows[1:], 2):
             for i, cls in cols:
@@ -7769,14 +7771,14 @@ class ScheduleSource:
     def _parse_class_headers(text):
         """The class names of the `Laps <Class>` header columns, in sheet order."""
         rows = list(csv.reader(io.StringIO(text)))
-        return [h.strip()[5:].strip() for h in (rows[0] if rows else [])
-                if (h or "").strip()[:5].lower() == "laps " and h.strip()[5:].strip()]
+        heads = [" ".join((h or "").split()) for h in (rows[0] if rows else [])]
+        return [h[5:] for h in heads if h[:5].lower() == "laps " and h[5:]]
 
     def class_name(self, cls):
         """`cls` as the Schedule's `Laps <Class>` header spells it, else trimmed; None when empty."""
         if not isinstance(cls, str) or not cls.strip():
             return None
-        cls = cls.strip()
+        cls = " ".join(cls.split())
         with self.lock:
             known = list(self.class_headers) + [c for cl in self.class_laps.values() for c in cl]
         return next((c for c in known if c.lower() == cls.lower()), cls)
@@ -8819,34 +8821,47 @@ class SetupControl(PushHealth):
     def schedule_laps(self, row, laps):
         """Set the lap count of a race Schedule row's stint lobby, or clear it with None:
         live in the relay at once, written to the `Laps` cell in the background."""
-        if not self.push_url:
-            return {"error": "webhook not configured: set RACECAST_SHEET_PUSH_URL "
-                             "in the active profile or .env (wiki: Sheet-Webhook)"}
-        if laps is not None and (type(laps) is not int or not 0 < laps <= 999):
-            return {"error": "laps is a whole number from 1 to 999, or null"}
+        err = self._lap_count_error(row, laps)
+        if err:
+            return {"error": err}
+        local = self._queue_lap_save(LAPS_TARGET, row, {"laps": "" if laps is None else str(laps)})
+        return {"ok": True, "row": row, "pending": True, **local}
+
+    def class_laps_check(self, row, cls, laps):
+        """(class as the Schedule's header spells it, None) or (None, error)."""
+        err = self._lap_count_error(row, laps)
+        if err:
+            return None, err
         src = self._save_sources.get(LAPS_TARGET)
-        if type(row) is not int or src is None or row not in {r[3] for r in src.get_rows()}:
-            return {"error": "row is not a stint of the Schedule"}
-        self._queue_save(LAPS_TARGET, row, {"laps": "" if laps is None else str(laps)})
-        return {"ok": True, "row": row, "pending": True}
+        name = src.class_name(cls) if src is not None and hasattr(src, "class_name") else None
+        return (name, None) if name else (None, "class is required")
 
     def schedule_class_laps(self, row, cls, laps):
         """Set one class's lap count of a race Schedule row's stint lobby, or clear it with
         None: live in the relay at once, written to its `Laps <Class>` cell in the background."""
-        if not self.push_url:
-            return {"error": "webhook not configured: set RACECAST_SHEET_PUSH_URL "
-                             "in the active profile or .env (wiki: Sheet-Webhook)"}
+        name, err = self.class_laps_check(row, cls, laps)
+        if err:
+            return {"error": err}
+        local = self._queue_lap_save(CLASS_LAPS_PREFIX + name, row,
+                                     {"class": name, "class_laps": "" if laps is None else str(laps)})
+        return {"ok": True, "row": row, "class": name, "pending": True, **local}
+
+    def _lap_count_error(self, row, laps):
         if laps is not None and (type(laps) is not int or not 0 < laps <= 999):
-            return {"error": "laps is a whole number from 1 to 999, or null"}
+            return "laps is a whole number from 1 to 999, or null"
         src = self._save_sources.get(LAPS_TARGET)
-        name = src.class_name(cls) if src is not None and hasattr(src, "class_name") else None
-        if not name:
-            return {"error": "class is required"}
         if type(row) is not int or src is None or row not in {r[3] for r in src.get_rows()}:
-            return {"error": "row is not a stint of the Schedule"}
-        self._queue_save(CLASS_LAPS_PREFIX + name, row,
-                         {"class": name, "class_laps": "" if laps is None else str(laps)})
-        return {"ok": True, "row": row, "class": name, "pending": True}
+            return "row is not a stint of the Schedule"
+        return None
+
+    def _queue_lap_save(self, target, row, fields):
+        """A lap count is race data: without a webhook it stays in the relay and says so."""
+        if self.push_url:
+            self._queue_save(target, row, fields)
+            return {}
+        self.saves.put(target, row, fields, queue=False)
+        self._source(target).apply_pending()
+        return {"sheet": WEBHOOK_MISSING_ERROR}
 
     def qualifying_set(self, row, url=None, name=None, stint=None):
         """Write the qualifying row. Same payload, but targeting the Qualifying
@@ -15952,17 +15967,20 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             cls = driver_race_svc.known_class(body.get("class"))
                             if cls is None:
                                 return self._send({"ok": False, "error": "unknown class"}, 400)
-                            res = setup_ctl.schedule_class_laps(body.get("row"), cls, body.get("laps"))
+                            cls, err = setup_ctl.class_laps_check(body.get("row"), cls, body.get("laps"))
                         else:
-                            res = setup_ctl.schedule_laps(body.get("row"), body.get("laps"))
-                        if "error" in res:
-                            return self._send({"ok": False, "error": res["error"]}, 400)
-                        extra = {"class": res["class"]} if "class" in res else {}
-                        if extra and relay.mode == "race":
-                            idx = relay.on_air_row_idx()
-                            driver_race_svc.lobby_class_laps(sched.class_laps_at(idx))   # the desk sees it at once
-                        race = driver_race_svc.log(who, "stint_laps", row=res["row"], laps=body.get("laps"), **extra)
-                        return self._send({"ok": True, "race": race})
+                            err = setup_ctl._lap_count_error(body.get("row"), body.get("laps"))
+                        if err:
+                            return self._send({"ok": False, "error": err}, 400)
+                        extra = {"class": cls} if "class" in body else {}
+                        driver_race_svc.log(who, "stint_laps", row=body["row"], laps=body.get("laps"), **extra)
+                        if extra:
+                            setup_ctl.schedule_class_laps(body["row"], cls, body.get("laps"))
+                            if relay.mode == "race":   # the desk sees it at once
+                                driver_race_svc.lobby_class_laps(sched.class_laps_at(relay.on_air_row_idx()))
+                        else:
+                            setup_ctl.schedule_laps(body["row"], body.get("laps"))
+                        return self._send({"ok": True, "race": driver_race_svc.standings()})
                     if action in actions:
                         try:
                             return self._send({"ok": True, "race": actions[action]()})

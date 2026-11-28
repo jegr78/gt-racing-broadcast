@@ -371,18 +371,18 @@ except on the tower.
   follow by the best position each holds.
 - **Lap count per class**: the first class takes the lap count above. The first class is
   the first named class in the current overall order (an unclassed leader does not
-  count), so the count can move to another class during the race. Every other class has
-  its own lap count in every stint lobby, the `Laps <Class>` cell of that stint's row in
+  count), so the count can move to another class during the race. Every class has its own
+  lap count in every stint lobby, the `Laps <Class>` cell of that stint's row in
   the [Schedule tab](Sheet-Template#schedule-tab). Race Control or the director see and
   change each stint's class count on the desk under **Race → Stint laps**, one column per
-  class (1 to 999, empty clears it): the relay uses a change at once and writes the cell
+  class in alphabetical order (1 to 999, empty clears it): the relay uses a change at once and writes the cell
   in the background. A single lobby and a solo broadcast have no stint list: there the
   desk's **Class laps** row next to the lap count sets each class's count, kept with the
   event settings like the lap count and never written to the Sheet. A class count never
   finishes a car. In every lobby the desks and
   the cockpit show each class's **Lobby lap** (the highest GT7 counter of its cars on the
   road) next to its race lap, on the desks against the class's count of the lobby on air;
-  the first class reads its lobby lap against the stint's `Laps`. The tower and the
+  the first class reads its lobby lap against its own count, else the stint's `Laps`. The tower and the
   public page never show a lobby lap. The class header's count in race laps shows only
   while the overall count shows, so never in a timed race, and in an endurance event
   only once the final lobby's cars are on the line, from the final lobby's class count.

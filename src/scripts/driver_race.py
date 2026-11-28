@@ -848,7 +848,7 @@ class Service:
         if out["mode"] == "qualifying":
             out["qualifying"], out["classes"] = self._quali(ctx, race, roster, compounds)
             return out
-        race.set_class_laps(self._class_counts(roster))
+        race.set_class_laps(self._class_counts(roster, race))
         st = race.standings(self._clock())
         colors = _class_colors(roster)
         rows = []
@@ -1178,8 +1178,9 @@ class Service:
         with self._lock:
             race = self._current()
             self._set_roster(race, ctx.get("roster") or {})
-            class_laps = self._class_counts(ctx.get("roster") or {})
+            class_laps = self._class_counts(ctx.get("roster") or {}, race)
             race.set_class_laps(class_laps)
+            named = _named_classes(ctx.get("roster") or {})
             out = race.standings(self._clock())
             if out["classes"]:
                 colors = _class_colors(ctx.get("roster") or {})
@@ -1201,6 +1202,7 @@ class Service:
                    quali_overrides=_saved_quali(_actions_path_for(self._path), ctx.get("segment")),
                    quali_laps=_saved_quali_laps(_actions_path_for(self._path), ctx.get("segment")),
                    class_laps=class_laps,
+                   lap_classes=sorted(named, key=str.lower) if len(named) >= 2 else [],
                    league=read_league(self._league), last_action=self._last_action,
                    start_armed=self._start_armed, race_started=self._race_started,
                    start_unlock=self._unlock, start_timer=self._start_timer)
@@ -1556,7 +1558,16 @@ class Service:
         return self.standings()
 
     def set_settings(self, changes, who="tailnet"):
-        """Persist and apply; formation only matters before a car starts counting."""
+        """Persist and apply; formation only matters before a car starts counting. A class
+        lap count names a class of the event's roster."""
+        if isinstance(changes, dict) and isinstance(changes.get("class_laps"), dict):
+            named = {}
+            for cls, n in changes["class_laps"].items():
+                known = self.known_class(cls)
+                if known is None:
+                    raise ValueError("unknown class")
+                named[known] = n
+            changes = dict(changes, class_laps=named)
         saved = write_settings(self._path, changes)
         with self._lock:
             self._log(who, "settings", **validate(changes))
@@ -1578,20 +1589,21 @@ class Service:
         with self._lock:
             self._lobby_counts = clean
 
-    def _class_counts(self, roster):
+    def _class_counts(self, roster, race):
         """The class lap counts under the roster's class names, none outside class mode: in
         endurance the stint lobby's on air, in a single lobby (and solo) the event setting's."""
-        named = {c.lower(): c for c in _named_classes(roster)}
+        named = {" ".join(c.split()).lower(): c for c in _named_classes(roster)}
         if len(named) < 2:
             return {}
-        counts = self._lobby_counts if self._current().multi_lobby else read_settings(self._path)["class_laps"]
-        return {named[c.lower()]: n for c, n in counts.items() if c.lower() in named}
+        counts = self._lobby_counts if race.multi_lobby else self._settings()["class_laps"]
+        return {named[k]: n for c, n in counts.items() for k in [" ".join(c.split()).lower()] if k in named}
 
     def known_class(self, cls):
         """`cls` as the roster names it, or None when it is no class of the event."""
         roster = self._context().get("roster") or {}
-        named = {c.lower(): c for c in _named_classes(roster)} if len(_named_classes(roster)) >= 2 else {}
-        return named.get(cls.strip().lower()) if isinstance(cls, str) else None
+        named = {" ".join(c.split()).lower(): c for c in _named_classes(roster)} \
+            if len(_named_classes(roster)) >= 2 else {}
+        return named.get(" ".join(cls.split()).lower()) if isinstance(cls, str) else None
 
     def stint_switch(self, final_laps=None, window=True, final_row=None):
         """The broadcast switched stints: open the change window (unless `window` is

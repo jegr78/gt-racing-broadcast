@@ -1191,7 +1191,17 @@ def t_race_control_sets_a_class_lap_count_per_stint():
         assert st == 200 and race["class_laps"] == {"GT4": 54}, \
             f"the count of the row on air reaches the race at once, under the roster's name: {st} {text[:300]}"
         assert race["last_action"]["who"] == "race_control:dave" and race["last_action"]["action"] == "stint_laps"
+        seen = []
+        real = ctl.schedule_class_laps
+        audit = driver_race.audit_path_for(srv.race_svc._path)
+
+        def spy(*a):
+            with open(audit, encoding="utf-8") as fh:
+                seen.append(fh.read().count('"stint_laps"'))
+            return real(*a)
+        ctl.schedule_class_laps = spy
         st, text, _h = _post(port, url + rc, {"row": 3, "class": "GT4", "laps": 50})
+        assert seen == [2], f"the change is audited before it applies: {seen}"
         assert st == 200 and json.loads(text)["race"]["class_laps"] == {"GT4": 54}, "another stint keeps its own"
         stints = json.loads(_req(port, f"/console/race-control/drivers/race?t={rc}")[1])["stints"]
         assert [x["class_laps"] for x in stints] == [{"GT4": 54}, {"GT4": 50}], stints

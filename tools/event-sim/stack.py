@@ -140,8 +140,8 @@ def sheet_tabs(scn):
     names = [c.name for c in comms]
     teams = event_roster(scn.event)
     laps = scn.event.get("stint_laps")
-    # Every class after the first has its own lap count per stint lobby; the first runs on Laps.
-    slower = [f"Laps {n.strip()}" for n in (scn.event.get("classes") or [])[1:]]
+    # Every class has its own lap count per stint lobby; an empty cell reads the stint's Laps.
+    slower = [f"Laps {n.strip()}" for n in (scn.event.get("classes") or [])]
     schedule = [["URL", "Streamer", "Stint", "Laps"] + slower]
     for n in range(1, stints + 1):
         c = next((c for c in comms if c.stint == n), None)

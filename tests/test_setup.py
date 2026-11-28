@@ -2035,6 +2035,25 @@ def t_an_older_script_or_a_missing_column_holds_only_that_class_count():
         assert ctl.push_status != "failed"
 
 
+def t_without_a_webhook_lap_counts_stay_in_the_relay_and_say_so():
+    ctl, s, calls = _class_laps_ctl()
+    ctl.push_url = ""
+    assert ctl.schedule_laps(3, 12) == {"ok": True, "row": 3, "pending": True, "sheet": m.WEBHOOK_MISSING_ERROR}
+    assert ctl.schedule_class_laps(3, "GT3", 11)["sheet"] == m.WEBHOOK_MISSING_ERROR
+    assert s.laps_at(1) == 12 and s.class_laps_at(1) == {"GT3": 11}, "race data does not wait for a Sheet"
+    row = s.stint_laps()[1]
+    assert (row["sync"], row["class_sync"]) == ("local", {"GT3": "local"}), f"the desk says it is not in the Sheet: {row}"
+    assert ctl.saves.next_job() is None and calls == [], "nothing is queued for a Sheet it cannot reach"
+    s.refresh()
+    assert s.laps_at(1) == 12 and s.class_laps_at(1) == {"GT3": 11}, "a Schedule refresh keeps them"
+
+
+def t_a_class_header_with_inner_spaces_matches_its_class():
+    text = "URL,Stint,Laps,Laps  GT3   Pro\nUCaaaaaaaaaaaaaaaaaaaaaa,S1,20,54\n"
+    assert m.ScheduleSource._parse_class_laps(text) == {2: {"GT3 Pro": 54}}
+    assert m.ScheduleSource._parse_class_headers(text) == ["GT3 Pro"]
+
+
 def t_validation_errors_create_no_pending_entry():
     ctl, s, calls = _async_ctl()
     assert "error" in ctl.schedule_set(2, name="Nobody")

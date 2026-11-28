@@ -92,7 +92,7 @@ so the race controls never scroll away:
   desk's status line and its last change sit below them.
 - **Stint laps** in the Race area, in endurance: each stint's lap count from the
   Schedule's `Laps` cell and, with [classes](Driver-Telemetry#classes), one column per
-  class after the first from its `Laps <Class>` cell. A change applies at once and reaches
+  class from its `Laps <Class>` cell. A change applies at once and reaches
   the Sheet in the background; a row the Sheet has not taken yet says so.
 - **Track map** on top of the right column, above the crew chat: each car as a numbered
   dot on the layout's racing line, from the race table's own live data without the

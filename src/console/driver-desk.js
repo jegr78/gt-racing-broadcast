@@ -144,7 +144,14 @@
   }
 
   // The named classes whose lap count the desk sets: the first runs on the race's count, the unclassed on none.
-  function lapClasses(names) { return names.filter(Boolean).slice(1); }
+  // The classes with a lap count field: every named class, in a stable order.
+  function lapClasses(r) { return Array.isArray(r.lap_classes) ? r.lap_classes.filter(Boolean) : []; }
+  // o[cls], matched like the relay matches a Sheet header: case and spacing do not count.
+  function classValue(o, cls) {
+    var want = String(cls).split(/\s+/).join(" ").toLowerCase();
+    var key = Object.keys(o || {}).filter(function (k) { return k.split(/\s+/).join(" ").toLowerCase() === want; })[0];
+    return key === undefined ? undefined : o[key];
+  }
   // The named classes whose fastest lap the desk can set or clear; none outside class mode.
   function flClasses(r) { return (Array.isArray(r.classes) ? r.classes : []).filter(Boolean); }
   // The fastest lap of a desk scope: the race's, or with a class only that class's.
@@ -510,7 +517,7 @@
     var classLapIn = Object.create(null);
     var classLapKey = null;
     function renderClassLaps(r, show) {
-      var names = show ? lapClasses(Array.isArray(r.classes) ? r.classes : []) : [];
+      var names = show ? lapClasses(r) : [];
       classLapRow.hidden = !names.length;
       var key = JSON.stringify(names);
       if (key !== classLapKey && !classLapRow.contains(document.activeElement)) {
@@ -527,10 +534,8 @@
       }
       var set = (r.settings && r.settings.class_laps) || {};
       names.forEach(function (n) {
-        var input = classLapIn[n];
-        if (input && document.activeElement !== input) {
-          input.value = Object.prototype.hasOwnProperty.call(set, n) && typeof set[n] === "number" ? set[n] : "";
-        }
+        var input = classLapIn[n], v = classValue(set, n);
+        if (input && document.activeElement !== input) input.value = typeof v === "number" ? v : "";
       });
     }
     var finalLap = button("Final lap", "warn", null, function () { act("/drivers/race/final-lap", {}, "Final lap"); });
@@ -589,7 +594,7 @@
       var stints = Array.isArray(r.stints) ? r.stints : null;
       stintBox.hidden = !stints;
       if (!stints) return;
-      var classes = lapClasses(Array.isArray(r.classes) ? r.classes : []);
+      var classes = lapClasses(r);
       var key = JSON.stringify([classes, stints.map(function (x) { return [x.row, x.stint]; })]);
       if (key !== stintKey && !stintBox.contains(document.activeElement)) {
         stintKey = key;
@@ -611,11 +616,9 @@
         if (document.activeElement !== cell.input) cell.input.value = typeof x.laps === "number" ? x.laps : "";
         var set = x.class_laps || {}, sync = x.class_sync || {}, notes = [syncText(x.sync)];
         Object.keys(cell.classes).forEach(function (c) {
-          var input = cell.classes[c];
-          if (document.activeElement !== input) {
-            input.value = Object.prototype.hasOwnProperty.call(set, c) && typeof set[c] === "number" ? set[c] : "";
-          }
-          var t = Object.prototype.hasOwnProperty.call(sync, c) ? syncText(sync[c]) : "";
+          var input = cell.classes[c], v = classValue(set, c);
+          if (document.activeElement !== input) input.value = typeof v === "number" ? v : "";
+          var t = syncText(classValue(sync, c));
           if (t) notes.push(c + " " + t);
         });
         cell.note.textContent = [x.row === r.stint_row ? "on air" : ""].concat(notes).filter(Boolean).join(" \u00b7 ");

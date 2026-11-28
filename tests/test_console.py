@@ -658,11 +658,12 @@ def t_the_desk_offers_a_lap_count_per_slower_class():
     assert '"/drivers/race/settings", {class_laps: change}' in desk, \
         "a single lobby keeps its class counts in the event settings, never the Sheet"
     assert "renderClassLaps(r, !laps.hidden)" in desk, "the class fields show only with the single lobby's lap count"
-    got = _desk_fn("lapClasses", '[lapClasses(["GT3", "GT4", "GT2", ""]), lapClasses(["", "GT3", "GT4"]), lapClasses([])]')
+    got = _desk_fn("lapClasses,classValue", '[lapClasses({lap_classes: ["GT2", "GT3", ""]}), lapClasses({}), '
+                   'classValue({"gt3  pro": 5}, "GT3 Pro"), classValue({}, "GT3")]')
     if got is None:
         return
-    assert got == [["GT4", "GT2"], ["GT4"], []], \
-        f"one input per named class after the first, which runs on the Schedule laps, none for the unclassed: {got}"
+    assert got == [["GT2", "GT3"], [], 5, None], \
+        f"one field per named class in the relay's stable order, matched like a Sheet header: {got}"
 
 
 def t_the_desk_adds_a_qualifying_lap_and_lists_the_corrections():

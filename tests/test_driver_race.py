@@ -2074,7 +2074,11 @@ def t_a_single_lobby_keeps_its_class_lap_counts_in_the_event_settings():
     assert (rec["action"], rec["class_laps"]) == ("settings", {"G": None}), rec
     again, _c, _p = _dash_service(_ctx, path)
     assert again.standings()["class_laps"] == {"H": 60}, "a relay restart keeps them"
-    for bad in ({"G": 0}, {"G": 1000}, {"G": "5"}, {"G": True}, {"": 5}, {"x" * 25: 5}, ["G"], {"G": 5.0}):
+    assert svc.standings()["lap_classes"] == ["G", "H"], "every class gets a field, in a stable order"
+    svc.set_settings({"class_laps": {" g ": 9}})
+    assert dr.read_settings(path)["class_laps"]["G"] == 9, "the class takes the roster's spelling"
+    for bad in ({"G": 0}, {"G": 1000}, {"G": "5"}, {"G": True}, {"": 5}, {"x" * 25: 5}, ["G"], {"G": 5.0},
+                {"GT-3": 5}):
         try:
             svc.set_settings({"class_laps": bad})
         except ValueError:
