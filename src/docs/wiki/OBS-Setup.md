@@ -131,8 +131,9 @@ needed.
 ### The driver dashboard
 
 The browser source **Driver Dashboard** (`http://127.0.0.1:8088/drivers`) sits right
-under the HUD group in the Stint scene (Program in the solo collections) and in the
-Splitscreen scene, so the tower and the track map stay on air during a driver swap. In the
+under the HUD group in the Stint scene (Program in the solo collections). The Splitscreen
+scene has its own source **Driver Dashboard Splitscreen** (`/drivers?map=0`) at the same
+place, so the tower stays on air during a driver swap without the track map. In the
 Splitscreen the CURRENT/NEXT labels draw over it. It stays empty until the director switches the dashboard on; see [Driver Telemetry](Driver-Telemetry#on-air-and-in-the-cockpit).
 
 ### The lower-third HUD: one relay-served overlay
