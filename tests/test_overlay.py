@@ -996,6 +996,31 @@ def t_ai_slots_default_clear_of_the_solo_pov_layout():
                     assert not overlap(a, b), (sid, a, other, b)
 
 
+def t_every_hud_element_of_the_base_layout_sits_inside_the_frame():
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
+        page = f.read()
+    css = ob.base_style(page)
+    px = re.compile(r"(?<![-\w])(left|top|width|height)\s*:\s*(-?\d+(?:\.\d+)?)px")
+
+    def props(body):
+        return {k: float(v) for k, v in px.findall(body)}
+
+    checked = 0
+    for sid, classes in re.findall(r'<div id="([\w-]+)" class="([^"]*)"', page):
+        box = {}
+        for cls in classes.split():
+            for body in re.findall(r"(?:^|[\s,}])\." + re.escape(cls) + r"\s*\{([^}]*)\}", css):
+                box.update(props(body))
+        box.update(ob.box_from_css(css, sid))
+        if not {"left", "top", "height"} <= box.keys():
+            continue
+        checked += 1
+        assert box["top"] + box["height"] <= 1080, \
+            f"#{sid} ends at y {box['top'] + box['height']:g}, below the 1080 px frame"
+        assert box["left"] + box.get("width", 0) <= 1920, f"#{sid} ends past x 1920"
+    assert checked >= 20, f"only {checked} HUD boxes found to check"
+
+
 def t_ob_visible_is_a_box_prop():
     # every slot (box + text) accepts visible
     assert "visible" in ob.KIND_BOX
