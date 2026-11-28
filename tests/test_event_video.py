@@ -151,6 +151,22 @@ def t_waiting_is_sped_up_and_shows_the_fast_forward_mark():
     assert abs(out - 47.0 / p.wait_speed) < 1e-6, f"47 s of waiting take {out}"
 
 
+def t_a_long_wait_takes_at_most_max_wait_of_film_at_a_whole_speed():
+    tl = timeline()
+    tl["steps"][2]["end"] = 60.0 + 400.0
+    for st in tl["steps"][3:]:
+        for k in ("start", "acted", "end"):
+            st[k] += 400.0
+    p = fp.Plan(tl)
+    seg = next(g for g in p.segments if g.a <= 200.0 < g.b)
+    gap = sum(g.b - g.a for g in p.segments if g.speed == seg.speed and g.a >= seg.a and g.b <= 460.0)
+    speed = p.speed_at(200.0)
+    assert speed == int(speed) and speed > p.wait_speed and gap / speed <= fp.MAX_WAIT_S < gap / (speed - 1), \
+        f"a wait too long for {fp.MAX_WAIT_S} s at {p.wait_speed}x plays at the least whole speed that fits: {speed}"
+    assert _at(p, 200.0)["ff"] == f"{speed:g}x", "the mark names that speed"
+    assert plan().speed_at(30.0) == plan().wait_speed, "a wait that fits keeps the normal speed"
+
+
 def t_a_short_wait_plays_in_real_time():
     p = plan()
     assert p.speed_at(108.0) == p.wait_speed, "the gap before the cockpit step is long enough to speed up"
@@ -351,22 +367,24 @@ def _at(p, t):
     return p.frame(next(i for i in range(p.frames) if p.src_time(i / p.fps) >= t - EPS))
 
 
-def t_a_step_without_focus_brings_its_own_role_forward_over_the_previous_views():
+def t_a_step_without_focus_stands_its_own_role_beside_the_previous_view():
     p = plan()
     f = _at(p, 2.0)
-    assert f["large"] == ["producer"], f["large"]
+    assert f["large"] == ["producer"] and f["front"] == "producer", "with nothing large before, it stands alone"
     f = _at(p, 66.0)
-    assert f["large"] == ["race_control"] and f["front"] == "race_control", "the own role comes forward alone"
-    x, y, w, h = f["rects"]["director"][:4]
-    assert 0 < f["rects"]["director"][4] <= fp.DIM and w > 3 * fp.RAIL_MAX_W, \
-        "the previous large views stay large behind it, dimmed"
+    assert f["large"] == ["race_control", "program"] and f["front"] is None, \
+        f"the own role stands beside the program that was large before, covering nothing: {f['large']}"
+    tl = timeline()
+    tl["steps"][3]["focus"] = ["director", "viewer"]
+    assert _at(fp.Plan(tl), 66.0)["large"] == ["race_control", "director"], \
+        "without the program, beside the first view that was large"
     tl = timeline()
     tl["steps"].insert(5, _step("desk2", "race_control", 80.0, 81.0, 82.0, caption="Race Control acts again"))
     tl["steps"][6].update(start=82.0, acted=82.1)
     q = fp.Plan(tl)
     span = [i for i in range(q.frames) if 66.0 <= q.frame(i)["t"] <= 81.0]
-    assert all(q.frame(i)["front"] == "race_control" and not q.frame(i)["moving"] for i in span[q.fps:]), \
-        "consecutive steps of the same role keep the same front layout"
+    assert all(q.frame(i)["large"] == ["race_control", "program"] and not q.frame(i)["moving"] for i in span[q.fps:]), \
+        "consecutive steps of the same role keep the same layout"
 
 
 def t_a_step_s_focus_overrides_its_role():
@@ -471,6 +489,46 @@ def t_a_closed_page_leaves_the_stage_until_it_opens_again():
     assert not _present(_at(missing, 360.0), "producer"), "a reopened page without its transcode takes no place"
 
 
+def t_a_screenshot_s_window_shows_the_frame_before_it():
+    tl = timeline()
+    tl["shots"] = [{"view": "race_control", "start": 70.0, "end": 70.5}]
+    p = fp.Plan(tl)
+    held = round(70.0 - fp.SHOT_LEAD_S - 0.6, 4)
+    for s in (70.0, 70.5, 70.5 + fp.SHOT_SETTLE_S - 0.1):
+        assert p._source("race_control", s) == [3, held], \
+            f"at {s} the desk shows its frame from before the shot: {p._source('race_control', s)}"
+    assert p._source("race_control", 70.5 + fp.SHOT_SETTLE_S + 0.1)[1] > held, "after the settle it plays on"
+    assert p._source("director", 70.2)[1] == 20.2, "another view plays through the shot"
+
+
+def t_close_screenshots_hold_one_frame_from_before_the_first():
+    tl = timeline()
+    tl["shots"] = [{"view": "race_control", "start": 70.0, "end": 70.5},
+                   {"view": "race_control", "start": 71.0, "end": 71.5}]
+    p = fp.Plan(tl)
+    held = round(70.0 - fp.SHOT_LEAD_S - 0.6, 4)
+    for s in (70.2, 72.9, 71.5 + fp.SHOT_SETTLE_S - 0.1):
+        assert p._source("race_control", s)[1] == held, f"overlapping windows hold one frame at {s}"
+
+
+def t_a_screenshot_hold_ends_where_the_next_action_on_its_page_starts():
+    tl = timeline()
+    tl["steps"].insert(5, _step("desk2", "race_control", 81.0, 82.0, 83.0, caption="Race Control acts again"))
+    tl["shots"] = [{"view": "race_control", "start": 79.5, "end": 80.0}]
+    p = fp.Plan(tl)
+    assert p._source("race_control", 80.5)[1] == round(79.5 - fp.SHOT_LEAD_S - 0.6, 4), "held after the shot"
+    assert p._source("race_control", 81.2)[1] == round(81.2 - 0.6, 4), "the next captioned action plays live"
+
+
+def t_a_screenshot_hold_never_reaches_before_its_recording():
+    tl = timeline()
+    tl["shots"] = [{"view": "director", "start": 50.1, "end": 50.4}]
+    p = fp.Plan(tl)
+    rec, t = p._source("director", 51.0)
+    assert p.recordings[rec]["file"] == "pages/director/page@second.webm" and t == 0.0, \
+        f"a shot right after a reopen holds the new recording's first frame: {(rec, t)}"
+
+
 def t_a_missing_transcode_of_a_reopened_page_shows_the_earlier_recording():
     tl = timeline()
     second = len(tl["recordings"]) - 1
@@ -504,12 +562,11 @@ def t_a_tab_is_on_the_stage_only_around_its_step():
     p = fp.Plan(tab_timeline())
     assert not _present(_at(p, 61.0), TAB) and not _present(_at(p, 101.0), TAB), "the tab is off the stage"
     before = _at(p, 65.3)
-    assert not _present(before, TAB) and before["front"] == "race_control", \
-        "until the tab opens, the desk that opens it stays in front"
+    assert not _present(before, TAB) and before["large"][0] == "race_control", \
+        "until the tab opens, the desk that opens it stays large"
     f = _at(p, 66.2)
-    assert f["front"] == TAB, "once open, the tab comes forward"
-    desk = f["rects"]["race_control"]
-    assert 0 < desk[4] <= fp.DIM and desk[2] > 3 * fp.RAIL_MAX_W, "the desk stays large behind it, dimmed"
+    assert f["large"] == [TAB, "program"] and f["front"] is None, \
+        f"once open, the tab stands large beside the program, covering nothing: {f['large']}"
 
 
 def t_a_recording_that_starts_mid_run_counts_its_time_from_its_start():
@@ -1487,7 +1544,8 @@ def t_a_run_with_the_obs_stand_in_has_no_program_and_still_plans_a_film():
     p = fp.Plan(tl)
     assert "program" not in p.views, "without --obs real no program view is on the stage"
     f = _at(p, 61.0)
-    assert f["large"] == ["director"], f"a focus on the missing program keeps only the director: {f['large']}"
+    assert f["large"][0] == "director" and "program" not in f["large"], \
+        f"a focus on the missing program drops it: {f['large']}"
     assert set(f["rects"]) == set(p.views) and "program" not in f["sources"], "no frame places the program"
     a, b = p.frame_range(0, 5)
     assert (a, b) == (0, 5 * p.fps), f"a five-second partial film from the stand-in run: {(a, b)}"

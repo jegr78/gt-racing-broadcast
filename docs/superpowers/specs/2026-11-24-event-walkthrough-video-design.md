@@ -52,11 +52,10 @@ in the normal CI, real league data or real race footage.
   name and a highlight ring while the step on them acts and holds its result.
 - A view takes a place on the stage only once its recording has started. Before that it
   is not there at all, and when its page opens it fades in where it will stand.
-- When a step's layout has a single large view, that view comes forward. It stands in the
-  centre at 80 % of the canvas height, clear of the chapter bar and the caption line, and
-  lies over the rest of the stage, which stays visible behind it at 35 % opacity. The views
-  large before stay large behind it. Steps with two views keep the side-by-side layout.
-  Consecutive steps of the same role keep the same layout.
+- When a step's layout has a single large view, it stands large beside the view that was
+  large before it, the program first, so it covers nothing (#1377). Only with no view large
+  before it does it come forward alone, in the centre at 80 % of the canvas height, over the
+  dimmed rail. Consecutive steps of the same role keep the same layout.
 - A commentator cockpit is on the stage only around its own stint. It comes on with the
   chapter of the first caption that names it, which is its link submission or the swap that
   puts it on air. At a four-view switch the cockpit on air before it hands over and leaves
@@ -106,8 +105,13 @@ in the normal CI, real league data or real race footage.
   switch itself also plays its wait for the checks in real time, since its checks wait for
   the On Air change in the cockpits, and holds 3 s after it.
 - Stretches where the scenario only waits (for a lap, a pit exit, a lobby) are sped up
-  by a factor chosen so that the timing still moves continuously. No stretch is cut out:
-  positions never jump.
+  by a factor chosen so that the timing still moves continuously, 8x, or the least whole
+  factor that fits a long wait into 20 s of film (#1377). No stretch is cut out: positions
+  never jump.
+- A screenshot of a page element taller than the viewport disturbs that page's recording
+  for a moment. The recording run notes each element shot's window, and the film shows the
+  page's frame from before it until the page has settled (close shots share one frame), or
+  until a captioned step acts on that page; the full scenario leaves 6 s for that.
 - The film starts once the views of the first caption have opened, so it opens on them.
 - The film has no length limit.
 - The title cards add film time and play no source time: the intro 5 s, a chapter's card
@@ -131,17 +135,17 @@ The order is the order of `full`. New steps are marked **new**.
 | # | Chapter | What happens | Large |
 |---|---|---|---|
 | 1 | Qualifying (the day before) | Producer picks the track and starts the qualifying event (Start event with the Qualifying option). **new:** Comms 1 submits the stream link, the director approves it and feed A runs warm (auto-arm) | Control Center, Cockpit, Director |
-| 2 | On air: qualifying (the day before) | Program with Comms 1, the cockpit on air. Drivers register for qualifying (one on the invite page), Race Control approves them. The director sets a 10 minute timer and starts it as the session starts; the cars drive their laps and Race Control adds laps, the public page ranks them. The timer runs out, the cars come in, the producer stops the event | Program, Cockpit, Driver, Race Control, Timing |
+| 2 | On air: qualifying (the day before) | The director starts the Q Part, program with Comms 1, the cockpit on air. Drivers register for qualifying (one on the invite page), Race Control approves them. The director sets a 10 minute timer and starts it as the session starts; telemetry times the cars' laps, Race Control adds one by hand for the car whose sender sends nothing, the public page ranks them. The timer runs out, the cars come in, the result stays in view, the director ends the Q Part, which stops the event | Program, Cockpit, Driver, Race Control, Timing |
 | 3 | Race day: start the event | The next day the producer starts the race event and sets the race | Control Center |
 | 4 | Drivers sign up | **new:** a driver registers on the invite page; the others follow. Race Control approves, **new:** corrects one registration, **new:** rejects one | Driver, Race Control |
-| 5 | Race start | **new:** intro, **new:** trailer, program with Comms 1, the qualifying timer reset, the race timer and the part start. Formation lap, start | Program, Director, Timing |
+| 5 | Race start | The part start, **new:** intro, **new:** trailer, program with Comms 1, the qualifying timer reset and the race timer. Formation lap, start | Program, Director, Timing |
 | 6 | Stint 1 at the desk | Pit stop and **new:** tyre compound confirmed. A disconnect: suspected, confirmed, marked for rejoin. A sender stops: estimate behind another car. A retirement | Race Control, Timing |
 | 7 | Next commentator | Comms 2 submits late, the director approves, the incoming feed runs warm | Cockpit, Director |
 | 8 | Driver swap 1 | **new:** the next driver requests telemetry for stint 2 on the invite page and Race Control approves it. Cars box, splitscreen once the leader stands in the box, switch to stint 2 once every car stands there (5 minutes at most), Race Control enters the compounds, new lobby, release | Driver, Race Control; at the switch the four quarters: Director, Program, Cockpit Comms 1, Cockpit Comms 2 |
 | 9 | Stint 2 at the desk | The disconnected car rejoins a lap down. Red flag, cars to the box, restart with kept gaps. **new:** pit stop with a compound change | Race Control, Program |
 | 10 | Driver swap 2 | As chapter 8, to stint 3, with Comms 2 handing over to Comms 3 | as chapter 8 |
 | 11 | The finish | Final lap called, chequered flag, result, fastest lap | Race Control, Timing |
-| 12 | Off air | **new:** outro, end of the part, the producer stops the event | Director, Program, Control Center |
+| 12 | Off air | **new:** outro, end of the last part, which stops the event | Director, Program |
 
 The retirement stays in stint 1, as in `full`: the deck's images depend on it.
 
@@ -294,7 +298,7 @@ user before anything else is built.
   waiting is, no source time is skipped, the picture stands only in a still, lead-in and
   minimum caption time, long actions and runs, swap holds) and for the focus rules (own
   role, override, at most two large views, four quarters only for a step that names four,
-  a single view in front, cockpits only around their stint).
+  a single view beside the one large before it, cockpits only around their stint).
 - **Stage:** a rendering test lays out a fixed timeline and checks that no view overlaps
   a caption and that every view is inside the canvas; the view in front may cover the
   dimmed views behind it and lies on top.

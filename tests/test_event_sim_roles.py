@@ -3,6 +3,7 @@
 drivers role on a fake relay client, the selectors against the shipped pages and the
 stack's helpers for them. No browser, no socket, nothing spawned.
 Run: python3 tests/test_event_sim_roles.py"""
+import contextlib
 import json
 import os
 import re
@@ -840,6 +841,24 @@ def t_a_screenshot_blacks_out_the_event_links():
     cc.shot("cc.png")
     assert page.shots == [("cc.png", "", ["#evt-invite-text", "#evt-timing-text"])], \
         "the Control Center shows both links in simulation"
+
+
+def t_a_screenshot_notes_its_window_for_the_film():
+    role, page, ctx = make(party.RaceControlRole)
+    shots = []
+
+    class Rec:
+        @contextlib.contextmanager
+        def shooting(self, view):
+            shots.append(view)
+            yield
+
+    role.do("open", {})
+    ctx.recorder = Rec()
+    role.shot("desk.png", ".area")
+    role.shot("page.png")
+    assert shots == ["race_control"], \
+        f"an element shot, which may resize the page, tells the recorder; a viewport shot does not: {shots}"
 
 
 def t_redact_hides_tokens_invites_and_timing_links():
@@ -2485,7 +2504,9 @@ def t_the_bundled_events_run_three_lobbies_and_check_each_commentator_on_program
         free = [s.get("id") for s in raw["step"] if s["role"].split(":")[0] not in ("api", "obs", "stream", "relay")
                 and not str(s.get("at", "")).startswith("after:")]
         assert free == [], f"{name}: without a browser these steps would not be skipped with their chain: {free}"
-        assert loaded.steps[-1].do == "stop_event", f"{name}: Stop event ends the relay, so it is the last step"
+        last = loaded.steps[-1]
+        assert last.do == "stop_event" or last.do == "end_part" and "not relay.up" in last.expect, \
+            f"{name}: the step that ends the event is the last step, an end_part only when it stops the relay"
         assert all(s.expect for s in loaded.steps if s.role == "api"), f"{name}: every probe step asserts something"
 
 
@@ -2550,6 +2571,23 @@ def _full():
     return scenario.load(os.path.join(SIM, "scenarios", "full.toml"), REG)
 
 
+def t_no_captioned_action_follows_an_element_shot_of_its_page_at_once():
+    with open(os.path.join(SIM, "scenarios", "full.toml"), "rb") as fh:
+        steps = tomllib.load(fh)["step"]
+    by = {s["id"]: s for s in steps}
+    close = []
+    for s in steps:
+        at = str(s.get("at", ""))
+        if not at.startswith("after:") or not s.get("caption"):
+            continue
+        ref, _, off = at[len("after:"):].partition("+")
+        shot = by[ref].get("shot")
+        if isinstance(shot, dict) and shot.get("element") and (shot.get("role") or by[ref]["role"]) == s["role"]:
+            if float(off.rstrip("s") or 0) < 6:
+                close.append(s["id"])
+    assert close == [], f"an element shot disturbs its page's recording for a moment; leave 6 s: {close}"
+
+
 def t_the_full_scenario_keeps_the_decks_50_shots():
     shots = {s.shot.name: (s.id, s.shot.role, s.shot.element) for s in _full().steps if s.shot}
     assert len(FULL_SHOTS) == 50, "the deck's race-day subset"
@@ -2604,6 +2642,10 @@ def t_the_full_scenario_plays_the_twelve_chapters_of_the_storyboard():
         assert first(lambda s, do=do: s.do == do, do).index < everyone, f"{do} before approve_drivers takes the rest"
     plays = [(s.args.get("media"), s.index) for s in steps if s.do == "play"]
     assert [m for m, _ in plays] == ["intro", "trailer", "outro"], plays
+    starts = [s for s in steps if s.do == "start_part"]
+    assert starts[-1].index < plays[0][1], f"{starts[-1].id}: the broadcast starts before the intro plays"
+    assert steps[-1].do == "end_part" and steps[-1].id == "off_air" and "not relay.up" in steps[-1].expect, \
+        "the director's end of the last Part ends the race event"
     race_on_air = [s for s in steps if s.do == "scene" and s.args.get("scene") == "Stint"][1]
     assert plays[1][1] < race_on_air.index and plays[2][1] > at["final_lap"] and plays[2][1] < at["off_air"], \
         "intro and trailer before the race's program, the outro after the finish"
@@ -2658,10 +2700,13 @@ def _after(by, later, earlier):
     return earlier in [s.id for s in _chain(by, later)]
 
 
+_ENDS = ("stop_event", "end_part")   # Stop event, or the director ending the last Part
+
+
 def _events(by, steps):
-    """The qualifying event's start and stop and the race event's start, in that order."""
+    """The qualifying event's start and end and the race event's start, in that order."""
     starts = [s for s in steps if s.do == "start_event"]
-    stops = [s for s in steps if s.do == "stop_event"]
+    stops = [s for s in steps if s.do in _ENDS]
     assert len(starts) == len(stops) == 2, ([s.id for s in starts], [s.id for s in stops])
     return starts[0], stops[0], starts[1]
 
@@ -2728,6 +2773,10 @@ def t_the_full_scenario_plays_qualifying_the_day_before_as_its_own_event():
     approve = beat("Race Control approving them", lambda s: s.do == "approve_all")
     drive_ = beat("the cars on track", lambda s: s.role == field.role and s.do == "start")
     laps = beat("Race Control at the qualifying desk", lambda s: s.do == "add_lap")
+    silent = [s for s in quali_steps if s.role == field.role and s.do == "drop"]
+    assert [s.args["entry"] for s in silent] == [s.args["entry"] for s in quali_steps if s.do == "add_lap"] \
+        and _after(by, laps.id, silent[0].id), \
+        "telemetry times the qualifying; Race Control adds a lap only for the car whose sender sends nothing"
     stop = beat("the cars stopping", lambda s: s.role == field.role and s.do == "stop")
     assert _after(by, approve.id, field.id) and _after(by, drive_.id, approve.id) and _after(by, stop.id, drive_.id) \
         and _after(by, laps.id, drive_.id), "registered, approved, then driven; Race Control adds laps meanwhile"
@@ -2742,7 +2791,16 @@ def t_the_full_scenario_plays_qualifying_the_day_before_as_its_own_event():
     over = [s for s in quali_steps if "relay.status.timer.remaining_s == 0" in s.expect]
     assert over and _after(by, over[0].id, timed[0].id) and stop.at.ref == over[0].id \
         and over[0].timeout > 600, "the cars come in once the qualifying timer ran out, the laps inside it"
-    assert quali_stop.caption, f"{quali_stop.id}: the producer stops the qualifying event on camera"
+    assert quali_stop.role == "director" and quali_stop.do == "end_part" and quali_stop.caption \
+        and "not relay.up" in quali_stop.expect, \
+        f"{quali_stop.id}: the director's end of the Q Part ends the qualifying event on camera"
+    live = beat("the director starting the Q Part", lambda s: s.do == "start_part")
+    on_air = next(s for s in quali_steps if s.do == "scene")
+    assert _after(by, on_air.id, live.id), "the qualifying broadcast starts before program goes on air"
+    result = [s for s in quali_steps if s.role == "viewer" and _after(by, s.id, stop.id)
+              and _after(by, quali_stop.id, s.id) and s.caption]
+    assert result, "the qualifying result stays in view before the broadcast ends"
+    assert not [s.id for s in steps if s.do == "stop_event"], "the last Part's end stops each event, not the producer"
     driver_open = [s for s in steps if s.role == "driver" and s.do == "open" and _after(by, s.id, race.id)]
     assert driver_open and all(_after(by, s.id, driver_open[0].id) for s in steps
                                if s.role == "driver" and s.do == "register" and _after(by, s.id, race.id)), \

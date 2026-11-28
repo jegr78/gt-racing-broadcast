@@ -929,13 +929,14 @@ submits a link in the cockpit, the director approves it, waits for Feed A to ser
 (`'comms1' in obs.program_channels`), shows the Standings graphic, sets the HUD's Race
 Control field and starts Part 1 (`obs.streaming`), four drivers register, Race Control
 approves them, they race, a viewer reads the public timing, Race Control calls the final
-lap, the director ends Part 1 and the producer stops the event. Stop event ends the relay, so it is the last step.
+lap, the director ends Part 1 and the producer stops the event. Stop event ends the relay, so it is the last step
+(in `full` the director's end of the last Part, which stops the event).
 
 ### Bundled event scenarios (`scenarios/*.toml`, #1234)
 
 Each plays three stints in three lobbies with one commentator per stint (Comms 1, 2, 3),
 checks each commentator's picture on program at their stint, swaps every driver in each new
-lobby and ends with Stop event. `tests/test_event_sim_roles.py` holds them to that. Run
+lobby and ends with Stop event or, in `full`, the end of the last Part. `tests/test_event_sim_roles.py` holds them to that. Run
 times on a maintainer machine, start and teardown included:
 
 - `quick` (4.5 min): Start event, qualifying mode, two Add lap times ranked on the public
@@ -946,12 +947,14 @@ times on a maintainer machine, start and teardown included:
 - `full` (about 36 min on GitHub's runner plus about 14 min of qualifying, real time): the
   deck's race day with 14 cars on a Suzuka-length lap, after a qualifying event the day
   before (about 14 min, 10 of them on its timer: Start event with the Qualifying option, Comms 1's qualifying link
-  submitted and approved, Comms 1 on air, one driver on the invite page and the others as
-  a second `drivers:quali` field registered for the `Qualifying` segment, Approve all, a
-  10 min timer the director sets before going on air and starts by hand as the cars go out, their laps and
-  three added on the desk, the cars in once the timer has run out, Stop event). The race
+  submitted and approved, the director's Q Part and Comms 1 on air, one driver on the invite
+  page and the others as a second `drivers:quali` field registered for the `Qualifying`
+  segment, Approve all, a 10 min timer the director sets before going on air and starts by
+  hand as the cars go out, their laps timed by telemetry and one added on the desk for the
+  car whose sender drops, the cars in once the timer has run out, the result in view, and the
+  director's end of the Q Part, which stops the event). The race
   event starts in race mode with only the stint 1 drivers registered: one on the invite page, one request
-  corrected and one rejected, Approve all for the other 14, intro and trailer, crew chat, the finished qualifying timer reset and the
+  corrected and one rejected, Approve all for the other 14, Part 1 started, intro and trailer, crew chat, the finished qualifying timer reset and the
   race timer set to the race length, the stint lobbies' lap counts set on the desk, Race
   start on the grid (the timer runs from the first race lap), every car's compound at each
   stint's start, formation with Formation Lap as the HUD's Race Control message (cleared at
@@ -967,7 +970,8 @@ times on a maintainer machine, start and teardown included:
   to the stint and the new compounds,
   a red flag with a keep restart whose lobby runs the laps of the plan Race Control takes,
   a pit stop with a compound change, the final lobby finishing by laps with the final lap
-  called as the leader starts its last, the outro. Its steps carry
+  called as the leader starts its last, the outro and the end of Part 1, its only Part, which
+  stops the event. Its steps carry
   the walkthrough film's twelve chapters, captions and focus; `tests/test_event_sim_roles.py`
   holds the 50 shot names to their steps, roles and elements, not to their content. It
   runs in the workflow; locally it exceeds the 2 GiB E2E unit. Its 50 screenshots carry

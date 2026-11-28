@@ -23,6 +23,7 @@ MAX_ACTION_S = 8.0       # a longer action plays this much in real time, the res
 RUN_SHOWN = 3            # of a run of steps with the same role and action, the later ones play sped up
 SWAP_HOLD_S = 6.0        # the hold of each step in a chapter with a four-view switch
 WAIT_SPEED = 8.0
+MAX_WAIT_S = 20.0        # a longer wait plays at the least whole speed that fits it into this much film
 MIN_WAIT_S = 4.0         # a shorter wait plays in real time, so the fast-forward mark does not flicker
 MOVE_S = 0.6
 CHAPTER_FRESH_S = 4.0
@@ -32,6 +33,8 @@ INTRO_S = 5.0            # card durations are whole frames, so the frames around
 CHAPTER_CARD_S = 3.0
 OUTRO_S = 6.0
 CARD_FADE_S = 0.6
+SHOT_LEAD_S = 0.3        # a page's recording lags the engine clock a little,
+SHOT_SETTLE_S = 2.5      # and shows a tall element shot's grey frames up to this long after it
 SCENARIOS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "event-sim", "scenarios")
 SCENARIO_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
@@ -168,8 +171,8 @@ def pace(steps, t0, t1, lead_in=LEAD_IN_S, hold=HOLD_S, speed=WAIT_SPEED, min_wa
     """(segments, marks): contiguous segments from t0 to t1 and, per captioned step, the
     output times its caption starts (shown), its action starts (act) and its caption ends. A captioned step plays its lead-in, action
     and hold in real time; where the source has no time for them (the next step follows at
-    once), the picture stands still. Every other stretch is sped up by `speed`, unless it
-    is shorter than `min_wait`. The intro, a step's `card` (before the chapter it opens,
+    once), the picture stands still. Every other stretch is sped up by `speed`, or by the
+    least whole factor that fits it into MAX_WAIT_S, unless it is shorter than `min_wait`. The intro, a step's `card` (before the chapter it opens,
     marked `card`) and the outro are stills of their own."""
     captioned = [s for s in steps if s.get("caption")]
     params = beats(steps, lead_in, hold)
@@ -181,27 +184,14 @@ def pace(steps, t0, t1, lead_in=LEAD_IN_S, hold=HOLD_S, speed=WAIT_SPEED, min_wa
             a = max(a, min(prev["acted"] + params[prev["id"]][2], s["start"]), shown[-1])
         shown.append(a)
         prev = s
-    real, events, index = [], [], {s["id"]: n for n, s in enumerate(captioned)}
-    if intro:
-        events.append((t0, (-2, 0), "card", INTRO_S, (None, intro)))
+    real, ends = [], []
     for n, s in enumerate(captioned):
-        lead, cap, h, least, tail = params[s["id"]]
+        _lead, cap, h, _least, _tail = params[s["id"]]
         nxt = shown[n + 1] if n + 1 < len(captioned) else t1
         e = max(s["acted"], min(s["acted"] + h, nxt, t1))
+        ends.append(e)
         real.append((shown[n], min(s["acted"], s["start"] + cap)))
         real.append((s["acted"], e))
-        lead_still = max(0.0, lead - (s["start"] - shown[n]))
-        act = min(s["acted"] - s["start"], cap) + max(0.0, s["acted"] - s["start"] - cap) / speed
-        seen = (s["start"] - shown[n]) + lead_still + act + (e - s["acted"])
-        hold_still = max(0.0, h - (e - s["acted"]), least - seen)
-        last_of_tail = tail and (n + 1 == len(captioned) or params[captioned[n + 1]["id"]][4] != tail)
-        if last_of_tail:
-            hold_still = max(0.0, MIN_CAPTION_S - (e - shown[index[tail]]) / speed)
-        if s.get("card"):
-            events.append((shown[n], (n, -1), "card", CHAPTER_CARD_S, (s["id"], s["card"])))
-        events += [(shown[n], (n, 0), "shown", 0.0, None), (s["start"], (n, 1), "still", lead_still, None),
-                   (s["start"], (n, 2), "act", 0.0, None), (e, (n, 3), "still", hold_still, None),
-                   (e, (n, 4), "end", 0.0, None)]
     merged = []
     for a, b in sorted(real):
         if b <= a:
@@ -210,14 +200,40 @@ def pace(steps, t0, t1, lead_in=LEAD_IN_S, hold=HOLD_S, speed=WAIT_SPEED, min_wa
             merged[-1][1] = max(merged[-1][1], b)
         else:
             merged.append([a, b])
+
+    def wait(a, b):
+        return 1.0 if b - a < min_wait else max(speed, float(math.ceil((b - a) / MAX_WAIT_S)))
+
     parts, at = [], t0
     for a, b in merged:
         if a > at:
-            parts.append((at, a, 1.0 if a - at < min_wait else speed))
+            parts.append((at, a, wait(at, a)))
         parts.append((a, b, 1.0))
         at = b
     if t1 > at:
-        parts.append((at, t1, 1.0 if t1 - at < min_wait else speed))
+        parts.append((at, t1, wait(at, t1)))
+
+    def film(a, b):
+        """The film seconds source time a to b takes, stills aside."""
+        return sum((min(b, y) - max(a, x)) / v for x, y, v in parts if min(b, y) > max(a, x))
+
+    events, index = [], {s["id"]: n for n, s in enumerate(captioned)}
+    if intro:
+        events.append((t0, (-2, 0), "card", INTRO_S, (None, intro)))
+    for n, s in enumerate(captioned):
+        lead, cap, h, least, tail = params[s["id"]]
+        e = ends[n]
+        lead_still = max(0.0, lead - (s["start"] - shown[n]))
+        seen = (s["start"] - shown[n]) + lead_still + film(s["start"], s["acted"]) + (e - s["acted"])
+        hold_still = max(0.0, h - (e - s["acted"]), least - seen)
+        last_of_tail = tail and (n + 1 == len(captioned) or params[captioned[n + 1]["id"]][4] != tail)
+        if last_of_tail:
+            hold_still = max(0.0, MIN_CAPTION_S - film(shown[index[tail]], e))
+        if s.get("card"):
+            events.append((shown[n], (n, -1), "card", CHAPTER_CARD_S, (s["id"], s["card"])))
+        events += [(shown[n], (n, 0), "shown", 0.0, None), (s["start"], (n, 1), "still", lead_still, None),
+                   (s["start"], (n, 2), "act", 0.0, None), (e, (n, 3), "still", hold_still, None),
+                   (e, (n, 4), "end", 0.0, None)]
     # a step that started before the film did lines up at t0, behind the intro and its card
     events = sorted(((max(t0, e[0]), *e[1:]) for e in events), key=lambda e: (e[0], e[1]))
     out, segs, marks, k = 0.0, [], {}, 0
@@ -249,9 +265,10 @@ def pace(steps, t0, t1, lead_in=LEAD_IN_S, hold=HOLD_S, speed=WAIT_SPEED, min_wa
 
 
 def focus_layout(step, prev, views):
-    """The large views from a captioned step on: its focus, else its own role alone; a step
-    on no view keeps the previous layout. `views` are the views on the stage. A single large
-    view comes forward over the views large before."""
+    """The large views from a captioned step on: its focus, else its own role; a step on no
+    view keeps the previous layout. `views` are the views on the stage. A single large view
+    stands beside the view that was large before it (the program first), so it covers
+    nothing; only without one does it come forward alone."""
     named = step.get("focus") or []
     shown = [v for v in named if v in views]
     if len(named) == 4 and len(shown) == 4:
@@ -267,8 +284,32 @@ def focus_layout(step, prev, views):
         large = prev_large[:2] or tuple(views[:1])
     if len(large) != 1:
         return Layout(large)
-    before = prev.large + prev.behind if len(prev.large) == 1 and not prev.quarters else prev.large
-    return Layout(large, behind=tuple(v for v in before if v in views and v != large[0])[:2])
+    before = [v for v in prev.large + prev.behind if v in views and v != large[0]]
+    if before:
+        return Layout((large[0], PROGRAM if PROGRAM in before else before[0]))
+    return Layout(large)
+
+
+def shot_holds(shots, steps):
+    """{view: [(a, b)]}: the source spans in which a view shows its frame at `a`, from before
+    its screenshots until the page settled. Spans that touch merge, and a span ends where a
+    captioned step of that view acts, so its action plays live."""
+    acts = {}
+    for st in steps:
+        if st.get("caption"):
+            acts.setdefault(st["role"], []).append(st["start"])
+    out = {}
+    for shot in sorted(shots, key=lambda x: x["start"]):
+        a, b = shot["start"] - SHOT_LEAD_S, shot["end"] + SHOT_SETTLE_S
+        spans = out.setdefault(shot["view"], [])
+        if spans and a <= spans[-1][1]:
+            spans[-1] = (spans[-1][0], max(spans[-1][1], b))
+        else:
+            spans.append((a, b))
+    for view, spans in out.items():
+        cut = sorted(acts.get(view, ()))
+        out[view] = [(a, min([b] + [t for t in cut if t > a])) for a, b in spans]
+    return out
 
 
 def label_rect(rect):
@@ -410,6 +451,7 @@ class Plan:
                     raise ValueError(f"the {s['id']} step's card needs a chapter on its step")
         intro, outro = (check_card(timeline[k], k) if timeline.get(k) is not None else None for k in ("intro", "outro"))
         self.recordings = list(timeline.get("recordings") or [])
+        self._shots = shot_holds(timeline.get("shots") or [], self.steps)
         self.durations = durations or {}
         self.available = available
         self.views = stage_views(self.recordings)
@@ -665,6 +707,11 @@ class Plan:
 
     def _source(self, view, s):
         recs = self._by_view[view]
+        for a, b in self._shots.get(view, ()):
+            if a <= s < b:
+                k = bisect.bisect_right([start for start, _ in recs], s) - 1
+                s = max(a, recs[k][0]) if k >= 0 else s
+                break
         k = bisect.bisect_right([start for start, _ in recs], s) - 1
         if k < 0:
             return None

@@ -109,6 +109,7 @@ class Recorder:
         self.clock = clock
         self.render = render or render_pngs
         self.recordings = []
+        self.shots = []
 
     def channel_card(self, stub_dir, channel, browser=None):
         """Render the card of a channel created or changed during the run (`channel` has
@@ -135,6 +136,16 @@ class Recorder:
             if r["view"] == role and r["kind"] == "page" and r.get("end") is None:
                 r["end"] = self.clock()
                 return
+
+    @contextlib.contextmanager
+    def shooting(self, view):
+        """A screenshot of `view`'s page runs inside: an element taller than the viewport
+        disturbs the page's recording for that moment, so the film skips the window."""
+        start = self.clock()
+        try:
+            yield
+        finally:
+            self.shots.append({"view": view, "start": start, "end": self.clock()})
 
     def program_started(self, path, size=None, at=None):
         """Note the program recording (OBS's own), started at `at` (default now)."""
@@ -176,7 +187,10 @@ class Recorder:
                        **({"end": round(r["end"] - start, 3)} if r.get("end") is not None else {})}
                       for r in self.recordings]
         film = {key: getattr(scenario, key) for key in FILM_KEYS if getattr(scenario, key, None) is not None}
-        return {"scenario": getattr(scenario, "name", ""), **film, "steps": out, "recordings": recordings}
+        shots = [{"view": x["view"], "start": round(x["start"] - start, 3), "end": round(x["end"] - start, 3)}
+                 for x in self.shots]
+        return {"scenario": getattr(scenario, "name", ""), **film, "steps": out, "recordings": recordings,
+                **({"shots": shots} if shots else {})}
 
     def write(self, timeline):
         os.makedirs(self.dir, exist_ok=True)

@@ -1,27 +1,29 @@
 # Full: qualifying the day before and the race day of the slide deck, in real time, over
 # three stints in three lobbies with one commentator each. 14 cars on a Suzuka-length lap
 # (about 1:45). The day before: Start event with the Qualifying option; Comms 1 submits
-# the qualifying link, the director approves it and feed A runs warm with it (auto-arm),
-# Comms 1 goes on air. One driver registers for qualifying on the invite page, the others
-# over the API, and Race Control approves them all. The director sets a 10 minute timer and
-# starts it as the session starts in the lobby; Race Control adds three laps while the cars
-# drive theirs and the public timing ranks them. Once the timer has run out the cars come in
-# and the producer stops the event. The next day: Start event in race mode. One driver registers on the invite page, the
-# others over the API; Race Control corrects one request, rejects one and approves the
-# rest with Approve all. Intro, trailer, Comms 1 on program, the director resets the
-# qualifying timer, sets the race timer and goes live. Race Control presses Race start on the grid and enters every car's
+# the qualifying link, the director approves it and feed A runs warm with it (auto-arm).
+# The director sets a 10 minute timer, starts the Q Part and puts Comms 1 on air. One driver
+# registers for qualifying on the invite page, the others over the API, and Race Control
+# approves them all. The director starts the timer as the session starts in the lobby;
+# telemetry times the laps, and Race Control adds one by hand for the car whose sender sends
+# nothing. Once the timer has run out the cars come in, the result stays in view, and the
+# director ends the Q Part, which stops the event. The next day: Start event in race mode.
+# One driver registers on the invite page, the others over the API; Race Control corrects
+# one request, rejects one and approves the rest with Approve all. The director starts
+# Part 1, plays intro and trailer, puts Comms 1 on program, resets the qualifying timer and
+# sets the race timer. Race Control presses Race start on the grid and enters every car's
 # tyre compound; the timer starts on the first race lap. A formation lap, the start, a pit
 # stop with its tyre compound; in stint 1 a car disconnects (suspected, the standings of
 # before it, confirmed DC, rejoin mark), another one's sender stops (an estimate 3 s
 # behind another car, rejoin mark), a third retires. Comms 2 sends the stint 2 link late.
 # Before each stint change the invite page registers one driver of the next stint and
-# Race Control approves it; the cars box behind the leader, the splitscreen goes on
-# program once the leader stands in the box, and the director presses NEXT once every car
-# stands there (5 minutes at most) and cuts back to the stint; Race Control enters the new
-# stint's compounds and every running team's driver swaps in the new lobby; the DC team
-# rejoins a lap down. A red flag in stint 2 ends in a keep-gaps restart, then a pit stop
-# with a compound change. In stint 3 Race Control calls the final lap when the race timer
-# runs out; the outro ends the broadcast.
+# Race Control approves it; each car boxes in its own second to last lobby lap, the
+# splitscreen goes on program once the leader stands in the box, and the director presses
+# NEXT; Race Control enters the new stint's compounds and every running team's driver swaps
+# in the new lobby; the DC team rejoins a lap down. A red flag in stint 2 ends in a
+# keep-gaps restart, then a pit stop with a compound change. In stint 3 Race Control calls
+# the final lap when the race timer runs out; after the outro the director ends Part 1,
+# the only Part, which stops the event.
 # Its 50 screenshots carry deck image names (`<slide>-<n>`): the race-day subset of the
 # deck, see tools/CLAUDE.md for the families it does not produce. The captions, chapters, cards and
 # focus are the walkthrough film's storyboard (spec 2026-11-24-event-walkthrough-video-design).
@@ -38,7 +40,8 @@ track = "6e378b"
 track_length_m = 5800
 cars = 14
 seed = 7
-parts = 2
+parts = 1
+qualifying_part = true
 
 [[event.commentators]]
 name = "Comms 1"
@@ -141,14 +144,23 @@ caption = "The director sets the qualifying timer to 10 minutes before going on 
 focus = ["director", "program"]
 
 [[step]]
-id = "quali_on_air"
+id = "quali_live"
 at = "after:quali_timer"
+role = "director"
+do = "start_part"
+expect = ["obs.streaming"]
+chapter = "On air: qualifying (the day before)"
+caption = "The director starts the qualifying broadcast"
+focus = ["director", "program"]
+
+[[step]]
+id = "quali_on_air"
+at = "after:quali_live"
 role = "director"
 do = "scene"
 args = { scene = "Stint" }
 expect = ["'comms1' in obs.program_channels"]
 timeout = "90s"
-chapter = "On air: qualifying (the day before)"
 caption = "The director puts Comms 1 on program for qualifying"
 focus = ["program", "director"]
 
@@ -266,35 +278,26 @@ caption = "The director starts the qualifying timer by hand"
 focus = ["director", "program"]
 
 [[step]]
-id = "quali_lap1"
+id = "quali_silent"
 at = "after:quali_clock"
-role = "race_control"
-do = "add_lap"
-args = { entry = "Blue Harbor Racing #22", time = "1:41.312" }
-caption = "Race Control adds a qualifying lap of Blue Harbor Racing #22"
+role = "drivers:quali"
+do = "drop"
+args = { entry = "Northwind Racing #18" }
+caption = "Telemetry times every car; the sender of Northwind Racing #18 sends nothing"
 focus = ["race_control", "viewer"]
 
 [[step]]
-id = "quali_lap2"
-at = "after:quali_lap1"
+id = "quali_lap1"
+at = "after:quali_silent"
 role = "race_control"
 do = "add_lap"
-args = { entry = "Apex Works #11", time = "1:40.208" }
-caption = "Race Control adds a qualifying lap of Apex Works #11"
-focus = ["race_control", "viewer"]
-
-[[step]]
-id = "quali_lap3"
-at = "after:quali_lap2"
-role = "race_control"
-do = "add_lap"
-args = { entry = "Cedar Motorsport #33", time = "1:40.951" }
-caption = "Race Control adds a qualifying lap of Cedar Motorsport #33"
+args = { entry = "Northwind Racing #18", time = "1:44.870" }
+caption = "Race Control adds the lap of Northwind Racing #18 by hand, the exception"
 focus = ["race_control", "viewer"]
 
 [[step]]
 id = "quali_desk"
-at = "after:quali_lap3"
+at = "after:quali_lap1"
 role = "race_control"
 do = "view"
 args = { area = "qualifying" }
@@ -305,10 +308,8 @@ id = "quali_timing"
 at = "after:quali_desk"
 role = "viewer"
 do = "read"
-args = { cars = 3 }
-expect = ["'Apex Works' in page('viewer').rows[0]",
-          "'Cedar Motorsport' in page('viewer').rows[1]",
-          "'Blue Harbor' in page('viewer').rows[2]"]
+args = { cars = 1 }
+expect = ["len(having(page('viewer').rows, 'Northwind', '1:44.870')) == 1"]
 timeout = "20s"
 shot = "quali-public-1"
 caption = "The public timing ranks the qualifying laps"
@@ -328,7 +329,7 @@ id = "quali_watch"
 at = "after:quali_laps_in"
 role = "race_control"
 do = "hold"
-args = { seconds = 90 }
+args = { seconds = 20 }
 caption = "Race Control follows the qualifying laps at its desk"
 focus = ["race_control", "viewer"]
 
@@ -356,8 +357,7 @@ at = "after:shot_quali_tower_gap_1"
 role = "viewer"
 do = "read"
 args = { cars = 14 }
-expect = ["page('viewer').cars >= 14",
-          "'Apex Works' in page('viewer').rows[0]"]
+expect = ["page('viewer').cars >= 14"]
 timeout = "20s"
 caption = "The public timing ranks every car by its best qualifying lap"
 focus = ["viewer", "program"]
@@ -380,17 +380,28 @@ caption = "The qualifying timer has run out: the cars come in"
 focus = ["program", "viewer"]
 
 [[step]]
-id = "quali_stop"
+id = "quali_result"
 at = "after:quali_in"
-role = "producer"
-do = "stop_event"
-expect = ["not relay.up"]
-timeout = "30s"
-caption = "The producer stops the qualifying event"
+role = "viewer"
+do = "hold"
+args = { seconds = 8 }
+caption = "The qualifying result on the public timing"
+focus = ["viewer", "program"]
 
 [[step]]
+id = "quali_stop"
+at = "after:quali_result"
+role = "director"
+do = "end_part"
+expect = ["not obs.streaming", "not relay.up"]
+timeout = "60s"
+caption = "The director ends the qualifying broadcast, and the event stops with it"
+focus = ["director", "program"]
+
+# The relay's own `event stop` releases the OBS feeds in the seconds after the relay died.
+[[step]]
 id = "start_event"
-at = "after:quali_stop"
+at = "after:quali_stop+5s"
 role = "producer"
 do = "start_event"
 args = { qualifying = false }
@@ -412,7 +423,7 @@ expect = ["race.settings.formation",
           "race.settings.finish_mode == 'laps'"]
 caption = "The producer sets the race: a formation lap and a finish by laps"
 
-# Stop event ended the qualifying invite: the driver page opens the race event's.
+# The qualifying event's stop ended its invite: the driver page opens the race event's.
 [[step]]
 id = "producer_away"
 at = "after:race_settings"
@@ -510,7 +521,7 @@ shot = { name = "approval-requests-1", role = "race_control", element = ".area[d
 
 [[step]]
 id = "approve_drivers"
-at = "after:desk_requests"
+at = "after:desk_requests+6s"
 role = "race_control"
 do = "approve_all"
 expect = ["result('approve_drivers').approved == 14",
@@ -521,12 +532,21 @@ shot = { name = "approval-approved-1", role = "race_control", element = ".area[d
 caption = "Race Control approves the 14 waiting requests with Approve all"
 
 [[step]]
-id = "intro"
+id = "go_live"
 at = "after:approve_drivers"
+role = "director"
+do = "start_part"
+expect = ["obs.streaming"]
+chapter = "Race start"
+caption = "The director starts the race broadcast"
+focus = ["director", "program"]
+
+[[step]]
+id = "intro"
+at = "after:go_live"
 role = "director"
 do = "play"
 args = { media = "intro" }
-chapter = "Race start"
 caption = "The director plays the intro"
 focus = ["program", "director"]
 
@@ -618,17 +638,8 @@ caption = "The director sets the race timer to the race length"
 focus = ["director", "program"]
 
 [[step]]
-id = "go_live"
-at = "after:timer_set+3s"
-role = "director"
-do = "start_part"
-expect = ["obs.streaming"]
-caption = "The director starts Part 1 of the broadcast"
-focus = ["director", "program"]
-
-[[step]]
 id = "race_start"
-at = "after:go_live"
+at = "after:timer_set+3s"
 role = "race_control"
 do = "race_start"
 expect = ["race.start_armed"]
@@ -1980,7 +1991,7 @@ shot = { name = "new-cockpit-finished", role = "commentator:Comms 3", element = 
 
 [[step]]
 id = "chat_finish"
-at = "after:shot_new_cockpit_finished"
+at = "after:shot_new_cockpit_finished+6s"
 role = "commentator:Comms 3"
 do = "chat"
 args = { text = "Thanks everyone, that was a great race." }
@@ -2010,15 +2021,7 @@ id = "off_air"
 at = "after:outro"
 role = "director"
 do = "end_part"
-expect = ["not obs.streaming"]
-caption = "The director ends Part 1 of the broadcast"
+expect = ["not obs.streaming", "not relay.up"]
+timeout = "60s"
+caption = "The director ends the broadcast, and the event stops with it"
 focus = ["director", "program"]
-
-[[step]]
-id = "stop_event"
-at = "after:off_air"
-role = "producer"
-do = "stop_event"
-expect = ["not relay.up"]
-timeout = "30s"
-caption = "The producer stops the event"
