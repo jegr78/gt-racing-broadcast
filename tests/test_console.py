@@ -584,6 +584,17 @@ def t_only_the_director_panel_mounts_the_unlock_and_the_desk_warns_a_counting_ra
         and "The race is finished" in warn, "the first Race start click warns a counting or finished race"
 
 
+def t_both_desks_remind_to_press_finish_after_the_countdown():
+    with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
+        desk = fh.read()
+    start = desk.index("live: [")
+    live = desk[start:desk.index("race: [", start)]
+    assert live.index("finish]") < live.index("finishDue") < live.index("classLapRow"), \
+        "the reminder sits right under the Finish button, in the live part both desks mount"
+    assert "finishDue.hidden = r.finish_due !== true;" in desk, "the relay's finish_due shows it"
+    assert "Press Finish" in desk[desk.index("var finishDue"):][:300], "it names the button"
+
+
 def t_the_desk_arms_one_button_at_a_time():
     with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
         desk = fh.read()

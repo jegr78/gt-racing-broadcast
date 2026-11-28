@@ -399,6 +399,9 @@ class Recorder:
     def _detect(self, standings, now):
         """Close silences whose data came back; only a running recording opens new ones."""
         may_suspect = self._running and standings.get("red_flag") is None
+        # After the leader's flag only a car already quiet before it reads no_data; the
+        # rest went quiet when GT7's finish countdown ended the session.
+        flagged = standings.get("state") in ("finishing", "finished")
         window = bool(standings.get("change_window"))
         for row in standings.get("entries") or []:
             entry, quiet = row.get("entry"), row.get("quiet_s")
@@ -412,6 +415,7 @@ class Recorder:
             if (quiet > NO_DATA_S and may_suspect and row.get("distance_m") is not None
                     and not row.get("finished") and not row.get("waiting")
                     and row.get("status") != "retired"
+                    and (not flagged or row.get("status") == "no_data")
                     and not (row.get("in_box") and window)):
                 self._suspect(row, quiet, now)
 

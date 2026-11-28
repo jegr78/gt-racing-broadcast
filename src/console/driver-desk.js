@@ -27,6 +27,7 @@
     ".dd button.warn{border-color:#ffb454;color:#ffb454}",
     ".dd button.alarm{border-color:#ff4d5e;color:#ff4d5e;font-weight:600}",
     ".dd button.armed{background:#ff4d5e;color:#fff}",
+    ".dd .due{border:1px solid #ffb454;color:#ffb454;border-radius:6px;padding:6px 9px}",
     ".dd input[type=number]{width:6.5em}",
     ".dd input[type=text]{width:9em}.dd input[type=text].wide{width:13em}",
     ".dd input[type=text].grow{width:auto;flex:1 1 12em}",
@@ -575,6 +576,9 @@
       hudMsg.value = on;
     }
     var finish = button("Finish", "warn", "finish", function () { act("/drivers/race/finish", {}, "Race finished"); });
+    // GT7's finish countdown ended the session before every car took the flag (#1397).
+    var finishDue = el("div", {cls: "due", hidden: "",
+      text: "The cars short of the flag stopped sending, so GT7's finish countdown is over. Press Finish to freeze their gaps."});
     // The panel has its own RED FLAG for cover and banner; here it only holds the race.
     var redFlag = button(fullRedFlag ? "RED FLAG" : "Hold race (red flag)", "alarm", "red", async function () {
       if (!fullRedFlag) return act("/drivers/race/red-flag", {}, "Race held for a red flag");
@@ -1151,6 +1155,7 @@
     var parts = {
       live: [staleNote, lapLine,
         el("div", {cls: "row finish"}, [mode, laps, finalLap, finish]),
+        finishDue,
         classLapRow,
         el("div", {cls: "row red"}, [redFlag, restart, release]),
         hudRow,
@@ -1235,6 +1240,7 @@
       laps.hidden = mode.value !== "laps" || Array.isArray(r.stints);
       renderClassLaps(r, !laps.hidden);
       renderHudMessage(r);
+      finishDue.hidden = r.finish_due !== true;
       renderStints(r);
       renderPlan(r);
       var red = r.red_flag;

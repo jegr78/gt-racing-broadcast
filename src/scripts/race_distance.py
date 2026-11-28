@@ -114,6 +114,7 @@ from array import array
 from gt7_tracks import _Line
 
 NO_DATA_S = 5.0
+FINISH_REMIND_S = 30.0      # after the flag, this long without data from a car short of it: press Finish
 BOX_SPEED_MPS = 1.0
 BOX_LATERAL_M = 12.0
 BOX_HOLD_S = 1.5
@@ -223,6 +224,7 @@ class _Entry:
         self.pit_at = None         # its distance at the box exit its last pit stop counted
         self.switch_pit = False    # a pit stop already counted since the latest stint switch
         self.finished_at = None
+        self.cut_at = None          # its last data, when GT7 ended the session short of its flag
         self.last_lap_ms = None
         self.lobby_ms = []         # its lap times in the lobby on air
         self.counted = []          # its laps that counted for the fastest lap, kept for a void
@@ -627,6 +629,7 @@ class Race:
 
     def finish(self, now):
         self._advance(now)
+        self._cut_quiet(now)
         for ent in self._entries.values():
             if ent.finished_at is None and not self._out(ent) \
                     and (ent.active is not None or self._estimated(ent)):
@@ -1111,6 +1114,8 @@ class Race:
                 ent.finished_at = t
                 self._finished = all(e.finished_at is not None or self._quiet(e, t) or self._out(e)
                                      for e in self._entries.values())
+                if self._finished:
+                    self._cut_quiet(t)
             return
         if self.multi_lobby and self._final_car(ent):
             # GT7 ends the final lobby on the road, which after a red flag restart need
@@ -1243,6 +1248,38 @@ class Race:
         car = self._cars.get(ent.active)
         return car is None or car.t is None or now - car.t > NO_DATA_S
 
+    def _short_of_flag(self, ent):
+        """A car still sending when the leader took the flag that has not taken its own:
+        when it goes quiet, GT7's finish countdown ended the session, not a disconnect."""
+        last = self._last(ent)
+        return self._finishing_at is not None and ent.finished_at is None and ent.distance is not None \
+            and not self._estimated(ent) and not ent.held and not ent.waiting \
+            and last is not None and last[0] >= self._flag_at - NO_DATA_S
+
+    def _cut_quiet(self, now):
+        """Freeze the quiet cars short of the flag where their counted data ends."""
+        for e in self._entries.values():
+            if not self._out(e) and self._short_of_flag(e) and now - self._last(e)[0] > NO_DATA_S:
+                e.cut_at, e.finished_at = self._last(e)[0], now
+
+    def _cut_laps(self, ent):
+        """The laps the order counts; a car the countdown cut short also completes the lap
+        it was on, so it is not one lap more behind than on the road."""
+        laps = self._ranked_laps(ent)
+        if ent.cut_at is None or laps is None:
+            return laps
+        winner = self._winner()
+        cap = math.floor(self._shown(winner) / self.length) if winner is not None else self._flag_laps
+        return min(laps + 1, cap)
+
+    def finish_due(self, now):
+        """After the leader's flag: no car short of its flag has sent for FINISH_REMIND_S."""
+        if self._finishing_at is None or self._finished:
+            return False
+        short = [self._last(e)[0] for e in self._entries.values()
+                 if not self._out(e) and self._short_of_flag(e)]
+        return bool(short) and all(now - t >= FINISH_REMIND_S for t in short)
+
     # -- reading -------------------------------------------------------------------
     def _state(self):
         if self._line is None:
@@ -1327,7 +1364,7 @@ class Race:
         order counts, since a frozen finish distance overshoots the line by chance; in the
         change window, until both took over, at least the laps when `ahead` stopped."""
         if ent.finished_at is not None and self._finishing_at is not None:
-            return max(0, self._ranked_laps(ahead) - self._ranked_laps(ent))
+            return max(0, self._cut_laps(ahead) - self._cut_laps(ent))
         shown = self._shown(ent)
         if ahead.finished_at is not None and not self._estimated(ent):
             # Against a frozen finish the laps at that moment, not a distance it closes on.
@@ -1387,9 +1424,14 @@ class Race:
     def _time_behind(self, ahead, ent, now=None):
         """Seconds `ent` is behind `ahead` by distance history, also when lapped; None
         without a running time (red flag) or history for that distance, and with `now`
-        also while `ahead` is quiet (its history is stale)."""
+        also while `ahead` is quiet (its history is stale), unless it finished or GT7's
+        finish countdown cut it short."""
         if ahead.distance is None or ent.distance is None:
             return None
+        if ent.cut_at is not None:
+            # Frozen where its data stopped: the gap as it was then.
+            reached = self._passed(ahead, ent, ent.distance + ent.adjust)
+            return None if reached is None else max(0.0, self._racing(ent.cut_at) - reached)
         if ent.finished_at is not None:
             mine, theirs = self._road_finish(ent), self._road_finish(ahead)
             if mine is not None and theirs is not None and self._ranked_laps(ent) == self._ranked_laps(ahead):
@@ -1405,7 +1447,8 @@ class Race:
             return None if reached is None else max(0.0, self._racing(ent.finished_at) - reached)
         if ent.waiting or ahead.waiting:
             return None                            # no running time while a red flag holds them
-        if now is not None and self._quiet(ahead, now):
+        if now is not None and self._quiet(ahead, now) \
+                and ahead.finished_at is None and not self._short_of_flag(ahead):
             return None
         at = ent.distance + ent.adjust - ahead.adjust
         last = self._last(ahead) if ahead.finished_at is not None else None
@@ -1576,6 +1619,10 @@ class Race:
                 return (0, -dist, side, 0.0, "")
             if e is winner:
                 return (-1, 0, 0.0, 0.0, "")
+            if e.cut_at is not None:
+                # Behind the cars that took the flag on its lap, in road order among the cut.
+                laps = self._cut_laps(e)
+                return (0, -(-1 if laps is None else laps), math.inf, -dist, e.entry)
             laps = self._ranked_laps(e)
             laps = -1 if laps is None else laps
             # Whoever reached that lap count first is ahead, finished or still running.
@@ -1637,7 +1684,8 @@ class Race:
                 "lapped": lapped or 0,
                 "status": "retired" if retired else
                           ("est" if self._estimated(e) else
-                           "no_sender" if e.active is None else "no_data") if quiet and (e.finished_at is None or self._estimated(e)) else
+                           "no_sender" if e.active is None else "no_data")
+                          if quiet and (e.finished_at is None or self._estimated(e)) and not self._short_of_flag(e) else
                           "waiting" if e.distance is None else
                           "box" if car.in_box else
                           "red_flag" if e.waiting else "racing",
@@ -1690,7 +1738,7 @@ class Race:
                 "fastest": self.fastest,
                 "lap": lap, "lobby_lap": self._lobby_lap(now), "classes": classes, "class_lap": class_lap,
                 "class_counts": class_counts, "class_count": class_count, "class_lobby_lap": class_lobby_lap,
-                "entries": rows}
+                "finish_due": self.finish_due(now), "entries": rows}
 
     def _road_order(self, ents, keys):
         """After the flag, cars still running on one ranked lap follow the road: each car
@@ -1758,7 +1806,7 @@ class Race:
         """Whether a row's gaps are measured: a running car with data, or a finished one
         (a finish is final)."""
         return e.distance is not None and not self._out(e) \
-            and (not self._quiet(e, now) or e.finished_at is not None)
+            and (not self._quiet(e, now) or e.finished_at is not None or self._short_of_flag(e))
 
     def _class_pass(self, ents, rows, ranked, now):
         """Fill each row's class fields like the overall ones, within its class, and

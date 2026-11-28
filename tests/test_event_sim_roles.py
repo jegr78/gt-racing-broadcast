@@ -2564,6 +2564,7 @@ FULL_SHOTS = {   # the deck's images as `full` takes them: name -> (step id, rol
     'finallap-1': ('desk_final', 'race_control', '.area[data-area="race"] .tbl'),
     'chequered-1': ('shot_chequered_1', 'page:overlay', ''),
     'chequered-2': ('shot_chequered_2', 'viewer', ''),
+    'finish-due-1': ('desk_finish_due', 'race_control', ''),
     'finished-1': ('shot_finished_1', 'page:overlay', ''),
     'finished-2': ('shot_finished_2', 'viewer', ''),
     'new-cockpit-finished': ('shot_new_cockpit_finished', 'commentator:Comms 3', '#timingCard'),
@@ -2594,9 +2595,9 @@ def t_no_captioned_action_follows_an_element_shot_of_its_page_at_once():
     assert close == [], f"an element shot disturbs its page's recording for a moment; leave 6 s: {close}"
 
 
-def t_the_full_scenario_keeps_the_decks_50_shots():
+def t_the_full_scenario_keeps_the_decks_51_shots():
     shots = {s.shot.name: (s.id, s.shot.role, s.shot.element) for s in _full().steps if s.shot}
-    assert len(FULL_SHOTS) == 50, "the deck's race-day subset"
+    assert len(FULL_SHOTS) == 51, "the deck's race-day subset"
     assert shots == FULL_SHOTS, \
         f"each name stays at its step, role and element: {sorted(set(shots.items()) ^ set(FULL_SHOTS.items()))}"
 

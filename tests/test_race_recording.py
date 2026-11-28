@@ -314,6 +314,19 @@ def t_quiet_car_becomes_a_suspicion_dated_by_its_last_packet():
             h.close()
 
 
+def t_after_the_leaders_flag_a_quiet_car_raises_nothing():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            for state in ("finishing", "finished"):
+                st = _st(rows=[_srow("7", quiet_s=60.0)])
+                st["state"] = state
+                h.rec.observe(st, {}, 1000.0)
+            assert _events(h) == [], "GT7's finish countdown ends the session: no disconnect"
+        finally:
+            h.close()
+
+
 def t_short_silence_raises_nothing():
     with tempfile.TemporaryDirectory() as d:
         h = _Rec(d)
@@ -387,9 +400,10 @@ def t_finished_car_raises_nothing():
     with tempfile.TemporaryDirectory() as d:
         h = _Rec(d)
         try:
-            rows = [_srow("1", quiet_s=9.0, finished=True), _srow("2", quiet_s=9.0)]
+            rows = [_srow("1", quiet_s=9.0, finished=True), _srow("2", quiet_s=9.0, status="no_data")]
             h.rec.observe(_st("finishing", rows), {}, 1000.0)
-            assert [e["entry"] for e in _events(h)] == ["2"], _events(h)
+            assert [e["entry"] for e in _events(h)] == ["2"], \
+                f"a car already quiet before the flag reads no_data and is still a suspicion: {_events(h)}"
         finally:
             h.close()
 

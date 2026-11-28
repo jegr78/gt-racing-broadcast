@@ -1932,8 +1932,47 @@ expect = ["relay.up"]
 shot = { name = "chequered-2", role = "viewer" }
 
 [[step]]
+id = "countdown_end"
+at = "after:chequer"
+role = "drivers"
+do = "stop"
+expect = ["relay.get('/drivers/race').state == 'finishing'"]
+caption = "GT7's finish countdown ends the session: the cars still on their last lap stop sending"
+focus = ["race_control", "viewer"]
+
+[[step]]
+id = "finish_due"
+at = "after:countdown_end"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.finish_due", "race.state == 'finishing'"]
+timeout = "60s"
+
+[[step]]
+id = "desk_finish_due"
+at = "after:finish_due"
+role = "race_control"
+do = "view"
+args = { area = "race" }
+shot = { name = "finish-due-1", role = "race_control" }
+caption = "After 30 s without data the desk reminds Race Control to press Finish"
+focus = ["race_control"]
+
+[[step]]
+id = "rc_finish"
+at = "after:desk_finish_due+3s"
+role = "race_control"
+do = "finish"
+expect = ["relay.get('/drivers/race').state == 'finished'",
+          "not relay.get('/drivers/race').finish_due"]
+timeout = "30s"
+caption = "Race Control presses Finish: the cars short of the flag keep their gaps where their data stopped"
+focus = ["race_control", "program"]
+
+[[step]]
 id = "finished"
-at = "after:shot_chequered_2"
+at = "after:rc_finish"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
