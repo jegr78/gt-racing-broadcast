@@ -387,8 +387,9 @@ def t_driver_telemetry_controls_for_directors_and_race_control():
     assert cp.decide({"director"}, ["race-control", "red-flag"], "POST") == cp.FORBIDDEN
 
 
-def t_class_lap_counts_are_a_desk_route():
-    path = ["drivers", "race", "class-laps"]
+def t_class_lap_counts_go_through_the_stint_laps_route():
+    assert cp.decide({"director"}, ["drivers", "race", "class-laps"], "POST") != cp.ALLOW, "the old route is gone"
+    path = ["drivers", "race", "stint-laps"]
     assert cp.decide({"director"}, path, "POST") == cp.ALLOW
     assert cp.decide({"race_control"}, ["race-control"] + path, "POST") == cp.ALLOW
     assert cp.decide({"commentator"}, path, "POST") == cp.FORBIDDEN
@@ -652,12 +653,17 @@ def t_final_lap_takes_one_click_and_finish_keeps_its_confirm():
 def t_the_desk_offers_a_lap_count_per_slower_class():
     with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
         desk = fh.read()
-    assert '"/drivers/race/class-laps", {class: ' in desk, "the inputs post to the class lap route"
-    got = _desk_fn("lapClasses", '[lapClasses(["GT3", "GT4", "GT2", ""]), lapClasses(["", "GT3", "GT4"]), lapClasses([])]')
+    assert '"/drivers/race/stint-laps", {row: row, class: cls, laps: ' in desk, \
+        "each stint's class input posts its row and class to the stint laps route"
+    assert '"/drivers/race/settings", {class_laps: change}' in desk, \
+        "a single lobby keeps its class counts in the event settings, never the Sheet"
+    assert "renderClassLaps(r, !laps.hidden)" in desk, "the class fields show only with the single lobby's lap count"
+    got = _desk_fn("lapClasses,classValue", '[lapClasses({lap_classes: ["GT2", "GT3", ""]}), lapClasses({}), '
+                   'classValue({"gt3  pro": 5}, "GT3 Pro"), classValue({}, "GT3")]')
     if got is None:
         return
-    assert got == [["GT4", "GT2"], ["GT4"], []], \
-        f"one input per named class after the first, which runs on the Schedule laps, none for the unclassed: {got}"
+    assert got == [["GT2", "GT3"], [], 5, None], \
+        f"one field per named class in the relay's stable order, matched like a Sheet header: {got}"
 
 
 def t_the_desk_adds_a_qualifying_lap_and_lists_the_corrections():
@@ -695,25 +701,29 @@ DESK_RACE = {"entries": [{"entry": "A", "class": "GT3", "class_pos": 1}, {"entry
                          {"entry": "C", "class": "GT3", "class_pos": 2}, {"entry": "D", "class": "", "class_pos": 1}],
              "classes": ["GT3", "GT4", ""], "class_lap": {"GT3": 7, "GT4": 6, "": 6},
              "class_laps": {"GT4": 18}, "lap": {"leader": 7, "count": 20},
+             "class_lobby_lap": {"GT3": 5, "GT4": 4, "": None},
+             "stints": [{"row": 2, "laps": 22}], "stint_row": 2,
              "class_colors": {"GT3": "#e10600", "GT4": "red;background:url(x)", "": ""},
              "class_counts": {"GT3": True, "GT4": True, "": True},
              "class_count": {"GT3": 20, "GT4": 18, "": None}}
 
 
 def t_the_desk_groups_the_race_by_class():
-    got = _desk_fn("classGroups", "classGroups(" + json.dumps(DESK_RACE) + ").map(g => "
-                   "[g.name, g.lap, g.laps, g.rows.map(e => e.entry), g.color])")
+    got = _desk_fn("lobbyCount,classGroups", "classGroups(" + json.dumps(DESK_RACE) + ").map(g => "
+                   "[g.name, g.lap, g.laps, g.rows.map(e => e.entry), g.color, g.lobby, g.lobbyLaps])")
     if got is None:
         return
     assert [g[:4] for g in got] == [["GT3", 7, 20, ["A", "C"]], ["GT4", 6, 18, ["B"]], ["", 6, None, ["D"]]], \
         f"every class under its header, the first with the race's lap count: {got}"
+    assert [g[5:] for g in got] == [[5, 22], [4, 18], [None, None]], \
+        f"each class reads its lobby lap against its own count, the first against the stint's Laps: {got}"
     assert [g[4] for g in got] == ["#e10600", "", ""], f"a header takes its class colour, never a non-colour: {got}"
 
 
 def t_the_desk_renders_one_class_as_today():
     race = {"entries": [{"entry": "A"}, {"entry": "B"}], "classes": [], "class_lap": {}, "class_laps": {},
             "lap": {"leader": 3, "count": 20}}
-    got = _desk_fn("classGroups", "classGroups(" + json.dumps(race) + ")")
+    got = _desk_fn("lobbyCount,classGroups", "classGroups(" + json.dumps(race) + ")")
     if got is None:
         return
     assert got == [{"name": None, "rows": [{"entry": "A"}, {"entry": "B"}]}], \
@@ -745,7 +755,7 @@ def t_the_desk_fastest_lap_entries_follow_the_class():
 
 def t_the_desk_class_header_count_follows_the_overall_rule():
     race = dict(DESK_RACE, class_count={"GT3": 20, "GT4": None, "": None})
-    got = _desk_fn("classGroups", "classGroups(" + json.dumps(race) + ").map(g => g.laps)")
+    got = _desk_fn("lobbyCount,classGroups", "classGroups(" + json.dumps(race) + ").map(g => g.laps)")
     if got is None:
         return
     assert got == [20, None, None], f"the header shows the relay's class count in race laps, none where it is off: {got}"

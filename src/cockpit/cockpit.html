@@ -994,6 +994,12 @@ function timingClassHead(c, span) {
     lap.textContent = 'Lap ' + c.lap + (typeof c.laps === 'number' ? ' / ' + c.laps : '');
     td.appendChild(lap);
   }
+  if (typeof c.lobby_lap === 'number') {
+    const lobby = document.createElement('span');
+    lobby.className = 'lap';
+    lobby.textContent = 'Lobby lap ' + c.lobby_lap;
+    td.appendChild(lobby);
+  }
   tr.appendChild(td);
   return tr;
 }

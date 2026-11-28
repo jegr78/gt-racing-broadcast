@@ -331,7 +331,8 @@ connection line sits under **Troubleshoot**. In short:
   listed under **Approved drivers** with **Correct** and **Reject**. See
   [approving drivers](Driver-Telemetry#approving-drivers).
 - the finish mode, in a single lobby the lap count, **Final lap** and **Finish**; in
-  endurance each stint's lap count under **Stint laps** and, while the red flag is out,
+  endurance each stint's lap count under **Stint laps** (with classes one column per
+  class) and, while the red flag is out,
   the [restart plan](Driver-Telemetry#red-flag-rejoin-and-corrections)
 - **Hold race (red flag)**, the restart mode and **Restart released**. The panel's own
   `RED FLAG` button holds the race as well when it raises the cover. Over a race already
@@ -342,8 +343,8 @@ connection line sits under **Troubleshoot**. In short:
 - in qualifying, the segment's ranking in place of the race order: best lap, gap to P1,
   interval to the car ahead and last lap, grouped by class with
   [classes](Driver-Telemetry#classes)
-- with [classes](Driver-Telemetry#classes), the order grouped by class and a lap count
-  for every class after the first
+- with [classes](Driver-Telemetry#classes), the order grouped by class with each class's
+  lobby lap, and a lap count per class (in endurance per stint under **Stint laps**)
 - the [driver dashboard](Driver-Telemetry#on-air-and-in-the-cockpit): **Show
   dashboard** / **Hide dashboard** puts it on air (Director Panel only), the delay in
   seconds, the fastest lap with **Clear fastest lap** and a form to set it (with

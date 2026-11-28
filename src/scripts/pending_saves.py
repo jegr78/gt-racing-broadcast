@@ -14,7 +14,7 @@ CONFIRMED = "confirmed"
 # wait, so a row cannot stay pinned when the sheet stores a value differently.
 CONFIRM_GRACE_S = 120.0
 
-_FIELDS = ("url", "name", "stint", "laps")
+_FIELDS = ("url", "name", "stint", "laps", "class", "class_laps")
 
 
 class _Entry:
@@ -37,7 +37,8 @@ class PendingSaves:
         self._queue = []            # keys waiting for a push, in order
         self._inflight = set()
 
-    def put(self, target, row, fields):
+    def put(self, target, row, fields, queue=True):
+        """Store a save; `queue=False` keeps it in the relay only, for a Sheet it cannot reach."""
         key = (target, int(row))
         with self._lock:
             e = self._entries.get(key) or _Entry()
@@ -45,7 +46,9 @@ class PendingSaves:
             e.rev += 1
             e.state, e.err, e.hold, e.confirmed_at = SAVING, None, False, None
             self._entries[key] = e
-            if key not in self._queue:
+            if not queue:
+                e.state, e.err, e.hold = LOCAL, None, True
+            elif key not in self._queue:
                 self._queue.append(key)
             return e.rev
 
@@ -138,6 +141,11 @@ class PendingSaves:
                     del self._entries[(t, row)]
                     dropped.append(row)
         return sorted(dropped)
+
+    def targets(self, prefix):
+        """The targets that start with *prefix* and hold an entry."""
+        with self._lock:
+            return sorted({t for t, _row in self._entries if t.startswith(prefix)})
 
     def retryable(self):
         """`local` entries a recovery may push again (not held by an outdated script)."""

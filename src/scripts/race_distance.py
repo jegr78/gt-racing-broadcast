@@ -1680,13 +1680,17 @@ class Race:
                 leader = min(leader, count)
             class_lap[name] = leader
             class_count[name] = d["count"] if name == first else count
+        runners = self._lobby_runners(now)
+        class_lobby_lap = {name: max((c.lap for e, c in runners if self._classes.get(e.entry, "") == name),
+                                     default=None) for name in classes}
         red = None if self._red is None else dict(self._red, held_s=round(now - self._red["at"], 1))
         return {"state": self._state(), "line_length_m": self.length, "red_flag": red,
                 "restart_mode": self._restart_mode,
                 "change_window": self._window_until is not None and now <= self._window_until,
                 "fastest": self.fastest,
                 "lap": lap, "lobby_lap": self._lobby_lap(now), "classes": classes, "class_lap": class_lap,
-                "class_counts": class_counts, "class_count": class_count, "entries": rows}
+                "class_counts": class_counts, "class_count": class_count, "class_lobby_lap": class_lobby_lap,
+                "entries": rows}
 
     def _road_order(self, ents, keys):
         """After the flag, cars still running on one ranked lap follow the road: each car

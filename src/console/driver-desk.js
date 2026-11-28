@@ -144,7 +144,14 @@
   }
 
   // The named classes whose lap count the desk sets: the first runs on the race's count, the unclassed on none.
-  function lapClasses(names) { return names.filter(Boolean).slice(1); }
+  // The classes with a lap count field: every named class, in a stable order.
+  function lapClasses(r) { return Array.isArray(r.lap_classes) ? r.lap_classes.filter(Boolean) : []; }
+  // o[cls], matched like the relay matches a Sheet header: case and spacing do not count.
+  function classValue(o, cls) {
+    var want = String(cls).split(/\s+/).join(" ").toLowerCase();
+    var key = Object.keys(o || {}).filter(function (k) { return k.split(/\s+/).join(" ").toLowerCase() === want; })[0];
+    return key === undefined ? undefined : o[key];
+  }
   // The named classes whose fastest lap the desk can set or clear; none outside class mode.
   function flClasses(r) { return (Array.isArray(r.classes) ? r.classes : []).filter(Boolean); }
   // The fastest lap of a desk scope: the race's, or with a class only that class's.
@@ -220,10 +227,13 @@
     var rows = r.entries || [], names = Array.isArray(r.classes) ? r.classes : [];
     if (!names.length) return [{name: null, rows: rows}];
     var lap = r.class_lap || {}, counts = r.class_count || {}, colors = r.class_colors || {};
+    var lobby = r.class_lobby_lap || {}, lobbyLaps = r.class_laps || {}, first = names.filter(Boolean)[0];
     function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k) && typeof o[k] === "number" ? o[k] : null; }
     return names.map(function (n) {
       var c = Object.prototype.hasOwnProperty.call(colors, n) ? colors[n] : "";
-      return {name: n, lap: own(lap, n), laps: own(counts, n),
+      var count = own(lobbyLaps, n);
+      return {name: n, lap: own(lap, n), laps: own(counts, n), lobby: own(lobby, n),
+              lobbyLaps: count !== null || !n ? count : n === first ? lobbyCount(r) : null,
               color: typeof c === "string" && /^(#[0-9a-fA-F]{3,8}|(rgb|hsl)a?\([0-9a-zA-Z.,%\s\/]+\)|[a-zA-Z]{3,20})$/.test(c) ? c : "",
               rows: rows.filter(function (e) { return (e.class == null ? "" : e.class) === n; })};
     });
@@ -502,6 +512,32 @@
       var n = parseInt(laps.value, 10);
       act("/drivers/race/settings", {lap_count: isFinite(n) ? n : null}, "Lap count saved");
     });
+    // A single lobby's lap count per class after the first: an event setting, no Sheet.
+    var classLapRow = el("div", {cls: "row", hidden: ""});
+    var classLapIn = Object.create(null);
+    var classLapKey = null;
+    function renderClassLaps(r, show) {
+      var names = show ? lapClasses(r) : [];
+      classLapRow.hidden = !names.length;
+      var key = JSON.stringify(names);
+      if (key !== classLapKey && !classLapRow.contains(document.activeElement)) {
+        classLapKey = key;
+        classLapRow.replaceChildren.apply(classLapRow, [el("span", {cls: "muted", text: "Class laps"})].concat(
+          names.map(function (n) {
+            classLapIn[n] = classLapIn[n] || lapInput(n, function (v) {
+              var change = {};
+              change[n] = v;
+              act("/drivers/race/settings", {class_laps: change}, n + " lap count saved");
+            });
+            return el("label", {cls: "check"}, [el("span", {text: n}), classLapIn[n]]);
+          })));
+      }
+      var set = (r.settings && r.settings.class_laps) || {};
+      names.forEach(function (n) {
+        var input = classLapIn[n], v = classValue(set, n);
+        if (input && document.activeElement !== input) input.value = typeof v === "number" ? v : "";
+      });
+    }
     var finalLap = button("Final lap", "warn", null, function () { act("/drivers/race/final-lap", {}, "Final lap"); });
     var finish = button("Finish", "warn", "finish", function () { act("/drivers/race/finish", {}, "Race finished"); });
     // The panel has its own RED FLAG for cover and banner; here it only holds the race.
@@ -525,74 +561,67 @@
       act("/drivers/race/release", {}, "Restart released");
     });
     var redBanner = el("div", {cls: "banner", hidden: ""});
-    // Lap counts of the slower classes for the stint on air; they never finish a car.
-    var classLapRow = el("div", {cls: "row", hidden: ""});
-    var classLapIn = Object.create(null);
-    var classLapKey = null;
-    function classLapInput(name) {
-      var input = el("input", {type: "number", min: "1", max: "999", placeholder: "laps", "aria-label": "Lap count of " + name});
-      input.addEventListener("change", function () {
-        var n = parseInt(input.value, 10);
-        act("/drivers/race/class-laps", {class: name, laps: isFinite(n) ? n : null}, name + " lap count saved");
-      });
-      return classLapIn[name] = input;
-    }
-    function renderClassLaps(r) {
-      var names = lapClasses(Array.isArray(r.classes) ? r.classes : []);
-      classLapRow.hidden = !names.length;
-      var key = JSON.stringify(names);
-      if (key !== classLapKey && !classLapRow.contains(document.activeElement)) {
-        classLapKey = key;
-        classLapRow.replaceChildren.apply(classLapRow, [el("span", {cls: "muted", text: "Class laps"})].concat(
-          names.map(function (n) {
-            return el("label", {cls: "check"}, [el("span", {text: n}), classLapIn[n] || classLapInput(n)]);
-          })));
-      }
-      var set = r.class_laps || {};
-      names.forEach(function (n) {
-        var input = classLapIn[n];
-        if (input && document.activeElement !== input) {
-          input.value = Object.prototype.hasOwnProperty.call(set, n) && typeof set[n] === "number" ? set[n] : "";
-        }
-      });
-    }
-
-    // Each stint lobby's lap count: the relay uses a change at once, the Sheet's Laps cell follows.
+    // Each stint lobby's lap count, and one per class after the first: the relay uses a change at
+    // once, the Sheet's Laps and Laps <Class> cells follow.
+    var stintHead = el("tr");
     var stintBody = el("tbody");
     var stintBox = el("div", {hidden: ""}, [el("h3", {text: "Stint laps"}),
-      el("div", {cls: "tbl"}, [el("table", {}, [el("thead", {}, [el("tr", {}, ["Stint", "Laps", ""].map(function (h) {
-        return el("th", {text: h}); }))]), stintBody])])]);
+      el("div", {cls: "tbl"}, [el("table", {}, [el("thead", {}, [stintHead]), stintBody])])]);
     var stintIn = Object.create(null);
     var stintKey = null;
-    function stintInput(row, label) {
+    function lapInput(label, post) {
       var input = el("input", {type: "number", min: "1", max: "999", placeholder: "laps", "aria-label": "Lap count of " + label});
       input.addEventListener("change", function () {
         var n = parseInt(input.value, 10);
-        act("/drivers/race/stint-laps", {row: row, laps: isFinite(n) ? n : null}, label + " lap count saved");
+        post(isFinite(n) ? n : null);
       });
       return input;
+    }
+    function stintInput(row, label) {
+      return lapInput(label, function (n) {
+        act("/drivers/race/stint-laps", {row: row, laps: n}, label + " lap count saved");
+      });
+    }
+    function classInput(row, label, cls) {
+      return lapInput(cls + " in " + label, function (n) {
+        act("/drivers/race/stint-laps", {row: row, class: cls, laps: n}, cls + " lap count of " + label + " saved");
+      });
+    }
+    function syncText(sync) {
+      return sync === "local" ? "not in the Sheet yet" : sync === "saving" ? "saving to the Sheet" : "";
     }
     function renderStints(r) {
       var stints = Array.isArray(r.stints) ? r.stints : null;
       stintBox.hidden = !stints;
       if (!stints) return;
-      var key = JSON.stringify(stints.map(function (x) { return [x.row, x.stint]; }));
+      var classes = lapClasses(r);
+      var key = JSON.stringify([classes, stints.map(function (x) { return [x.row, x.stint]; })]);
       if (key !== stintKey && !stintBox.contains(document.activeElement)) {
         stintKey = key;
         stintIn = Object.create(null);
+        stintHead.replaceChildren.apply(stintHead, ["Stint", "Laps"].concat(classes, [""]).map(function (h) {
+          return el("th", {text: h}); }));
         stintBody.replaceChildren.apply(stintBody, stints.map(function (x, i) {
           var label = x.stint || "Stint " + (i + 1);
-          stintIn[x.row] = {input: stintInput(x.row, label), note: el("td", {cls: "muted"})};
-          return el("tr", {}, [el("td", {text: label}), el("td", {}, [stintIn[x.row].input]), stintIn[x.row].note]);
+          var cell = stintIn[x.row] = {input: stintInput(x.row, label), note: el("td", {cls: "muted"}),
+                                       classes: Object.create(null)};
+          classes.forEach(function (c) { cell.classes[c] = classInput(x.row, label, c); });
+          return el("tr", {}, [el("td", {text: label}), el("td", {}, [cell.input])].concat(
+            classes.map(function (c) { return el("td", {}, [cell.classes[c]]); }), [cell.note]));
         }));
       }
       stints.forEach(function (x) {
         var cell = stintIn[x.row];
         if (!cell) return;
         if (document.activeElement !== cell.input) cell.input.value = typeof x.laps === "number" ? x.laps : "";
-        cell.note.textContent = [x.row === r.stint_row ? "on air" : "",
-          x.sync === "local" ? "not in the Sheet yet" : x.sync === "saving" ? "saving to the Sheet" : ""]
-          .filter(Boolean).join(" \u00b7 ");
+        var set = x.class_laps || {}, sync = x.class_sync || {}, notes = [syncText(x.sync)];
+        Object.keys(cell.classes).forEach(function (c) {
+          var input = cell.classes[c], v = classValue(set, c);
+          if (document.activeElement !== input) input.value = typeof v === "number" ? v : "";
+          var t = syncText(classValue(sync, c));
+          if (t) notes.push(c + " " + t);
+        });
+        cell.note.textContent = [x.row === r.stint_row ? "on air" : ""].concat(notes).filter(Boolean).join(" \u00b7 ");
       });
     }
     // While the red flag is out: how far the race falls behind the stint's plan, and the restart lobby's laps.
@@ -1168,6 +1197,7 @@
       if (document.activeElement !== mode) mode.value = s.finish_mode || "laps";
       if (document.activeElement !== laps) laps.value = s.lap_count || "";
       laps.hidden = mode.value !== "laps" || Array.isArray(r.stints);
+      renderClassLaps(r, !laps.hidden);
       renderStints(r);
       renderPlan(r);
       var red = r.red_flag;
@@ -1216,7 +1246,6 @@
         return e.entry + " " + estimateText(e.estimate) +
           (e.status === "est" ? "" : " (waiting for its data to stop)");
       }).join(", ") : "";
-      renderClassLaps(r);
       lapLine.textContent = lapText(r);
       var all = r.entries || [];
       function raceRow(e, grouped, k) {
@@ -1251,7 +1280,9 @@
           var name = el("span", {text: g.name || "Unclassed"});
           if (g.color) name.style.color = g.color;
           rows.push(el("tr", {cls: "cls"}, [el("td", {colspan: "9"}, [name,
-            g.lap !== null ? el("span", {cls: "lap", text: "Lap " + g.lap + (g.laps !== null ? " / " + g.laps : "")}) : null])]));
+            g.lap !== null ? el("span", {cls: "lap", text: "Lap " + g.lap + (g.laps !== null ? " / " + g.laps : "")}) : null,
+            g.lobby !== null ? el("span", {cls: "lap", text: "Lobby lap " + g.lobby +
+                                                             (g.lobbyLaps !== null ? " / " + g.lobbyLaps : "")}) : null])]));
         }
         g.rows.forEach(function (e, k) { rows.push(raceRow(e, g.name !== null, k)); });
       });

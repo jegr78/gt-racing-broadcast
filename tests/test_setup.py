@@ -1908,8 +1908,10 @@ def t_a_stint_lap_count_is_live_at_once_and_reaches_the_sheet():
     ctl, s, calls = _laps_ctl(post=lambda p: (True, None), sheet_laps={2: 14, 3: 14})
     assert ctl.schedule_laps(3, 12) == {"ok": True, "row": 3, "pending": True}
     assert calls == [], "the count does not wait for the sheet"
-    assert s.stint_laps() == [{"row": 2, "stint": "Stint 1", "laps": 14, "sync": None},
-                              {"row": 3, "stint": "Stint 2", "laps": 12, "sync": "saving"}], s.stint_laps()
+    assert s.stint_laps() == [{"row": 2, "stint": "Stint 1", "laps": 14, "sync": None,
+                               "class_laps": {}, "class_sync": {}},
+                              {"row": 3, "stint": "Stint 2", "laps": 12, "sync": "saving",
+                               "class_laps": {}, "class_sync": {}}], s.stint_laps()
     assert s.final_laps() == 12, "the last row's count is the final lobby's"
     s.refresh()
     assert s.laps_at(1) == 12, "a refresh before the sheet shows it keeps the desk's count"
@@ -1971,6 +1973,85 @@ def t_a_tab_without_a_laps_column_holds_only_the_count():
         m.push_webhook_retrying = orig
     assert s.stint_laps()[1]["sync"] == "local" and ctl.saves.retryable() == 0, "the count waits for a Laps column"
     assert s.sync_state(3) == (None, None), "the URL of the same row reaches the sheet"
+
+
+def _class_laps_ctl(post=None, sheet=None):
+    ctl, s, calls = _async_ctl(post=post, rows=_TWO_STINTS)
+    s._fetched_laps = {2: 14, 3: 14}
+    s._fetched_class_laps = dict(sheet or {})
+    s.refresh()
+    return ctl, s, calls
+
+
+def t_a_class_lap_count_is_live_at_once_and_reaches_its_own_column():
+    ctl, s, calls = _class_laps_ctl(post=lambda p: (True, None), sheet={2: {"GT3": 12}})
+    assert ctl.schedule_class_laps(3, "GT3", 11) == {"ok": True, "row": 3, "class": "GT3", "pending": True}
+    assert calls == [], "the count does not wait for the sheet"
+    assert s.class_laps_at(0) == {"GT3": 12} and s.class_laps_at(1) == {"GT3": 11}, "each stint keeps its own"
+    rows = s.stint_laps()
+    assert rows[1]["class_laps"] == {"GT3": 11} and rows[1]["class_sync"] == {"GT3": "saving"}, rows
+    assert rows[1]["laps"] == 14 and rows[1]["sync"] is None, "the overall count is untouched"
+    s.refresh()
+    assert s.class_laps_at(1) == {"GT3": 11}, "a refresh before the sheet shows it keeps the desk's count"
+    assert ctl.drain_saves() == 1
+    assert calls[-1] == {"action": "schedule", "row": 3, "class": "GT3", "class_laps": "11"}, \
+        f"a class write names its class and never carries laps: {calls[-1]}"
+    assert ctl.schedule_class_laps(3, "gt3", None)["ok"] and s.class_laps_at(1) == {}, \
+        "None clears it, and the class matches the sheet's header whatever its case"
+    ctl.drain_saves()
+    assert calls[-1] == {"action": "schedule", "row": 3, "class": "GT3", "class_laps": ""}, calls
+
+
+def t_a_class_lap_count_needs_a_class_and_a_whole_number():
+    ctl, s, calls = _class_laps_ctl()
+    for bad in (0, 1000, "12", True, 1.5):
+        assert "error" in ctl.schedule_class_laps(3, "GT3", bad), bad
+    for cls in ("", "  ", None, 7):
+        assert "error" in ctl.schedule_class_laps(3, cls, 12), f"class {cls!r}"
+    assert "error" in ctl.schedule_class_laps(4, "GT3", 12), "row 4 is no stint of the Schedule"
+    assert len(ctl.saves) == 0
+
+
+def t_an_older_script_or_a_missing_column_holds_only_that_class_count():
+    for answer, err in (((True, None, b'{"ok": true, "action": "schedule", "v": 8}'),
+                         m.WEBHOOK_CLASS_LAPS_OUTDATED_ERROR),
+                        ((False, "webhook did not confirm: 'no Laps GT3 column in the Schedule tab'", b""),
+                         m.WEBHOOK_CLASS_LAPS_NO_COLUMN_ERROR)):
+        ctl, s, calls = _class_laps_ctl()
+        ctl._save_push = m.SetupControl._save_push.__get__(ctl)
+        orig = m.push_webhook_retrying
+        m.push_webhook_retrying = lambda url, payload, *a, a_=answer, **k: (
+            a_ if "class_laps" in payload else (True, None, b'{"ok": true, "action": "schedule", "v": 9}'))
+        try:
+            ctl.schedule_class_laps(3, "GT3", 11)
+            ctl.schedule_laps(3, 12)
+            ctl.drain_saves()
+        finally:
+            m.push_webhook_retrying = orig
+        assert s.class_laps_at(1) == {"GT3": 11}, "the relay keeps the count"
+        assert s.stint_laps()[1]["class_sync"] == {"GT3": "local"}, s.stint_laps()[1]
+        assert s.stint_laps()[1]["sync"] is None, "the overall count of the same row reaches the sheet"
+        assert ctl.saves.retryable() == 0, f"no retry against {err}"
+        assert ctl.push_status != "failed"
+
+
+def t_without_a_webhook_lap_counts_stay_in_the_relay_and_say_so():
+    ctl, s, calls = _class_laps_ctl()
+    ctl.push_url = ""
+    assert ctl.schedule_laps(3, 12) == {"ok": True, "row": 3, "pending": True, "sheet": m.WEBHOOK_MISSING_ERROR}
+    assert ctl.schedule_class_laps(3, "GT3", 11)["sheet"] == m.WEBHOOK_MISSING_ERROR
+    assert s.laps_at(1) == 12 and s.class_laps_at(1) == {"GT3": 11}, "race data does not wait for a Sheet"
+    row = s.stint_laps()[1]
+    assert (row["sync"], row["class_sync"]) == ("local", {"GT3": "local"}), f"the desk says it is not in the Sheet: {row}"
+    assert ctl.saves.next_job() is None and calls == [], "nothing is queued for a Sheet it cannot reach"
+    s.refresh()
+    assert s.laps_at(1) == 12 and s.class_laps_at(1) == {"GT3": 11}, "a Schedule refresh keeps them"
+
+
+def t_a_class_header_with_inner_spaces_matches_its_class():
+    text = "URL,Stint,Laps,Laps  GT3   Pro\nUCaaaaaaaaaaaaaaaaaaaaaa,S1,20,54\n"
+    assert m.ScheduleSource._parse_class_laps(text) == {2: {"GT3 Pro": 54}}
+    assert m.ScheduleSource._parse_class_headers(text) == ["GT3 Pro"]
 
 
 def t_validation_errors_create_no_pending_entry():

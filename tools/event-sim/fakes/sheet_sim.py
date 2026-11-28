@@ -49,7 +49,7 @@ SHEET_PATH = "/spreadsheets/d/sim"
 EXEC_PATH = "/macros/s/sim/exec"
 ECHO_PATH = "/macros/echo"
 DEFAULT_KEY = "sim"
-SCRIPT_VERSION = 8
+SCRIPT_VERSION = 9
 SETUP_FIELDS = ("Stint", "Streamer", "Session", "Race Control", "Flag")
 TIMER_ROWS = {"Race End (UTC)": 1, "Duration": 2, "Visible": 3, "Updated (UTC)": 4,
               "Remaining": 5}
@@ -385,8 +385,16 @@ class Sheet:
         name_col = self._col_of(header, "streamer") or 2
         stint_col = self._col_of(header, "stint")
         laps_col = self._col_of(header, "laps")
+        target = "Qualifying" if p.get("tab") == "Qualifying" else "Schedule"
         if "laps" in p and not laps_col:
-            raise ScriptError(f"no Laps column in the {'Qualifying' if p.get('tab') == 'Qualifying' else 'Schedule'} tab")
+            raise ScriptError(f"no Laps column in the {target} tab")
+        class_col = 0
+        if "class_laps" in p:
+            cls = " ".join(js_str(p.get("class", "")).split())
+            class_col = next((c + 1 for c, v in enumerate(header)
+                              if " ".join(v.split()).lower() == "laps " + cls.lower()), 0) if cls else 0
+            if not class_col:
+                raise ScriptError(f"no Laps {cls} column in the {target} tab")
         if "url" in p:
             self._set(rows, row, url_col, p["url"])
         if "name" in p:
@@ -395,6 +403,8 @@ class Sheet:
             self._set(rows, row, stint_col, p["stint"])
         if "laps" in p:
             self._set(rows, row, laps_col, p["laps"])
+        if "class_laps" in p:
+            self._set(rows, row, class_col, p["class_laps"])
 
     def _write_pov(self, p):
         rows = self._sheet("POV")

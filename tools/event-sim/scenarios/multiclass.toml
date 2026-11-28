@@ -239,7 +239,7 @@ id = "gt3_laps"
 at = "after:release3"
 role = "race_control"
 do = "class_laps"
-args = { class = "GT3", laps = 1 }
+args = { class = "GT3", stint = "Stint 3", laps = 1 }
 expect = ["race.class_laps.gt3 == 1"]
 timeout = "10s"
 shot = "classes-desk"

@@ -1259,13 +1259,15 @@ def t_race_control_confirms_a_dc_and_sets_a_class_lap_count():
     assert role.do("confirm_dc", {"entry": "B #2"}) == {"status": "DC confirmed"}
     assert page.clicks[-2:] == ['.navbtn[data-area="race"]', key], "the events list is in the Race area"
     fails(lambda: role.do("confirm_dc", {"entry": "A #1"}), "no open event of 'A #1'")
-    laps = _desk_change(page, '.dd input[aria-label="Lap count of GT4"]', "/drivers/race/class-laps",
-                        "GT4 lap count saved")
-    assert role.do("class_laps", {"class": "GT4", "laps": 5}) == {"status": "GT4 lap count saved"}
+    laps = _desk_change(page, '.dd input[aria-label="Lap count of GT4 in Stint 2"]', "/drivers/race/stint-laps",
+                        "GT4 lap count of Stint 2 saved")
+    args = {"class": "GT4", "stint": "Stint 2", "laps": 5}
+    assert role.do("class_laps", args) == {"status": "GT4 lap count of Stint 2 saved"}
     assert laps.value == "5"
-    assert role.do("class_laps", {"class": "GT4", "laps": 5}) == {"kept": True}, \
+    assert role.do("class_laps", args) == {"kept": True}, \
         "a count the field already holds sends no change, so the step keeps it without a request"
-    fails(lambda: role.do("class_laps", {"class": "GT3", "laps": 5}), "Lap count of GT3")
+    fails(lambda: role.do("class_laps", dict(args, stint="Stint 1")), "Lap count of GT4 in Stint 1")
+    fails(lambda: role.do("class_laps", {"class": "GT4", "laps": 5}), "needs args.class and args.stint")
 
 
 def t_race_control_sets_each_stints_lap_count_on_the_desk():

@@ -91,8 +91,9 @@ so the race controls never scroll away:
   **Take**. The lap line shows the lobby on air against its stint's lap count. The
   desk's status line and its last change sit below them.
 - **Stint laps** in the Race area, in endurance: each stint's lap count from the
-  Schedule's `Laps` cell. A change applies at once and reaches the Sheet in the
-  background; a row the Sheet has not taken yet says so.
+  Schedule's `Laps` cell and, with [classes](Driver-Telemetry#classes), one column per
+  class from its `Laps <Class>` cell. A change applies at once and reaches
+  the Sheet in the background; a row the Sheet has not taken yet says so.
 - **Track map** on top of the right column, above the crew chat: each car as a numbered
   dot on the layout's racing line, from the race table's own live data without the
   dashboard delay; in qualifying each car with a live sender. It stays hidden until the relay has the
