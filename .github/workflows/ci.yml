@@ -137,7 +137,8 @@ jobs:
         timeout-minutes: 2
         run: python tools/e2e-event-info.py
 
-      # ERR_NO_BUFFER_SPACE (WSAENOBUFS) points at ephemeral port exhaustion; record the socket state.
+      # ERR_NO_BUFFER_SPACE (WSAENOBUFS) with free ephemeral ports: record the TCP and UDP
+      # sockets, the processes holding the most handles and the kernel pool.
       - name: Windows socket state after a failure
         if: failure() && runner.os == 'Windows'
         timeout-minutes: 2
@@ -148,6 +149,16 @@ jobs:
           $c | Group-Object State | Sort-Object Count -Descending | Format-Table Count, Name -AutoSize
           $c | Where-Object State -eq 'TimeWait' | Group-Object RemotePort |
             Sort-Object Count -Descending | Select-Object -First 10 | Format-Table Count, Name -AutoSize
+          $u = Get-NetUDPEndpoint -ErrorAction SilentlyContinue
+          "UDP endpoints: $(@($u).Count)"
+          $u | Group-Object OwningProcess | Sort-Object Count -Descending | Select-Object -First 5 |
+            ForEach-Object { "{0,6} {1}" -f $_.Count, (Get-Process -Id $_.Name -ErrorAction SilentlyContinue).ProcessName }
+          $c | Group-Object OwningProcess | Sort-Object Count -Descending | Select-Object -First 5 |
+            ForEach-Object { "{0,6} {1}" -f $_.Count, (Get-Process -Id $_.Name -ErrorAction SilentlyContinue).ProcessName }
+          Get-Process | Sort-Object HandleCount -Descending | Select-Object -First 8 |
+            Format-Table Id, ProcessName, HandleCount, @{n='WS_MB';e={[int]($_.WorkingSet64/1MB)}} -AutoSize
+          Get-Counter '\Memory\Pool Nonpaged Bytes', '\Memory\Available MBytes' -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty CounterSamples | Format-Table Path, CookedValue -AutoSize
 
   build:
     needs: scope
