@@ -937,7 +937,8 @@ class Service:
 
     def _mark_dc(self, rows):
         """A quiet car whose disconnect Race Control confirmed reads "dc" instead of
-        "no_data". A recorder failure only costs the label, never the tick."""
+        "no_data" and leaves the track map until it sends again. A recorder failure only
+        costs the label, never the tick."""
         try:
             dc = self._rec.confirmed_silent() if self._rec is not None else set()
         except Exception:
@@ -945,6 +946,8 @@ class Service:
         for row in rows:
             if row.get("status") == "no_data" and row.get("entry") in dc:
                 row["status"] = "dc"
+                if "x" in row:
+                    row["x"] = row["z"] = None
 
     def line(self):
         """The picked layout's line for the track map, at most LINE_POINTS points;
