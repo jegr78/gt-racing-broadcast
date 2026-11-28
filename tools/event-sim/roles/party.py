@@ -938,6 +938,9 @@ class RaceControlRole(LiveColumn, Surface):
     def act_final_lap(self, args):
         return self._press(DESK["final_lap"], "/drivers/race/final-lap", "Final lap")
 
+    def act_formation_lap(self, args):
+        return self._press(DESK["formation_lap"], "/drivers/race/formation-lap", "Formation Lap on the HUD")
+
     def act_finish(self, args):
         return self._press(DESK["finish"], "/drivers/race/finish", "Race finished", armed=True)
 

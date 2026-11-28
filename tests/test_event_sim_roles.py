@@ -352,7 +352,8 @@ def t_the_registry_has_every_party_and_its_actions():
             "director": {"open", "close", "hold", "approve_link", "next", "scene", "red_flag",
                          "show_dashboard", "cue", "chat", "graphic", "pov", "hud", "mode", "start_part",
                          "end_part", "fit", "view", "play", "timer", "timer_key"},
-            "race_control": {"open", "close", "hold", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
+            "race_control": {"open", "close", "hold", "approve_driver", "approve_drivers", "final_lap", "formation_lap",
+                             "finish", "red_flag",
                              "release", "retire", "rejoin", "estimate", "add_lap", "set_time", "correction",
                              "note", "fit", "confirm_dc", "class_laps", "stint_laps", "take_plan", "view", "reject_driver",
                              "correct_driver", "compound", "compounds", "race_start", "approve_all",
@@ -1208,6 +1209,9 @@ def t_final_lap_is_one_click_and_an_armed_button_two():
     key = desk_button(page, "Final lap", "/drivers/race/final-lap", "Final lap", armed=False)
     assert role.do("final_lap", {}) == {"status": "Final lap"}
     assert page.clicks == [key], f"Final lap is one click: {page.clicks}"
+    key = desk_button(page, "Formation Lap", "/drivers/race/formation-lap", "Formation Lap on the HUD", armed=False)
+    assert role.do("formation_lap", {}) == {"status": "Formation Lap on the HUD"}
+    assert page.clicks[-1] == key, f"Formation Lap is one click: {page.clicks}"
     desk_button(page, "Finish", "/drivers/race/finish", "Race finished")
     desk_button(page, "Restart released", "/drivers/race/release", "Restart released")
     assert role.do("finish", {}) == {"status": "Race finished"}
@@ -2726,19 +2730,23 @@ def t_the_qualifying_timer_holds_the_session_length_before_program_goes_on_air()
 def t_the_full_scenario_shows_race_control_messages_at_formation_final_lap_and_finish():
     steps = _full().steps
     by = {s.id: s for s in steps}
-    rc = [s for s in steps if s.do == "hud" and s.args.get("field") == "racecontrol"]
-    said = {s.args["value"]: s for s in rc}
-    for text in ("Formation Lap", "Final Lap", "Chequered Flag"):
-        assert text in said, f"Race Control's message {text!r} is on the HUD: {[s.args for s in rc]}"
-        assert text in stack.RACE_CONTROL, f"{text!r} is in the run's Configuration vocabulary"
-        assert said[text].role == "director" and said[text].caption, said[text]
-    clear = [s for s in rc if s.args["value"] == ""]
-    assert clear, "the formation message is cleared when the race starts"
-    assert _after(by, said["Formation Lap"].id, "formation") and _after(by, "racing", said["Formation Lap"].id), \
+    assert not [s.id for s in steps if s.do == "hud" and s.args.get("field") == "racecontrol"], \
+        "the director no longer sets the race's HUD messages by hand"
+    formation = next(s for s in steps if s.do == "formation_lap")
+    assert formation.role == "race_control" and formation.caption, formation
+    assert _after(by, formation.id, "formation") and _after(by, "racing", formation.id), \
         "Formation Lap shows while the cars run the formation lap"
-    assert _after(by, clear[0].id, "racing"), "it goes when the race starts"
-    assert _after(by, said["Final Lap"].id, "final_lap"), "Final Lap follows Race Control's call"
-    assert _after(by, said["Chequered Flag"].id, "flag"), "Chequered Flag once the leader has taken it"
+    for text in ("Formation Lap", "Final Lap", "Chequered Flag"):
+        assert text in stack.RACE_CONTROL, f"{text!r} is in the run's Configuration vocabulary"
+
+    def expects(step_id, text):
+        return f"relay.get('/setup/data').fields.racecontrol == '{text}'" in by[step_id].expect
+    assert expects(formation.id, "Formation Lap")
+    assert expects("rc_go", "") and _after(by, "rc_go", "racing"), "it goes by itself when the race starts"
+    assert expects("final_lap", "Final Lap") and by["final_lap"].role == "race_control", \
+        "Race Control's final lap call shows Final Lap with it"
+    assert expects("rc_flag", "Chequered Flag") and _after(by, "rc_flag", "flag") and by["rc_flag"].role == "api", \
+        "Chequered Flag replaces it by itself once the leader has taken the flag"
 
 
 def t_the_full_scenario_plays_qualifying_the_day_before_as_its_own_event():

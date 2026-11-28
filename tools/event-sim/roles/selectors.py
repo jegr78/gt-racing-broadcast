@@ -87,6 +87,7 @@ MEDIA = {"intro": "Intro Video", "trailer": "Trailer Video", "outro": "Outro Vid
 # The driver desk's button and field labels (src/console/driver-desk.js), by what they do.
 DESK = {
     "final_lap": "Final lap",
+    "formation_lap": "Formation Lap",
     "finish": "Finish",
     "red_flag": "RED FLAG",
     "release": "Restart released",
