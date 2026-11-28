@@ -402,8 +402,9 @@ def t_the_finish_reminder_waits_while_a_car_short_of_the_flag_still_sends():
     a, b = Car(race, "A", "a", -10), Car(race, "B", "b", -20)
     t = _drive(race, [a, b], [52, 50], 0.0, 4 * L / 52 + 1)
     assert race.standings(t)["state"] == "finishing"
-    t = _drive(race, [a, b], [None, 50], t, 40)
-    assert not race.standings(t)["finish_due"], "B still drives to its flag"
+    t = _drive(race, [a, b], [None, 50], t, 10)
+    st = race.standings(t)
+    assert st["state"] == "finishing" and not st["finish_due"], "B still drives to its flag"
     early = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=3)
     x, y = Car(early, "X", "x", -10), Car(early, "Y", "y", -20)
     t = _drive(early, [x, y], [50, 50], 0.0, 30)
