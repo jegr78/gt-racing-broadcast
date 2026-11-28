@@ -365,6 +365,53 @@ def t_final_lap_by_time_and_finish_by_hand():
     assert other.standings(t)["state"] == "finished" and _row(other, "C", t)["distance_m"] == d
 
 
+def _countdown_race():
+    """A takes the flag of a three-lap race; B runs on the lead lap about 300 m behind it,
+    C a lap down. Four seconds into GT7's finish countdown the session ends: nobody sends."""
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=3)
+    a, b, c = Car(race, "A", "a", -10), Car(race, "B", "b", -20), Car(race, "C", "c", -30)
+    t = _drive(race, [a, b, c], [52, 50, 34], 0.0, 4 * L / 52 + 1)
+    t = _drive(race, [a, b, c], [None, 50, 34], t, 4)
+    return race, t
+
+
+def t_after_the_countdown_the_cars_short_of_the_flag_keep_their_last_gap():
+    race, t = _countdown_race()
+    live = {r["entry"]: r for r in race.standings(t)["entries"]}
+    for wait in (10, 60):
+        rows = race.standings(t + wait)["entries"]
+        assert [r["entry"] for r in rows] == ["A", "B", "C"], rows
+        for r in rows[1:]:
+            assert r["status"] == "racing", f"silence after the flag is no lost data: {r}"
+            assert (r["gap_time_s"], r["lapped"]) == (live[r["entry"]]["gap_time_s"], live[r["entry"]]["lapped"]), \
+                f"{r['entry']} keeps its last gap while the session is over: {r} vs {live[r['entry']]}"
+    assert race.standings(t + 60)["finish_due"], "30 s without data from a car short of the flag: press Finish"
+    race.finish(t + 60)
+    for now in (t + 60, t + 300):
+        rows = {r["entry"]: r for r in race.standings(now)["entries"]}
+        b, c = rows["B"], rows["C"]
+        assert b["lapped"] == 0 and b["gap_time_s"] == live["B"]["gap_time_s"] and b["gap_s"] is not None, \
+            f"B ends on the lead lap with its gap when the data stopped: {b} vs {live['B']}"
+        assert c["lapped"] == 1 and c["laps"] == live["C"]["laps"], f"C ends one lap down, not two: {c}"
+        assert [b["laps"], c["laps"]] == [live["B"]["laps"], live["C"]["laps"]], "no lap is added"
+    assert not race.standings(t + 300)["finish_due"]
+
+
+def t_the_finish_reminder_waits_while_a_car_short_of_the_flag_still_sends():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=3)
+    a, b = Car(race, "A", "a", -10), Car(race, "B", "b", -20)
+    t = _drive(race, [a, b], [52, 50], 0.0, 4 * L / 52 + 1)
+    assert race.standings(t)["state"] == "finishing"
+    t = _drive(race, [a, b], [None, 50], t, 40)
+    assert not race.standings(t)["finish_due"], "B still drives to its flag"
+    early = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=3)
+    x, y = Car(early, "X", "x", -10), Car(early, "Y", "y", -20)
+    t = _drive(early, [x, y], [50, 50], 0.0, 30)
+    st = early.standings(t + 60)
+    assert not st["finish_due"] and {r["status"] for r in st["entries"]} == {"no_data"}, \
+        f"before the flag silence is still no data: {st['entries']}"
+
+
 def _batched_finish(multi_lobby, b_first=True):
     """A leads B by 10 m on the road and by 210 m in race distance (as after a keep
     restart); one 0.4 s batch carries both crossings. With `b_first` B's sender posts

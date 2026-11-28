@@ -398,7 +398,9 @@ class Recorder:
 
     def _detect(self, standings, now):
         """Close silences whose data came back; only a running recording opens new ones."""
-        may_suspect = self._running and standings.get("red_flag") is None
+        # After the leader's flag GT7's finish countdown ends the session: silence is no disconnect.
+        may_suspect = self._running and standings.get("red_flag") is None \
+            and standings.get("state") not in ("finishing", "finished")
         window = bool(standings.get("change_window"))
         for row in standings.get("entries") or []:
             entry, quiet = row.get("entry"), row.get("quiet_s")

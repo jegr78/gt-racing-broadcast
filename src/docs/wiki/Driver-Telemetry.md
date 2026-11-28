@@ -314,7 +314,14 @@ and says so. Changing the layout mid-event starts the race over.
   HUD), and the race ends at the leader's next crossing. An endurance final lobby ends on the road, see below. Each crossing is
   timed between the car's two samples around the line, and the flag goes to every car
   that crosses after the leader's crossing moment, in whatever order the data reaches
-  the relay. A car that crossed just before the leader runs one more lap. The race timer never ends a race. **Finish** freezes the order at once. After the
+  the relay. A car that crossed just before the leader runs one more lap. The race timer never ends a race. **Finish** freezes the order at once.
+  Once the leader has the flag, GT7 runs the lobby's race finish countdown (30 to 180 s)
+  and then ends the session, so cars still on their last lap may never see the flag.
+  From the leader's flag on, a car that goes quiet is no disconnect: no suspicion opens,
+  and every screen keeps its last gap and lap instead of `No data`. When no car short
+  of the flag has sent for 30 s, both desks remind you to press **Finish**, which
+  freezes those cars where their data stopped: their laps, their gap, and on the lead
+  lap when they were on it. After the
   leader's flag the order is laps first, then who completed them first, so a lapped
   car that takes the flag stays behind a car on the lead lap that is still running.
   Cars still running on the same lap keep following the road until each finishes,
