@@ -667,6 +667,41 @@
         },
         {
             "prev_ver": 536936450,
+            "name": "Driver Dashboard Splitscreen",
+            "uuid": "0ad0fee0-0000-4000-8000-000000000005",
+            "id": "browser_source",
+            "versioned_id": "browser_source",
+            "settings": {
+                "url": "http://127.0.0.1:8088/drivers?map=0",
+                "width": 1920,
+                "height": 1080,
+                "restart_when_active": false
+            },
+            "mixers": 255,
+            "sync": 0,
+            "flags": 0,
+            "volume": 1.0,
+            "balance": 0.5,
+            "enabled": true,
+            "muted": false,
+            "push-to-mute": false,
+            "push-to-mute-delay": 0,
+            "push-to-talk": false,
+            "push-to-talk-delay": 0,
+            "hotkeys": {
+                "libobs.mute": [],
+                "libobs.unmute": [],
+                "libobs.push-to-mute": [],
+                "libobs.push-to-talk": [],
+                "ObsBrowser.Refresh": []
+            },
+            "deinterlace_mode": 0,
+            "deinterlace_field_order": 0,
+            "monitoring_type": 0,
+            "private_settings": {}
+        },
+        {
+            "prev_ver": 536936450,
             "name": "Splitscreen HUD Overlay",
             "uuid": "0ad0fee0-0000-4000-8000-000000000003",
             "id": "browser_source",
@@ -1630,8 +1665,8 @@
                         "private_settings": {}
                     },
                     {
-                        "name": "Driver Dashboard",
-                        "source_uuid": "0ad0fee0-0000-4000-8000-000000000004",
+                        "name": "Driver Dashboard Splitscreen",
+                        "source_uuid": "0ad0fee0-0000-4000-8000-000000000005",
                         "visible": true,
                         "locked": true,
                         "rot": 0.0,

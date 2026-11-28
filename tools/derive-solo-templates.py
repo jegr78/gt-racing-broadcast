@@ -42,7 +42,7 @@ U = {
 DROP_SCENES = {"Stint", "Splitscreen"}
 # The endurance commentary mic (#593) is dropped with the feeds and rebuilt below in
 # the solo shape: hot, wrapped, wired into more scenes.
-DROP_SOURCES = {"Feed A", "Feed B", "Commentary Mic Device"}
+DROP_SOURCES = {"Feed A", "Feed B", "Commentary Mic Device", "Driver Dashboard Splitscreen"}
 
 # Committed device tokens (localized per OS by setup-assets.localize_device_sources).
 CAPTURE_TOKEN = "__RACECAST_CAPTURE__"
