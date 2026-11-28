@@ -263,7 +263,10 @@ and says so. Changing the layout mid-event starts the race over.
   where Race Control places it (see below). Once Race
   Control confirms the silence as a disconnect, every screen shows **DC** instead (desks,
   tower, cockpit, public timing page, the recording and its frozen standings), until the
-  car sends data again. A car Race Control placed with an **estimate** shows **EST**
+  car sends data again. A confirmed DC also leaves the track maps of the overlay, the
+  cockpit and the desks, where its dot would otherwise stand on the line while the field
+  passes; it comes back with the car's next data, at its rejoin. A car Race Control
+  placed with an **estimate** shows **EST**
   instead of either (see below).
 - **No sender**: every entry of the Configuration roster stands in the order from the
   start. One whose driver never ran a sender sits at the end with no gap: **No sender**
