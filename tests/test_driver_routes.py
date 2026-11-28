@@ -1322,8 +1322,14 @@ def t_a_solo_stint_watch_never_reads_the_schedule():
     import threading, time
 
     class Source:
-        def __getattr__(self, name):
-            raise AssertionError(f"solo read the Schedule: {name}")
+        def get_rows(self):
+            raise AssertionError("solo read the Schedule rows")
+
+        def final_laps(self):
+            raise AssertionError("solo read the final lap count")
+
+        def class_laps_at(self, _idx):
+            raise AssertionError("solo read the class lap counts")
 
     class Relay:
         solo, mode, race_source = True, "race", Source()
