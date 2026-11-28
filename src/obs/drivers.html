@@ -450,7 +450,7 @@
     label.textContent = "";
     label.style.color = "";
     document.getElementById("drivers-fastest").classList.add("none");
-    map.draw([]);
+    map.draw(entries, {byPlace: true});
   }
   async function poll() {
     try {

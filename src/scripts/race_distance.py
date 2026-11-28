@@ -639,6 +639,11 @@ class Race:
     def _finite(v):
         return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
+    def in_area(self, x, z):
+        """True for a finite place inside the line's area (any finite place without a line)."""
+        a = self._area
+        return self._finite(x) and self._finite(z) and (a is None or (a[0] <= x <= a[1] and a[2] <= z <= a[3]))
+
     def _valid(self, sample):
         """The sample's checked (t, lap, speed m/s, x, z); None drops it."""
         t, lap = sample.get("t"), sample.get("lap")
@@ -647,12 +652,8 @@ class Race:
             return None
         if lap is not None and type(lap) is not int:
             return None
-        if x is not None or z is not None:
-            if not (self._finite(x) and self._finite(z)):
-                return None
-            a = self._area
-            if a is not None and not (a[0] <= x <= a[1] and a[2] <= z <= a[3]):
-                return None
+        if (x is not None or z is not None) and not self.in_area(x, z):
+            return None
         return t, lap, speed / 3.6, x, z
 
     def _prune(self, now, keep):

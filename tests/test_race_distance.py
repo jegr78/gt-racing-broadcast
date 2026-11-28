@@ -921,6 +921,14 @@ def t_a_lapped_car_that_skips_its_change_regains_the_lead_lap():
             assert all(lap == 0 for lap, _, gone in seen[-200:]), "back at racing pace out of the pit lane"
 
 
+def t_a_place_counts_only_inside_the_line_s_area():
+    race = rd.Race([{"x": 0.0, "z": 0.0}, {"x": 1000.0, "z": 0.0}, {"x": 1000.0, "z": 500.0}])
+    assert race.in_area(500.0, 250.0) and race.in_area(-299.0, 0.0), "on the line's area and its margin"
+    assert not race.in_area(-301.0, 0.0), "beyond the margin is another place, not this track"
+    assert not race.in_area(None, 1.0) and not race.in_area(float("nan"), 1.0) and not race.in_area(True, 1.0)
+    assert rd.Race(None).in_area(1e9, -1e9), "without a line any finite place counts"
+
+
 def t_a_lapped_car_back_on_the_lead_lap_keeps_it_through_a_spin_or_a_stop_on_track():
     for mode in ("never", "pit"):
         for slow in ((60.0, 10.0, 5.0), (60.0, 60.0, 0.0001)):

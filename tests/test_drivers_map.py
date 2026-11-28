@@ -54,7 +54,7 @@ def _place(spots):
     """placeDots on a circle of radius 40 around (50, 50); None where node is missing."""
     line = [[50 + 40 * math.cos(math.radians(a)),
              50 + 40 * math.sin(math.radians(a))] for a in range(360)]
-    return _node(f"const CLEAR = 6;\n{_fn(_src('ui', 'track-map.js'), 'placeDots')}\n"
+    return _node(f"const CLEAR = 6;\n{_fn(_src('ui', 'track-map.js'), 'along')}\n{_fn(_src('ui', 'track-map.js'), 'placeDots')}\n"
                  f"console.log(JSON.stringify(placeDots({json.dumps(line)}, {json.dumps(spots)})));")
 
 
@@ -122,6 +122,25 @@ def t_the_map_draws_the_line_and_a_labelled_dot_per_placed_car():
     assert got["asked"] == ["/drivers/line"], f"one line per track, fetched once: {got}"
     assert got["line"] == "polyline" and got["dots"] == ["7", "2"], \
         f"the line, then the number or else the position on each car with a spot: {got}"
+
+
+def t_qualifying_dots_keep_their_order_on_the_track_not_the_ranking():
+    got = _node(_DOM + _src("ui", "track-map.js") + r"""
+      (async function () {
+        const svg = node("svg"), map = TrackMap.create(svg);
+        await map.sync("suzuka");
+        const x = () => Object.fromEntries(svg.children[1].children.map(d => [d.children[1].textContent,
+                                                                             d.children[1].attrs.x]));
+        const ranked = [{entry: "fast", number: "1", x: 10, z: 0}, {entry: "slow", number: "2", x: 12, z: 0}];
+        map.draw(ranked);
+        const rank = x();
+        map.draw(ranked, {byPlace: true});
+        return {rank: rank, place: x()};
+      })().then(r => console.log(JSON.stringify(r)));""")
+    if got is None:
+        return
+    assert got["rank"]["2"] < got["rank"]["1"], f"in rank order the car ahead slides back past the faster one: {got}"
+    assert got["place"]["2"] > got["place"]["1"], f"by place the car ahead on the line stays ahead: {got}"
 
 
 def t_a_car_that_has_finished_leaves_the_map():
@@ -202,17 +221,19 @@ def t_the_race_control_map_shows_the_desks_undelayed_rows():
     got = _node(_fn(desk, "mapCars") + r"""
       const r = {mode: "race", class_colors: {GT3: "#0a0"},
                  entries: [{entry: "a", class: "GT3", x: 1, z: 2}, {entry: "b", class: "GT4", x: 3, z: 4}]};
-      console.log(JSON.stringify([mapCars(r), mapCars(Object.assign({}, r, {mode: "qualifying"}))]));""")
+      const q = Object.assign({}, r, {mode: "qualifying", qualifying: [{entry: "b", pos: 1, x: 3, z: 4}]});
+      console.log(JSON.stringify([mapCars(r), mapCars(q)]));""")
     if got is not None:
         race, quali = got
         assert [(e["entry"], e["pos"], e["class_color"]) for e in race] == [("a", 1, "#0a0"), ("b", 2, "")], \
             f"each row in running order with its class ring: {race}"
-        assert quali == [], f"qualifying shows the line only, as on the overlay: {quali}"
+        assert [e["entry"] for e in quali] == ["b"], f"qualifying shows its rows by best lap: {quali}"
     mount = desk[desk.index("function mount("):]
     assert 'root.querySelector("[data-track-map]")' in mount and "window.TrackMap" in mount, \
         "the desk draws a map only where its page has one"
-    assert re.search(r"map\.sync\(r\.track \|\| null\)\.then\(function \(\) \{ map\.draw\(mapCars\(r\)\)", mount), \
-        "the map follows the race table's own /drivers/race answer"
+    assert re.search(r"map\.sync\(r\.track \|\| null\)\.then\(function \(\) \{ map\.draw\(mapCars\(r\), "
+                     r"\{byPlace: r\.mode === \"qualifying\"\}\)", mount), \
+        "the map follows the race table's own /drivers/race answer, in qualifying by place on the line"
     assert "data-track-map" in _src("racecontrol", "race-control.html")
     assert "data-track-map" not in _src("director", "director-panel.html"), "the Director Panel has no map"
 
@@ -226,14 +247,15 @@ def t_the_cockpit_map_follows_the_delayed_dashboard():
         drawTimingMap(d);
         await new Promise(r => setTimeout(r, 10));
         const race = dots(svg);
-        drawTimingMap(Object.assign({}, d, {mode: "qualifying", qualifying: d.entries}));
+        drawTimingMap(Object.assign({}, d, {mode: "qualifying",
+                                            qualifying: [{entry: "q", number: "7", pos: 1, x: 20, z: 0}]}));
         await new Promise(r => setTimeout(r, 10));
         return {race: race, quali: dots(svg), asked: asked};
       })().then(r => console.log(JSON.stringify(r)));""")
     if got is None:
         return
     assert got["race"] == ["3"] and got["asked"] == ["/drivers/line"], f"the dashboard's cars on its track: {got}"
-    assert got["quali"] == [], f"qualifying shows the line only, as on the overlay: {got}"
+    assert got["quali"] == ["7"], f"qualifying shows its own rows' cars, not the race entries: {got}"
     poll = _fn(page, "pollTiming")
     assert "drawTimingMap(d);" in poll and "j('/drivers/dashboard')" in poll, \
         "the map draws from the same delayed answer as the timing table"

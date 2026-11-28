@@ -355,7 +355,7 @@ def public_view(snap):
 
 
 def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None, laps=None, now=0.0,
-               known=None):
+               known=None, in_area=None):
     """Rank the running segment's entries by GT7 best lap: [{pos, entry, number,
     driver, team, color, text_color, best_ms, gap_ms, interval_ms, last_lap_ms}];
     entries without a lap last. Only live senders count, and a lap under `min_ms`
@@ -367,17 +367,25 @@ def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None
     and is updated in place at wall time `now`, so a lap stays after its sender goes
     quiet or GT7 starts a new session. `known` {entry: (last ms, changed at)} is what
     `seen` held before a relay restart: a sender's first lap dates from it, or from
-    after the restart's last known moment when GT7's last lap changed meanwhile."""
+    after the restart's last known moment when GT7's last lap changed meanwhile. Each row's
+    `x`/`z` is its newest live sample's place, None off the line's area (`in_area`, by
+    default any finite place)."""
     best = seen if seen is not None else {}
 
     def lap(ms):
         return ms if type(ms) is int and max(0, min_ms) < ms < MAX_LAP_MS else None
+    place = {}
+    in_area = in_area or race_distance.Race(None).in_area
     for c in connections:
         if not c.get("live", True):
             continue
         if segment is not None and c.get("segment") not in (segment, None):
             continue
         latest = c.get("latest")
+        if latest and in_area(latest.get("x"), latest.get("z")):
+            t = latest.get("t") if race_distance.Race._finite(latest.get("t")) else float("-inf")
+            if t >= place.get(c["entry"], (None, None, float("-inf")))[2]:
+                place[c["entry"]] = (latest["x"], latest["z"], t)
         cur = best.get(c["entry"])
         if cur is None and len(best) >= MAX_QUALI:
             continue
@@ -408,10 +416,11 @@ def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None
     rows = []
     for i, (e, (ms, name, last, at)) in enumerate(order):
         ahead = order[i - 1][1][0] if i else None
+        x, z, _t = place.get(e, (None, None, None))
         rows.append(dict(_viewer_entry({"entry": e, "driver": name}, roster), pos=i + 1, best_ms=ms,
                          gap_ms=None if ms is None or pole is None else ms - pole,
                          interval_ms=None if ms is None or ahead is None else ms - ahead,
-                         last_lap_ms=last, last_lap_at=at))
+                         last_lap_ms=last, last_lap_at=at, x=x, z=z))
     return rows
 
 
@@ -900,7 +909,8 @@ class Service:
             ctx.get("connections") or [], ctx.get("segment"), roster,
             min_ms=0 if race.length is None else int(race.min_lap_s() * 1000),
             overrides=_saved_quali(path, ctx.get("segment")), seen=seen,
-            laps=_saved_quali_laps(path, ctx.get("segment")), now=self._wall(), known=known)
+            laps=_saved_quali_laps(path, ctx.get("segment")), now=self._wall(), known=known,
+            in_area=race.in_area)
         self._keep_gt7_laps(seen, known, _segment_key(ctx.get("segment")))
         named = self._request_names(ctx.get("segment"))
         window = read_league(self._league)["last_lap_s"]

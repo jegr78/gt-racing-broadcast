@@ -555,8 +555,8 @@ It never carries connection ids, corrections or who made them.
 - **Track map on the desks**: the Race Control desk shows the overlay's track map as the
   first card of the right column, above the crew chat, from its race table's live data
   without the delay. In the cockpit, **Map** in the crew chat's header lays it over the
-  crew chat, from the same delayed data as its timing; it starts hidden. Both draw the
-  line only in qualifying, as the overlay, and stay hidden until the layout's racing line
+  crew chat, from the same delayed data as its timing; it starts hidden. Both show the
+  qualifying's cars with a live sender too, as the overlay does, and stay hidden until the layout's racing line
   is there.
 
 ### Public live timing

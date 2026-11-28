@@ -381,9 +381,9 @@
     return s.approval === "pending" ? ["pending", "amb"] : ["approved, no data", "amb"];
   }
 
-  // The track map's cars: the race rows in running order; qualifying shows the line only, as the overlay.
+  // The track map's cars: the race rows in running order, in qualifying the rows by best lap.
   function mapCars(r) {
-    if (r.mode === "qualifying") return [];
+    if (r.mode === "qualifying") return r.qualifying || [];
     var colors = r.class_colors || {};
     return (r.entries || []).map(function (e, i) {
       return Object.assign({}, e, {pos: i + 1, class_color: colors[e.class] || ""});
@@ -1377,7 +1377,7 @@
       var r = await raceCall;
       markStale(!!r);
       if (r) renderRace(r);
-      if (r && map) map.sync(r.track || null).then(function () { map.draw(mapCars(r)); });
+      if (r && map) map.sync(r.track || null).then(function () { map.draw(mapCars(r), {byPlace: r.mode === "qualifying"}); });
       var rec = await recCall;
       if (renderRecording(rec) && r) renderRace(r);
       var rd = await call("/drivers/readiness", undefined, true);
