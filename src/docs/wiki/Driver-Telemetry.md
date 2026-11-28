@@ -376,7 +376,10 @@ except on the tower.
   the [Schedule tab](Sheet-Template#schedule-tab). Race Control or the director see and
   change each stint's class count on the desk under **Race → Stint laps**, one column per
   class (1 to 999, empty clears it): the relay uses a change at once and writes the cell
-  in the background. A class count never finishes a car. In every lobby the desks and
+  in the background. A single lobby and a solo broadcast have no stint list: there the
+  desk's **Class laps** row next to the lap count sets each class's count, kept with the
+  event settings like the lap count and never written to the Sheet. A class count never
+  finishes a car. In every lobby the desks and
   the cockpit show each class's **Lobby lap** (the highest GT7 counter of its cars on the
   road) next to its race lap, on the desks against the class's count of the lobby on air;
   the first class reads its lobby lap against the stint's `Laps`. The tower and the

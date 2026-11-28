@@ -1308,6 +1308,40 @@ def t_the_stint_watch_passes_the_class_counts_of_the_row_on_air():
         f"the row on air brings its counts, a desk change and a switch reach the race: {got}"
 
 
+def t_a_solo_stint_watch_never_reads_the_schedule():
+    import threading, time
+
+    class Source:
+        def __getattr__(self, name):
+            raise AssertionError(f"solo read the Schedule: {name}")
+
+    class Relay:
+        solo, mode, race_source = True, "race", Source()
+        _warn_tick_error, _tick_ok = g.m.Relay._warn_tick_error, g.m.Relay._tick_ok
+        errors = []
+
+        def on_air_row_idx(self):
+            raise AssertionError("solo has no row on air")
+
+    got = []
+
+    class Svc:
+        def stint_switch(self, **_k):
+            got.append("switch")
+
+        def lobby_class_laps(self, counts):
+            got.append(counts)
+
+    relay, stop = Relay(), threading.Event()
+    relay._warn_tick_error = lambda what, exc: relay.errors.append((what, exc))
+    worker = threading.Thread(target=g.m.stint_switch_watch, args=(relay, Svc(), stop, lambda: None, 0.01), daemon=True)
+    worker.start()
+    time.sleep(0.2)
+    stop.set()
+    worker.join(2)
+    assert got == [] and relay.errors == [], f"solo passes nothing and logs nothing: {got} {relay.errors}"
+
+
 def t_the_stint_watch_records_the_race_stint_on_air():
     class Source:
         def get_rows(self):
@@ -1681,14 +1715,24 @@ def t_race_control_sets_a_stint_lap_count_that_the_race_shows_at_once():
 
 
 def t_a_solo_race_has_no_stint_list():
+    roster = {ENTRIES[0]: {"carClass": "GT3"}, ENTRIES[1]: {"carClass": "GT4"}}
     sched, ctl = _stint_schedule()
-    srv, port, _path, _hub = _serve(solo=True, setup_ctl=ctl)
+    srv, port, _path, _hub = _serve(solo=True, setup_ctl=ctl,
+                                    context=lambda: {"roster": roster, "stint": None, "mode": "race"})
     srv.relay.race_source = sched
     try:
         race = json.loads(_req(port, "/drivers/race")[1])
         assert "stints" not in race, "a single lobby keeps its own lap count"
         st, _t, _h = _post(port, "/drivers/race/stint-laps", {"row": 2, "laps": 9})
         assert st == 409, st
+        st, _t, _h = _post(port, "/drivers/race/stint-laps", {"row": 2, "class": "GT4", "laps": 9})
+        assert st == 409, st
+        assert len(ctl.saves) == 0, "solo never queues a Sheet write"
+        st, text, _h = _post(port, "/drivers/race/settings", {"class_laps": {"GT4": 9}})
+        race = json.loads(_req(port, "/drivers/race")[1])
+        assert st == 200 and race["class_laps"] == {"GT4": 9}, \
+            f"solo keeps the class count in the event settings: {st} {text[:200]}"
+        assert len(ctl.saves) == 0, "and nothing reaches the Sheet"
     finally:
         srv.shutdown()
 

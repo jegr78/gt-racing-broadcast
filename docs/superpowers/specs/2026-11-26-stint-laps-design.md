@@ -60,6 +60,11 @@ its lobby lap (the highest GT7 counter of its cars) against its count. **Take** 
 restart plan sets only the stint's overall count; Race Control sets the class counts of
 the restart lobby in their columns.
 
+A single lobby and a solo broadcast keep their class counts as an event setting next to
+the lap count (`class_laps` in `driver-race.json`, one class per change, null clears),
+set in the desk's Class laps row. Solo has no Schedule tab: it never reads the Schedule
+for them, never queues a Sheet write and logs nothing about one.
+
 ## The restart plan after a red flag
 
 While the red flag is out, from **RED FLAG** until **Restart released**, the desk shows a

@@ -655,6 +655,9 @@ def t_the_desk_offers_a_lap_count_per_slower_class():
         desk = fh.read()
     assert '"/drivers/race/stint-laps", {row: row, class: cls, laps: ' in desk, \
         "each stint's class input posts its row and class to the stint laps route"
+    assert '"/drivers/race/settings", {class_laps: change}' in desk, \
+        "a single lobby keeps its class counts in the event settings, never the Sheet"
+    assert "renderClassLaps(r, !laps.hidden)" in desk, "the class fields show only with the single lobby's lap count"
     got = _desk_fn("lapClasses", '[lapClasses(["GT3", "GT4", "GT2", ""]), lapClasses(["", "GT3", "GT4"]), lapClasses([])]')
     if got is None:
         return

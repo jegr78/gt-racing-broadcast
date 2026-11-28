@@ -48,7 +48,7 @@ MAX_CORRECTION_M = 100_000.0
 MAX_PIT_CORRECTION = 50
 MAX_ESTIMATE_S = 3600.0
 DEFAULTS = {"formation": True, "finish_mode": "laps", "lap_count": None, "delay_s": 0,
-            "visible": False, "show_compound": True, "show_fuel": True}
+            "visible": False, "show_compound": True, "show_fuel": True, "class_laps": {}}
 COMPOUNDS = ("RS", "RM", "RH", "I", "W")   # Racing Soft/Medium/Hard, Intermediate, Wet
 MAX_DELAY_S = 120
 COUNTING = ("racing", "final_lap", "finishing")
@@ -74,7 +74,7 @@ def read_settings(path):
     except (OSError, ValueError):
         doc = {}
     doc = doc if isinstance(doc, dict) else {}
-    out = dict(DEFAULTS)
+    out = dict(DEFAULTS, class_laps={})
     for key, value in doc.items():
         try:
             out.update(validate({key: value}))
@@ -113,6 +113,14 @@ def validate(changes):
         if n is not None and (type(n) is not int or not 1 <= n <= MAX_LAPS):
             raise ValueError(f"lap_count is 1 to {MAX_LAPS}, or none")
         out["lap_count"] = n
+    if "class_laps" in changes:
+        raw = changes["class_laps"]
+        if not isinstance(raw, dict) or len(raw) > MAX_CLASSES:
+            raise ValueError("class_laps is {class: lap count or null}")
+        for cls, n in raw.items():
+            if not _text(cls, MAX_CLASS) or (n is not None and (type(n) is not int or not 1 <= n <= MAX_LAPS)):
+                raise ValueError(f"class_laps is {{class: 1 to {MAX_LAPS}, or null}}")
+        out["class_laps"] = dict(raw)
     return out
 
 
@@ -139,8 +147,20 @@ def _read_json(path):
 
 
 def write_settings(path, changes):
+    """Merge `changes` in; `class_laps` changes one class at a time, null clears it."""
     current = read_settings(path)
-    current.update(validate(changes))
+    checked = validate(changes)
+    if "class_laps" in checked:
+        merged = dict(current["class_laps"])
+        for cls, n in checked.pop("class_laps").items():
+            if n is None:
+                merged.pop(cls, None)
+            else:
+                merged[cls] = n
+        if len(merged) > MAX_CLASSES:
+            raise ValueError(f"at most {MAX_CLASSES} classes carry a lap count")
+        current["class_laps"] = merged
+    current.update(checked)
     _write_json(path, current)
     return current
 
@@ -1559,11 +1579,13 @@ class Service:
             self._lobby_counts = clean
 
     def _class_counts(self, roster):
-        """The lobby's class lap counts under the roster's class names; none outside class mode."""
+        """The class lap counts under the roster's class names, none outside class mode: in
+        endurance the stint lobby's on air, in a single lobby (and solo) the event setting's."""
         named = {c.lower(): c for c in _named_classes(roster)}
         if len(named) < 2:
             return {}
-        return {named[c.lower()]: n for c, n in self._lobby_counts.items() if c.lower() in named}
+        counts = self._lobby_counts if self._current().multi_lobby else read_settings(self._path)["class_laps"]
+        return {named[c.lower()]: n for c, n in counts.items() if c.lower() in named}
 
     def known_class(self, cls):
         """`cls` as the roster names it, or None when it is no class of the event."""

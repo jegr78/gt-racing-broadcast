@@ -505,6 +505,34 @@
       var n = parseInt(laps.value, 10);
       act("/drivers/race/settings", {lap_count: isFinite(n) ? n : null}, "Lap count saved");
     });
+    // A single lobby's lap count per class after the first: an event setting, no Sheet.
+    var classLapRow = el("div", {cls: "row", hidden: ""});
+    var classLapIn = Object.create(null);
+    var classLapKey = null;
+    function renderClassLaps(r, show) {
+      var names = show ? lapClasses(Array.isArray(r.classes) ? r.classes : []) : [];
+      classLapRow.hidden = !names.length;
+      var key = JSON.stringify(names);
+      if (key !== classLapKey && !classLapRow.contains(document.activeElement)) {
+        classLapKey = key;
+        classLapRow.replaceChildren.apply(classLapRow, [el("span", {cls: "muted", text: "Class laps"})].concat(
+          names.map(function (n) {
+            classLapIn[n] = classLapIn[n] || lapInput(n, function (v) {
+              var change = {};
+              change[n] = v;
+              act("/drivers/race/settings", {class_laps: change}, n + " lap count saved");
+            });
+            return el("label", {cls: "check"}, [el("span", {text: n}), classLapIn[n]]);
+          })));
+      }
+      var set = (r.settings && r.settings.class_laps) || {};
+      names.forEach(function (n) {
+        var input = classLapIn[n];
+        if (input && document.activeElement !== input) {
+          input.value = Object.prototype.hasOwnProperty.call(set, n) && typeof set[n] === "number" ? set[n] : "";
+        }
+      });
+    }
     var finalLap = button("Final lap", "warn", null, function () { act("/drivers/race/final-lap", {}, "Final lap"); });
     var finish = button("Finish", "warn", "finish", function () { act("/drivers/race/finish", {}, "Race finished"); });
     // The panel has its own RED FLAG for cover and banner; here it only holds the race.
@@ -1085,6 +1113,7 @@
     var parts = {
       live: [staleNote, lapLine,
         el("div", {cls: "row finish"}, [mode, laps, finalLap, finish]),
+        classLapRow,
         el("div", {cls: "row red"}, [redFlag, restart, release]),
         redBanner, planRow, msgs.live, lastChange],
       race: [el("div", {cls: "row", style: "flex-wrap: nowrap"}, [raceStart, startNote]), unlockRow, raceNote, raceTable, stintBox, evTitle,
@@ -1165,6 +1194,7 @@
       if (document.activeElement !== mode) mode.value = s.finish_mode || "laps";
       if (document.activeElement !== laps) laps.value = s.lap_count || "";
       laps.hidden = mode.value !== "laps" || Array.isArray(r.stints);
+      renderClassLaps(r, !laps.hidden);
       renderStints(r);
       renderPlan(r);
       var red = r.red_flag;

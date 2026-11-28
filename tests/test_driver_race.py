@@ -19,10 +19,10 @@ def t_settings_validate_persist_and_fall_back():
     path = os.path.join(tempfile.mkdtemp(), "driver-race.json")
     assert dr.read_settings(path) == {"formation": True, "finish_mode": "laps", "lap_count": None,
                                       "delay_s": 0, "visible": False,
-                                      "show_compound": True, "show_fuel": True}
+                                      "show_compound": True, "show_fuel": True, "class_laps": {}}
     saved = dr.write_settings(path, {"formation": False, "lap_count": 12})
     assert saved == {"formation": False, "finish_mode": "laps", "lap_count": 12, "delay_s": 0,
-                     "visible": False, "show_compound": True, "show_fuel": True} == dr.read_settings(path)
+                     "visible": False, "show_compound": True, "show_fuel": True, "class_laps": {}} == dr.read_settings(path)
     for bad in ({"formation": "no"}, {"finish_mode": "sprint"}, {"lap_count": 0},
                 {"lap_count": 2.5}, {"lap_count": True}):
         try:
@@ -1756,10 +1756,10 @@ CLASS_ROSTER = {"A": {"number": "1", "cupTeam": "Red Bulls", "carClass": "H", "c
                 "C": {"number": "3", "carClass": "G", "classColor": ""}}
 
 
-def _class_service(path=None, along=None, until=6.0):
+def _class_service(path=None, along=None, until=6.0, multi=False):
     ctx = {"roster": {k: dict(v) for k, v in CLASS_ROSTER.items()}, "stint": None, "remaining": None,
            "mode": "race"}
-    svc, clock, path = _dash_service(ctx, path)
+    svc, clock, path = _dash_service(ctx, path, multi=multi)
     along = along or {"A": -20.0, "B": -60.0, "C": -100.0}
     while clock[0] < until:
         clock[0] = round(clock[0] + 0.1, 3)
@@ -2043,13 +2043,10 @@ def _class_of(d, name):
 
 
 def t_the_lobby_on_air_brings_its_class_lap_counts():
-    svc, _clock, path, ctx = _class_service()
+    svc, _clock, path, ctx = _class_service(multi=True)
     svc.lobby_class_laps({"g": 54, "Z": 9})
     assert svc.standings().get("class_laps") == {"G": 54}, \
         f"the desks see the count under the roster's spelling, an unknown class is dropped: {svc.standings().get('class_laps')}"
-    svc.set_settings({"lap_count": 60})
-    svc.tick()
-    assert _class_of(svc.dashboard(), "G")["laps"] == 54, svc.dashboard()["classes"]
     svc.lobby_class_laps({"G": 50})
     assert svc.standings()["class_laps"] == {"G": 50}, "the next lobby's count replaces it"
     svc.lobby_class_laps({})
@@ -2063,6 +2060,32 @@ def t_the_lobby_on_air_brings_its_class_lap_counts():
     assert svc.standings()["class_laps"] == {}, "outside class mode no class has a count"
 
 
+def t_a_single_lobby_keeps_its_class_lap_counts_in_the_event_settings():
+    svc, _clock, path, _ctx = _class_service()
+    svc.set_settings({"class_laps": {"G": 54}}, who="race_control:rc")
+    assert dr.read_settings(path)["class_laps"] == {"G": 54}, "the count is an event setting, no Sheet"
+    svc.lobby_class_laps({"G": 30})
+    assert svc.standings()["class_laps"] == {"G": 54}, "a single lobby ignores a Schedule row's count"
+    svc.set_settings({"class_laps": {"H": 60}})
+    assert dr.read_settings(path)["class_laps"] == {"G": 54, "H": 60}, "one class changes, the others stay"
+    svc.set_settings({"class_laps": {"G": None}})
+    assert dr.read_settings(path)["class_laps"] == {"H": 60}, "null clears one class"
+    rec = _audit(path)[-1]
+    assert (rec["action"], rec["class_laps"]) == ("settings", {"G": None}), rec
+    again, _c, _p = _dash_service(_ctx, path)
+    assert again.standings()["class_laps"] == {"H": 60}, "a relay restart keeps them"
+    for bad in ({"G": 0}, {"G": 1000}, {"G": "5"}, {"G": True}, {"": 5}, {"x" * 25: 5}, ["G"], {"G": 5.0}):
+        try:
+            svc.set_settings({"class_laps": bad})
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} must be refused")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"class_laps": {"G": 7, "H": "x"}}, fh)
+    assert dr.read_settings(path)["class_laps"] == dr.DEFAULTS["class_laps"] == {}, \
+        "a damaged hand edit falls back to none"
+
+
 def t_a_class_lap_count_below_the_leader_lap_is_kept():
     svc, _clock, path, _ctx = _class_service()
     svc.correct("rc:Anna", "A", 27 * L, 0, "test")
@@ -2073,7 +2096,7 @@ def t_a_class_lap_count_below_the_leader_lap_is_kept():
     svc.tick()
     before = svc.dashboard()
     assert _class_of(before, "G")["lap"] >= 55, before["classes"]
-    svc.lobby_class_laps({"G": 54})
+    svc.set_settings({"class_laps": {"G": 54}})
     st = svc.standings()
     assert st["state"] == before["state"] and st.get("class_laps") == {"G": 54}, st["state"]
     svc.tick()
@@ -2103,7 +2126,7 @@ def _class_flag_service():
 def t_a_class_lap_stops_at_the_class_count_once_the_flag_is_out():
     svc, drive, ctx = _class_flag_service()
     drive(3 * L / 60 - 1)
-    svc.lobby_class_laps({"G": 1})
+    svc.set_settings({"class_laps": {"G": 1}})
     svc.tick()
     assert _class_of(svc.dashboard(), "G")["lap"] == 2, "before the flag the class lap may pass its count"
     drive(3 * L / 60 + 1)
@@ -2113,9 +2136,9 @@ def t_a_class_lap_stops_at_the_class_count_once_the_flag_is_out():
     assert (_class_of(d, "G")["lap"], _class_of(d, "G")["laps"]) == (1, 1), \
         f"after the flag the class header never reads past its count: {d['classes']}"
     assert _class_of(dr.public_view(d), "G")["lap"] == 1, "the public page reads the same class lap"
-    svc.lobby_class_laps({"G": 2})
+    svc.set_settings({"class_laps": {"G": 2}})
     st = svc.standings()
-    assert st["class_lap"] == {"H": 3, "G": 2}, f"the desks read the class lap of the lobby on air: {st['class_lap']}"
+    assert st["class_lap"] == {"H": 3, "G": 2}, f"the desks read the changed class count at once: {st['class_lap']}"
 
 
 def t_the_schedule_laps_belong_to_the_first_named_class():
