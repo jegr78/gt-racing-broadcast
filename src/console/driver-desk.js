@@ -538,7 +538,11 @@
         if (input && document.activeElement !== input) input.value = typeof v === "number" ? v : "";
       });
     }
-    var finalLap = button("Final lap", "warn", null, function () { act("/drivers/race/final-lap", {}, "Final lap"); });
+    var finalLap = button("Final lap", "warn", null, function () {
+      act("/drivers/race/final-lap", {}, function (d) {
+        return d.banner && d.banner !== "ok" ? "Final lap (HUD message not set: " + d.banner + ")" : "Final lap";
+      });
+    });
     // Race Control's HUD message (#1384): the shortcut, any message of the league's
     // vocabulary, and Clear. Formation Lap clears and Final Lap turns into Chequered
     // Flag by itself; the Director Panel keeps its own message controls.
@@ -546,9 +550,10 @@
       act("/drivers/race/formation-lap", {}, "Formation Lap on the HUD");
     });
     var hudMsg = el("select", {"aria-label": "HUD Race Control message"});
-    var hudKey = null;
+    var hudKey = null, hudOn = "";
     hudMsg.addEventListener("change", function () {
-      act("/drivers/race/hud-message", {text: hudMsg.value}, hudMsg.value ? hudMsg.value + " on the HUD" : "HUD message cleared");
+      act("/drivers/race/hud-message", {text: hudMsg.value}, hudMsg.value ? hudMsg.value + " on the HUD" : "HUD message cleared")
+        .then(function (d) { if (!d) hudMsg.value = hudOn; hudMsg.blur(); });
     });
     var hudClear = button("Clear message", "", null, function () {
       act("/drivers/race/hud-message", {text: ""}, "HUD message cleared");
@@ -558,16 +563,16 @@
       var list = Array.isArray(r.hud_messages) ? r.hud_messages : null;
       hudRow.hidden = !fullRedFlag || !list;
       if (hudRow.hidden) return;
-      var key = JSON.stringify(list);
-      if (key !== hudKey && document.activeElement !== hudMsg) {
+      formation.hidden = list.indexOf("Formation Lap") < 0;
+      var on = hudOn = typeof r.hud_message === "string" ? r.hud_message : "";
+      if (document.activeElement === hudMsg) return;
+      var extra = on && list.indexOf(on) < 0 ? [on] : [];
+      var key = JSON.stringify([list, extra]);
+      if (key !== hudKey) {
         hudKey = key;
-        hudMsg.replaceChildren.apply(hudMsg, [opt("", "No message")].concat(list.map(function (m) { return opt(m, m); })));
+        hudMsg.replaceChildren.apply(hudMsg, [opt("", "No message")].concat(list.concat(extra).map(function (m) { return opt(m, m); })));
       }
-      var on = typeof r.hud_message === "string" ? r.hud_message : "";
-      if (document.activeElement !== hudMsg) {
-        if (on && list.indexOf(on) < 0) hudMsg.appendChild(opt(on, on));
-        hudMsg.value = on;
-      }
+      hudMsg.value = on;
     }
     var finish = button("Finish", "warn", "finish", function () { act("/drivers/race/finish", {}, "Race finished"); });
     // The panel has its own RED FLAG for cover and banner; here it only holds the race.

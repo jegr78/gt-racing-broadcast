@@ -3330,6 +3330,8 @@ class _MsgHud(_Hud):
 
 
 class _MsgCtl:
+    push_url = "http://push"
+
     def __init__(self, hud):
         self.hud, self.calls = hud, []
 
@@ -3347,6 +3349,7 @@ def t_race_control_sets_the_hud_message_with_shortcuts_and_from_the_vocabulary()
     srv, port, _path, _hub = _serve(solo=False, hud_source=hud, setup_ctl=ctl)
     rc, director, alice = g._tok("dave"), g._tok("bob"), g._tok("alice")
     audit = driver_race.audit_path_for(srv.race_svc._path)
+    limit, g.m.HUD_MESSAGE_MIN_S = g.m.HUD_MESSAGE_MIN_S, 0.0
     try:
         race = json.loads(_req(port, f"/console/race-control/drivers/race?t={rc}")[1])
         assert race["hud_messages"] == hud.vocab()["racecontrol"] and race["hud_message"] == "", \
@@ -3372,7 +3375,26 @@ def t_race_control_sets_the_hud_message_with_shortcuts_and_from_the_vocabulary()
         st, text, _h = _post(port, f"/console/drivers/race/final-lap?t={director}", {})
         assert st == 200 and hud.msg == "Final Lap", f"Final lap also shows it on the HUD: {st} {text} {hud.msg!r}"
         assert json.loads(text)["state"] == srv.race_svc.standings()["state"]
+        g.m.HUD_MESSAGE_MIN_S = 60.0
+        st, _t, _h = _post(port, f"/console/drivers/race/formation-lap?t={director}", {})
+        st2, _t, _h = _post(port, f"/console/drivers/race/formation-lap?t={director}", {})
+        assert (st, st2) == (200, 429), f"one HUD message change per person and second: {st} {st2}"
+        g.m.HUD_MESSAGE_MIN_S = 0.0
+        real = srv.race_svc.standings
+        srv.race_svc.standings = lambda: dict(real(), state="finishing")
+        st, text, _h = _post(port, f"/console/drivers/race/final-lap?t={director}", {})
+        srv.race_svc.standings = real
+        assert st == 200 and hud.msg == "Chequered Flag", \
+            f"a Final lap press after the leader's flag shows Chequered Flag, never a lasting Final Lap: {hud.msg!r}"
+        ctl.push_url = ""
+        with open(audit, encoding="utf-8") as fh:
+            before = fh.read().count('"hud_message"')
+        st, text, _h = _post(port, f"/console/race-control/drivers/race/hud-message?t={rc}", {"text": "Final Lap"})
+        assert st == 409 and "webhook" in json.loads(text)["error"], (st, text)
+        with open(audit, encoding="utf-8") as fh:
+            assert fh.read().count('"hud_message"') == before, "without a webhook nothing is logged as changed"
     finally:
+        g.m.HUD_MESSAGE_MIN_S = limit
         srv.shutdown()
 
 
@@ -3427,6 +3449,34 @@ def t_the_hud_message_follows_the_race_by_itself():
     auto.observe()
     assert hud.msg == "Final Lap" and len(ctl.calls) == calls, \
         "without Chequered Flag in the vocabulary Final Lap stays"
+
+
+def t_a_failed_hud_message_change_runs_again_on_the_next_tick():
+    hud = _MsgHud()
+    ctl, race = _MsgCtl(hud), _States()
+    auto = g.m.HudMessageAuto(ctl, hud, race)
+    hud.msg, race.state = "Formation Lap", "waiting"
+    auto.observe()
+    real, fails = ctl.set_field, [1]
+
+    def flaky(*a):
+        if fails:
+            fails.pop()
+            raise OSError("push failed")
+        return real(*a)
+    ctl.set_field = flaky
+    race.state = "racing"
+    try:
+        auto.observe()
+    except OSError:
+        pass  # dashboard_ticks warns and goes on
+    auto.observe()
+    assert hud.msg == "", "the start is taken again on the next tick"
+    ctl.push_url, hud.msg, race.state = "", "Final Lap", "final_lap"
+    auto.observe()
+    race.state = "finishing"
+    auto.observe()
+    assert hud.msg == "Final Lap" and race.logged[-1][2] == "", "without a webhook nothing changes or is logged"
 
 
 if __name__ == "__main__":
