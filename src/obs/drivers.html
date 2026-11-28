@@ -24,6 +24,8 @@
   body[data-hidden] #drivers-header, body[data-hidden] #drivers-tower,
   body[data-hidden] #drivers-fastest, body[data-hidden] #drivers-map { display: none !important; }
   body[data-red-flag] #drivers-map { display: none !important; }
+  /* map=0: the splitscreen keeps the tower without the track map. */
+  body[data-no-map] #drivers-map { display: none !important; }
   #drivers-header {
     position: absolute; left: 48px; top: 64px; width: 500px; height: 64px; box-sizing: border-box;
     padding: 8px 16px; background: var(--dd-bg); border-left: 6px solid var(--dd-accent);
@@ -149,6 +151,7 @@
   document.body.setAttribute("data-hidden", "");   // off air until the relay says otherwise
   document.getElementById("drivers-fastest").classList.add("none");
   const map = TrackMap.create(document.getElementById("dd-svg"));
+  if (new URLSearchParams(location.search).get("map") === "0") document.body.dataset.noMap = "";
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);

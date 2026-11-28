@@ -29,6 +29,7 @@ const els = {};
 const document = {getElementById: id => els[id] || (els[id] = node("div")),
                   createElement: node, createElementNS: (ns, t) => node(t), body: node("body"),
                   createTextNode: t => Object.assign(node("#text"), {textContent: String(t)})};
+const location = {search: ""};
 function fetch() { return new Promise(() => {}); }
 function setTimeout() {}
 function flat(n) { return [n].concat(...(n.children || []).map(flat)); }
