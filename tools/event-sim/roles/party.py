@@ -729,7 +729,7 @@ class RaceControlRole(LiveColumn, Surface):
     `show_standings` (entry), `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry),
     `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason),
     `set_time` and `add_lap` (entry, time; qualifying), `note` (text, target), `confirm_dc`
-    (entry), `class_laps` (class, laps), `view` (area), `fit`. An
+    (entry), `class_laps` (class, stint, laps), `view` (area), `fit`. An
     action first opens the desk area that holds its controls; the race controls stay in
     the live column."""
     kind = "race_control"
@@ -972,20 +972,25 @@ class RaceControlRole(LiveColumn, Surface):
         return {"status": self._status("Confirm DC", "DC confirmed", before)}
 
     def act_class_laps(self, args):
-        """Set the lap count of a class after the first one (the live column's Class laps row);
-        a count the field already holds is kept, since its input would send nothing."""
-        cls = str(args.get("class", ""))
-        field = self.sel("input", label=DESK["class_laps"] + cls)
-        if self.control(field, f"Lap count of {cls}").input_value() == str(args.get("laps", "")):
+        """Set the lap count of a class after the first one in one stint lobby (its column of
+        the Race area's Stint laps); a count the field already holds is kept, since its input
+        would send nothing."""
+        cls, stint = str(args.get("class", "")), str(args.get("stint", ""))
+        if not cls or not stint:
+            raise StepError("class_laps needs args.class and args.stint, e.g. { class = \"GT3\", stint = \"Stint 3\" }")
+        name = f"{cls} in {stint}"
+        self.area("race")
+        field = self.sel("input", label=DESK["class_laps"] + name)
+        if self.control(field, f"Lap count of {name}").input_value() == str(args.get("laps", "")):
             return {"kept": True}
         before = self._line()
 
         def enter():
-            box = self.control(field, f"Lap count of {cls}")
+            box = self.control(field, f"Lap count of {name}")
             box.fill(str(args.get("laps", "")), timeout=CONTROL_MS)
             box.press("Tab", timeout=CONTROL_MS)
-        self.answered(enter, self.base + "/drivers/race/class-laps", f"Lap count of {cls}")
-        return {"status": self._status(f"Lap count of {cls}", f"{cls} lap count saved", before)}
+        self.answered(enter, self.base + "/drivers/race/stint-laps", f"Lap count of {name}")
+        return {"status": self._status(f"Lap count of {name}", f"{cls} lap count of {stint} saved", before)}
 
     def act_stint_laps(self, args):
         """Set the lap count of each stint lobby ({label: laps}) in the Race area's Stint laps;

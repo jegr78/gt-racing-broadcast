@@ -1177,28 +1177,40 @@ def t_both_desks_retire_a_car_and_name_a_driver_and_bad_input_is_refused():
         srv.shutdown()
 
 
-def t_class_laps_route_refuses_bad_input():
+def t_race_control_sets_a_class_lap_count_per_stint():
     roster = {ENTRIES[0]: {"carClass": "GT3"}, ENTRIES[1]: {"carClass": "GT4"}}
-    srv, port, _path, _hub = _serve(context=lambda: {"roster": roster, "stint": "S1", "mode": "race"})
-    hdr = {"Content-Type": "application/json"}
+    sched, ctl = _stint_schedule()
+    srv, port, _path, _hub = _serve(solo=False, setup_ctl=ctl,
+                                    context=lambda: {"roster": roster, "stint": "Stint 1", "mode": "race"})
+    srv.relay.race_source = sched
+    rc, director, alice = g._tok("dave"), g._tok("bob"), g._tok("alice")
+    url = "/console/race-control/drivers/race/stint-laps?t="
     try:
-        rc, director, alice = g._tok("dave"), g._tok("bob"), g._tok("alice")
-        st, text, _h = _req(port, f"/console/race-control/drivers/race/class-laps?t={rc}",
-                            json.dumps({"class": "GT4", "laps": 54}).encode(), hdr)
+        st, text, _h = _post(port, url + rc, {"row": 2, "class": "gt4", "laps": 54})
         race = json.loads(text)["race"] if st == 200 else {}
-        assert st == 200 and race["class_laps"] == {"GT4": 54}, (st, text[:300])
-        assert race["last_action"]["who"] == "race_control:dave" and race["last_action"]["action"] == "class_laps"
-        st, text, _h = _req(port, f"/console/drivers/race/class-laps?t={director}",
-                            json.dumps({"class": "GT4", "laps": None}).encode(), hdr)
+        assert st == 200 and race["class_laps"] == {"GT4": 54}, \
+            f"the count of the row on air reaches the race at once, under the roster's name: {st} {text[:300]}"
+        assert race["last_action"]["who"] == "race_control:dave" and race["last_action"]["action"] == "stint_laps"
+        st, text, _h = _post(port, url + rc, {"row": 3, "class": "GT4", "laps": 50})
+        assert st == 200 and json.loads(text)["race"]["class_laps"] == {"GT4": 54}, "another stint keeps its own"
+        stints = json.loads(_req(port, f"/console/race-control/drivers/race?t={rc}")[1])["stints"]
+        assert [x["class_laps"] for x in stints] == [{"GT4": 54}, {"GT4": 50}], stints
+        assert ctl.saves.next_job() == (g.m.CLASS_LAPS_PREFIX + "GT4", 2,
+                                        {"class": "GT4", "class_laps": "54"}, 1), "the sheet gets it after"
+        st, text, _h = _post(port, f"/console/drivers/race/stint-laps?t={director}", {"row": 2, "class": "GT4",
+                                                                                     "laps": None})
         assert st == 200 and json.loads(text)["race"]["class_laps"] == {}, (st, text[:300])
-        assert _req(port, f"/console/drivers/race/class-laps?t={alice}",
-                    json.dumps({"class": "GT4", "laps": 5}).encode(), hdr)[0] == 403, \
-            "a commentator never sets a class lap count"
-        for bad in ({"class": "GT4", "laps": 0}, {"class": "GT4", "laps": "x"}, {"class": "GT4", "laps": 1000},
-                    {"class": "LMP", "laps": 5}, {"class": ["GT4"], "laps": 5}, {"laps": 5}, {"class": "GT4"}):
-            st, text, _h = _req(port, f"/console/race-control/drivers/race/class-laps?t={rc}",
-                                json.dumps(bad).encode(), hdr)
+        assert _post(port, f"/console/drivers/race/stint-laps?t={alice}",
+                     {"row": 2, "class": "GT4", "laps": 5})[0] == 403, "a commentator never sets a class lap count"
+        for bad in ({"row": 2, "class": "GT4", "laps": 0}, {"row": 2, "class": "GT4", "laps": "x"},
+                    {"row": 2, "class": "LMP", "laps": 5}, {"row": 2, "class": ["GT4"], "laps": 5},
+                    {"row": 2, "class": "GT4"}, {"row": 9, "class": "GT4", "laps": 5}):
+            st, text, _h = _post(port, url + rc, bad)
             assert st == 400, (bad, st, text)
+        assert _post(port, url + rc, {"class": "GT4", "laps": 5, "row": 2})[0] == 200
+        assert _req(port, f"/console/race-control/drivers/race/class-laps?t={rc}",
+                    json.dumps({"class": "GT4", "laps": 5}).encode(), {"Content-Type": "application/json"})[0] in (403, 404), \
+            "the old per-stint store is gone"
     finally:
         srv.shutdown()
 
@@ -1243,15 +1255,12 @@ def t_schedule_laps_columns_per_class_are_parsed():
     assert [src.class_laps_at(i) for i in (0, 1, 2, 3)] == [{"GT3": 54}, {}, {"GT3": 12}, {}]
 
 
-def t_the_stint_watch_prefills_the_on_air_rows_class_laps():
+def t_the_stint_watch_passes_the_class_counts_of_the_row_on_air():
     import threading, time
-    roster = {ENTRIES[0]: {"carClass": "GT3"}, ENTRIES[1]: {"carClass": "GT4"}}
-    ctx = {"roster": roster, "stint": "S1", "mode": "race"}
-    srv, _port, _path, _hub = _serve(solo=False, context=lambda: ctx)
-    srv.shutdown()
-    svc = srv.race_svc
 
     class Source:
+        counts = [{"GT4": 40}, {"GT4": 41}, {}]
+
         def get_rows(self):
             return [("u", "A", "S1", 2), ("u", "B", "S2", 3), ("u", "C", "S3", 4)]
 
@@ -1259,7 +1268,7 @@ def t_the_stint_watch_prefills_the_on_air_rows_class_laps():
             return None
 
         def class_laps_at(self, idx):
-            return [{"GT4": 40}, {"GT4": 41}, {}][idx]
+            return dict(self.counts[idx])
 
     class Relay:
         solo, mode, race_source, idx = False, "race", Source(), 0
@@ -1268,26 +1277,35 @@ def t_the_stint_watch_prefills_the_on_air_rows_class_laps():
         def on_air_row_idx(self):
             return self.idx
 
+    got = []
+
+    class Svc:
+        def stint_switch(self, **_k):
+            pass
+
+        def lobby_class_laps(self, counts):
+            if not got or got[-1] != counts:
+                got.append(counts)
+
     relay, stop = Relay(), threading.Event()
     worker = threading.Thread(target=g.m.stint_switch_watch,
-                              args=(relay, svc, stop, lambda: None, 0.01), daemon=True)
+                              args=(relay, Svc(), stop, lambda: None, 0.01), daemon=True)
     worker.start()
     try:
         deadline = time.monotonic() + 2
-        while svc.class_laps("S1") != {"GT4": 40} and time.monotonic() < deadline:
+        while got != [{"GT4": 40}] and time.monotonic() < deadline:
             time.sleep(0.01)
-        assert svc.class_laps("S1") == {"GT4": 40}, "a relay start pre-fills the row on air"
-        assert svc._current()._window_until is None, "a relay start opens no change window"
-        svc.set_class_laps("rc:Anna", "GT4", 33, stint="S2")
-        ctx["stint"], relay.idx = "S2", 1
-        deadline = time.monotonic() + 2
-        while svc._current()._window_until is None and time.monotonic() < deadline:
+        Source.counts[0] = {"GT4": 39}
+        while got[-1] != {"GT4": 39} and time.monotonic() < deadline:
             time.sleep(0.01)
-        time.sleep(0.05)
-        assert svc.class_laps("S2") == {"GT4": 33}, "the switch keeps the desk value"
+        relay.idx = 2
+        while got[-1] != {} and time.monotonic() < deadline:
+            time.sleep(0.01)
     finally:
         stop.set()
         worker.join(2)
+    assert got == [{"GT4": 40}, {"GT4": 39}, {}], \
+        f"the row on air brings its counts, a desk change and a switch reach the race: {got}"
 
 
 def t_the_stint_watch_records_the_race_stint_on_air():
@@ -1524,7 +1542,7 @@ def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
     calls, relay, stop = [], Relay(), threading.Event()
 
     class Svc:
-        def stint_switch(self, final_laps=None, window=True, final_row=None, class_laps=None):
+        def stint_switch(self, final_laps=None, window=True, final_row=None):
             calls.append(final_laps if window else ("start", final_laps))
             rows_seen.append(final_row)
     rows_seen = []
@@ -1644,8 +1662,10 @@ def t_race_control_sets_a_stint_lap_count_that_the_race_shows_at_once():
         st, text, _h = _post(port, f"/console/race-control/drivers/race/stint-laps?t={rc}", {"row": 3, "laps": 11})
         assert st == 200 and json.loads(text)["ok"] is True, (st, text)
         race = json.loads(_req(port, f"/console/race-control/drivers/race?t={rc}")[1])
-        assert race["stints"] == [{"row": 2, "stint": "Stint 1", "laps": 14, "sync": None},
-                                  {"row": 3, "stint": "Stint 2", "laps": 11, "sync": "saving"}], race["stints"]
+        assert race["stints"] == [{"row": 2, "stint": "Stint 1", "laps": 14, "sync": None,
+                                   "class_laps": {}, "class_sync": {}},
+                                  {"row": 3, "stint": "Stint 2", "laps": 11, "sync": "saving",
+                                   "class_laps": {}, "class_sync": {}}], race["stints"]
         assert race["stint_row"] == 2, "the row on air"
         assert ctl.saves.next_job() == (g.m.LAPS_TARGET, 3, {"laps": "11"}, 1), "the sheet gets the count after"
         st, text, _h = _post(port, f"/console/race-control/drivers/race/stint-laps?t={rc}", {"row": 3, "laps": 0})

@@ -153,7 +153,7 @@ def t_schedule_write_confirms_and_a_later_read_sees_it():
     with _sim() as sim:
         body = m.post_webhook(sim.push_url, {"action": "schedule", "row": 3, "url": "sim://comms2",
                                              "name": "Comms 2"}, timeout=5)
-        assert json.loads(body) == {"ok": True, "action": "schedule", "v": 8}, body
+        assert json.loads(body) == {"ok": True, "action": "schedule", "v": 9}, body
         assert m.check_webhook_response(body, "schedule") == (True, None)
         parsed = m.ScheduleSource._parse_rows(_get(_csv_url(sim, "Schedule"))[2])
         assert ("sim://comms2", "Comms 2", "Stint 2", 3) in parsed, parsed
@@ -185,6 +185,20 @@ def t_schedule_writes_the_laps_cell_by_its_header_and_refuses_without_one():
         answer = _post(sim, {"action": "schedule", "row": 2, "laps": "12"})
         assert answer == {"error": "no Laps column in the Schedule tab"}, answer
         assert sim.tab("Schedule") == SCHEDULE, "a refused write changes nothing"
+
+
+def t_schedule_writes_a_class_laps_cell_by_its_header_and_refuses_without_one():
+    tabs = {"Schedule": [["URL", "Streamer", "Stint", "Laps", "Laps  GT3"], ["", "Comms 1", "Stint 1", "14", "12"]]}
+    with _sim(tabs=tabs) as sim:
+        answer = _post(sim, {"action": "schedule", "row": 2, "class": "gt3", "class_laps": "11"})
+        assert answer.get("v") == 9, answer
+        assert sim.tab("Schedule")[1] == ["", "Comms 1", "Stint 1", "14", "11"], \
+            f"the class cell, matched by its header whatever its case and spacing, never the Laps cell: {sim.tab('Schedule')}"
+        _post(sim, {"action": "schedule", "row": 2, "class": "GT3", "class_laps": ""})
+        assert sim.tab("Schedule")[1][4] == "", "an empty count clears the cell"
+        answer = _post(sim, {"action": "schedule", "row": 2, "class": "GT4", "class_laps": "9"})
+        assert answer == {"error": "no Laps GT4 column in the Schedule tab"}, answer
+        assert sim.tab("Schedule")[1] == ["", "Comms 1", "Stint 1", "14", ""], "a refused write changes nothing"
 
 
 def t_schedule_without_a_stint_header_skips_the_stint_and_falls_back_to_a_b():
@@ -303,7 +317,7 @@ def t_timer_round_trips_through_the_relay_parser():
         state = {"end": 1795003600.0, "duration": 3600, "visible": True, "remaining": None,
                  "updated": 0.0}
         body = m.post_webhook(sim.push_url, m.TimerStore._payload(state), timeout=5)
-        assert json.loads(body) == {"ok": True, "action": "timer", "v": 8}
+        assert json.loads(body) == {"ok": True, "action": "timer", "v": 9}
         read = m.parse_timer_tab(_get(_csv_url(sim, "Timer"))[2])
         assert read["end"] == state["end"] and read["duration"] == 3600 and read["visible"], read
         assert read["updated"] == clock.now, "Updated (UTC) is the script's own clock"
@@ -325,7 +339,7 @@ def t_stream_key_is_read_not_logged_and_answers_the_probe():
 def t_unknown_and_missing_actions_and_bad_json():
     with _sim() as sim:
         assert _post(sim, {"action": "lights"}) == {"error": "unknown action: lights"}
-        assert _post(sim, {"visible": "FALSE"}) == {"ok": True, "action": "timer", "v": 8}
+        assert _post(sim, {"visible": "FALSE"}) == {"ok": True, "action": "timer", "v": 9}
         status, body = _status(sim.push_url, data=b"{nope", headers={"Content-Type": "application/json"})
         assert status == 200 and json.loads(body)["error"].startswith("SyntaxError"), body
         ok, err, _ = m.push_webhook_retrying(sim.push_url, {"action": "lights"}, "lights",
@@ -367,7 +381,7 @@ def t_fetch_stays_on_loopback():
 
 def t_payloads_that_are_no_plain_object_behave_like_v7():
     with _sim() as sim:
-        assert _post(sim, ["schedule"]) == {"ok": True, "action": "timer", "v": 8}, "an array runs as timer"
+        assert _post(sim, ["schedule"]) == {"ok": True, "action": "timer", "v": 9}, "an array runs as timer"
         assert _post(sim, None) == {"error": "TypeError: Cannot read properties of null (reading 'action')"}
         assert _post(sim, 5) == {"error": "TypeError: Cannot use 'in' operator to search for 'end' in 5"}
         assert _post(sim, {"action": ["a", "b"]}) == {"error": "unknown action: a,b"}, "String() joins an array"

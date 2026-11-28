@@ -15924,7 +15924,6 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         "retire": lambda: svc.retire(who, b.get("entry"), b.get("on", True)),
                         "driver-name": lambda: svc.set_driver_name(who, b.get("entry"), b.get("name"),
                                                                    b.get("driver", "")),
-                        "class-laps": lambda: svc.set_class_laps(who, b.get("class"), b.get("laps")),
                     }
                     if action == "unlock-start":
                         if str(who).startswith("race_control:"):
@@ -15949,13 +15948,21 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                                                     "Schedule"}, 409)
                         if "laps" not in body:
                             return self._send({"ok": False, "error": "laps is a number or null"}, 400)
-                        res = setup_ctl.schedule_laps(body.get("row"), body.get("laps"))
+                        if "class" in body:
+                            cls = driver_race_svc.known_class(body.get("class"))
+                            if cls is None:
+                                return self._send({"ok": False, "error": "unknown class"}, 400)
+                            res = setup_ctl.schedule_class_laps(body.get("row"), cls, body.get("laps"))
+                        else:
+                            res = setup_ctl.schedule_laps(body.get("row"), body.get("laps"))
                         if "error" in res:
                             return self._send({"ok": False, "error": res["error"]}, 400)
-                        race = driver_race_svc.log(who, "stint_laps", row=res["row"], laps=body.get("laps"))
+                        extra = {"class": res["class"]} if "class" in res else {}
+                        if extra and relay.mode == "race":
+                            idx = relay.on_air_row_idx()
+                            driver_race_svc.lobby_class_laps(sched.class_laps_at(idx))   # the desk sees it at once
+                        race = driver_race_svc.log(who, "stint_laps", row=res["row"], laps=body.get("laps"), **extra)
                         return self._send({"ok": True, "race": race})
-                    if action == "class-laps" and "laps" not in body:
-                        return self._send({"ok": False, "error": "laps is a number or null"}, 400)
                     if action in actions:
                         try:
                             return self._send({"ok": True, "race": actions[action]()})
@@ -16619,8 +16626,8 @@ def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0, o
                        clock=time.time, invite_active=lambda: True):
     """Tell the driver race when the broadcast switches stints: that opens the driver
     change window, and the switch onto the last schedule row brings the final lobby's
-    lap count (the row's `Laps` cell, else the event setting). The row's `Laps <Class>`
-    cells pre-fill the class lap counts, at a switch and at a start. Endurance only.
+    lap count (the row's `Laps` cell, else the event setting). Every tick passes the row's
+    class lap counts (`Laps <Class>` cells or a desk change). Endurance only.
     `on_air_path` keeps the race stint on air and a last-alive stamp, which a plain
     `event start` resumes from, while `invite_active()` says an event is unstopped."""
     last, sent = None, None
@@ -16641,11 +16648,9 @@ def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0, o
                 final, last_row = None, bool(rows) and idx == len(rows) - 1
                 if last_row:
                     final = relay.race_source.final_laps() or settings_laps()
-                class_laps = relay.race_source.class_laps_at(idx) if rows else {}
                 sent = final
-                if switched or last_row or class_laps:
-                    race_svc.stint_switch(final_laps=final, window=switched, final_row=last_row,
-                                          class_laps=class_laps)
+                if switched or last_row:
+                    race_svc.stint_switch(final_laps=final, window=switched, final_row=last_row)
                     LOG.info("driver race: %s row %d%s", "stint switch to" if switched
                              else "on air at start:", idx + 1,
                              f", final lobby over {final} laps" if final else "")
@@ -16655,6 +16660,8 @@ def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0, o
                     sent = final
                     race_svc.final_lobby_laps(final)
                     LOG.info("driver race: final lobby now over %s laps", final)
+            if relay.mode == "race" and hasattr(race_svc, "lobby_class_laps"):
+                race_svc.lobby_class_laps(relay.race_source.class_laps_at(idx) if rows else {})
             last = idx
             relay._tick_ok("driver race stint watch")
         except Exception as e:  # noqa: BLE001  a watcher error must never touch the broadcast

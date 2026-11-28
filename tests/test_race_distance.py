@@ -3477,6 +3477,14 @@ def t_a_class_lap_stops_at_its_class_count_once_the_flag_is_out():
         "a class count never finishes a car"
 
 
+def t_each_class_reads_its_own_lap_of_the_lobby():
+    race, cars = _class_flag_race({})
+    t = _drive(race, cars, [60, 40, 35], 0.0, 2 * L / 60 + 1)
+    st = race.standings(t)
+    assert st["class_lobby_lap"] == {"H": 3, "G": 2}, \
+        f"each class's highest GT7 counter, not the lobby's: {st['class_lobby_lap']} {st['lobby_lap']}"
+
+
 def t_a_class_count_reads_race_laps_like_the_overall_one():
     race = rd.Race(TRACE, formation=True, finish_mode="laps", lap_count=4)
     race.set_classes({"A": "H", "B": "G"})
