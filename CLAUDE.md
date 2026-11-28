@@ -234,7 +234,7 @@ Security boundaries that apply everywhere:
   for all viewers that stretches their poll interval instead of turning anyone away, plus
   the roster's brand logos
   (`/console/timing/brand/<key>`, PNG only).
-- The `race_control` role reaches two program changes. The full `RED FLAG`
+- The `race_control` role reaches three program changes. The full `RED FLAG`
   (`POST /console/race-control/red-flag`, #1114) raises the Standby Cover, sets the HUD
   banner and holds the driver race. **Race start** (`POST
   /console/race-control/drivers/race/start`, #1324) rebuilds the driver race and arms
@@ -243,8 +243,13 @@ Security boundaries that apply everywhere:
   one-shot `unlock-start`, which is refused for `race_control`) or the timer has
   started (released by a timer RESET or the director's unlock) or is not yet read from
   the Sheet (released by the Sheet answering or the director's keep unlock, then START
-  by hand; a fresh unlock is refused there and a timer RESET does not release it). No
-  step-up; all of them are logged with the person's identity.
+  by hand; a fresh unlock is refused there and a timer RESET does not release it). The
+  **HUD's Race Control message** (#1384): `POST .../drivers/race/hud-message {text}`
+  (any message of the Configuration vocabulary, empty clears), `.../formation-lap`, and
+  **Final lap**, which shows `Final Lap` with the race's final lap; the relay clears
+  `Formation Lap` when the race starts counting and turns `Final Lap` into `Chequered
+  Flag` at the leader's flag (`HudMessageAuto`). No step-up; all of them are logged with
+  the person's identity.
   Every other program control stays director-gated, including putting the driver
   dashboard on air. Race data the desks maintain (corrections, tyre compound, the
   dashboard's compound and fuel columns) is not a program change.

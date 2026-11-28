@@ -85,7 +85,11 @@ so the race controls never scroll away:
   you last picked, never one the desk opened by itself.
 - **Live column**: a small program preview with **Hide** (hidden, the race controls move
   up), what is on air, and the race controls: the finish mode (in a single lobby also
-  its lap count), **Final lap**, **Finish**, **RED FLAG**, and while the red flag is out
+  its lap count), **Final lap**, **Finish**, **RED FLAG**, the **HUD message** row
+  (Race Control desk only: **Formation Lap**, any message of the league's Configuration
+  list, **Clear message**; **Final lap** also shows `Final Lap` on the HUD, `Formation
+  Lap` leaves by itself when the race starts counting, and `Final Lap` turns into
+  `Chequered Flag` once the leader has the flag), and while the red flag is out
   the restart mode, **Restart released** and in endurance the
   [restart plan](Driver-Telemetry#red-flag-rejoin-and-corrections) with its buffer and
   **Take**. The lap line shows the lobby on air against its stint's lap count. The
