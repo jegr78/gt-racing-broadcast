@@ -3360,9 +3360,13 @@ def t_race_control_sets_the_hud_message_with_shortcuts_and_from_the_vocabulary()
         assert st == 200 and hud.msg == "Driver Swaps", "any message of the vocabulary, like the director's"
         st, text, _h = _post(port, f"/console/race-control/drivers/race/hud-message?t={rc}", {"text": ""})
         assert st == 200 and hud.msg == "", "an empty text clears it"
+        with open(audit, encoding="utf-8") as fh:
+            before = fh.read().count('"hud_message"')
         for bad in ({"text": "Invented"}, {}, {"text": 5}):
             st, text, _h = _post(port, f"/console/race-control/drivers/race/hud-message?t={rc}", bad)
             assert st == 400 and hud.msg == "", (bad, st, text)
+        with open(audit, encoding="utf-8") as fh:
+            assert fh.read().count('"hud_message"') == before, "a refused message leaves no audit line"
         assert _post(port, f"/console/drivers/race/hud-message?t={alice}", {"text": "Final Lap"})[0] == 403, \
             "a commentator never puts a message on air"
         st, text, _h = _post(port, f"/console/drivers/race/final-lap?t={director}", {})
