@@ -267,10 +267,8 @@ class _Sink:
 
 
 def _closed_port():
-    sock = _udp()
-    port = sock.getsockname()[1]
-    sock.close()
-    return ("127.0.0.1", port)
+    """The discard port: no system hands it out as an ephemeral port, unlike a just closed one."""
+    return ("127.0.0.1", 9)
 
 
 def t_the_sender_forwards_every_packet_to_each_app_and_a_dead_one_stops_nothing():
@@ -1274,6 +1272,33 @@ def t_check_reports_each_forward_target_and_fails_on_a_dead_one():
         and _target(dead) + " sent" in line and "is the app running" in line, \
         f"the check names each app, a closed one fails it: {said}"
     assert said[-1] == "RESULT: FAIL (forward)", said[-1]
+
+
+def t_a_closed_app_reported_on_the_receive_counts_as_failed():
+    class WindowsUdp:
+        """Takes every send and reports the earlier ICMP port unreachable on the receive."""
+        def send(self, data):
+            return len(data)
+
+        def recv(self, _n):
+            raise ConnectionResetError(10054, "forcibly closed")
+
+        def close(self):
+            pass  # nothing to release
+    said = []
+    sender = snd.Sender(_Sink(), listen=0, bind="127.0.0.1", say=said.append)
+    target = ("127.0.0.1", 20777)
+    sender.forward, sender._fwd = [target], {target: WindowsUdp()}
+    sender.forward_stats = {target: {"sent": 0, "failed": 0}}
+    tx = _udp()
+    try:
+        tx.sendto(b"\0" * 296, sender.sock.getsockname())
+        assert sender.receive_once()
+    finally:
+        tx.close()
+        sender.close()
+    assert sender.forward_stats[target] == {"sent": 0, "failed": 1}, sender.forward_stats
+    assert any("127.0.0.1:20777 failed" in x for x in said), said
 
 
 def t_check_skips_the_forward_part_without_packets():

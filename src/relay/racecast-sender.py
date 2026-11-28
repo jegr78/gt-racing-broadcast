@@ -495,6 +495,10 @@ class Sender:
         for target, sock in self._fwd.items():
             try:
                 sock.send(data)
+                try:
+                    sock.recv(2048)    # Windows reports a closed port's ICMP error on a receive
+                except (BlockingIOError, InterruptedError):
+                    pass  # nothing pending: the normal case
             except OSError as exc:
                 self.forward_stats[target]["failed"] += 1
                 if target not in self._fwd_warned:
@@ -520,6 +524,7 @@ class Sender:
                 self.say("forward to %s skipped: the same app as %s" % (_target(target), _target(seen[addr])))
                 continue
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setblocking(False)
             try:
                 sock.connect(addr)
             except OSError as exc:
