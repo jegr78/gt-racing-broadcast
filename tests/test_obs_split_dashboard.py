@@ -29,6 +29,8 @@ def t_the_splitscreen_dashboard_source_hides_the_track_map():
         page = fh.read()
     assert 'body[data-no-map] #drivers-map { display: none !important; }' in page, "map=0 hides the map"
     assert 'get("map") === "0"' in page, "the page reads map=0 from its URL"
+    assert 'noMap ? {draw() {}, async sync() {}} : TrackMap.create(' in page, \
+        "a hidden map fetches no line and draws nothing"
 
 
 def t_the_splitscreen_shows_the_driver_dashboard_as_the_stint_scene_does():

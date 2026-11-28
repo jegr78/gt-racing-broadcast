@@ -150,8 +150,10 @@
   rows.textContent = "";
   document.body.setAttribute("data-hidden", "");   // off air until the relay says otherwise
   document.getElementById("drivers-fastest").classList.add("none");
-  const map = TrackMap.create(document.getElementById("dd-svg"));
-  if (new URLSearchParams(location.search).get("map") === "0") document.body.dataset.noMap = "";
+  // map=0 (the splitscreen): no track map, and no line fetched or drawn for it.
+  const noMap = new URLSearchParams(location.search).get("map") === "0";
+  if (noMap) document.body.dataset.noMap = "";
+  const map = noMap ? {draw() {}, async sync() {}} : TrackMap.create(document.getElementById("dd-svg"));
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
