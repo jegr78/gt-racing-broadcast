@@ -3,6 +3,7 @@
 drivers role on a fake relay client, the selectors against the shipped pages and the
 stack's helpers for them. No browser, no socket, nothing spawned.
 Run: python3 tests/test_event_sim_roles.py"""
+import contextlib
 import json
 import os
 import re
@@ -840,6 +841,22 @@ def t_a_screenshot_blacks_out_the_event_links():
     cc.shot("cc.png")
     assert page.shots == [("cc.png", "", ["#evt-invite-text", "#evt-timing-text"])], \
         "the Control Center shows both links in simulation"
+
+
+def t_a_screenshot_notes_its_window_for_the_film():
+    role, page, ctx = make(party.RaceControlRole)
+    shots = []
+
+    class Rec:
+        @contextlib.contextmanager
+        def shooting(self, view):
+            shots.append(view)
+            yield
+
+    role.do("open", {})
+    ctx.recorder = Rec()
+    role.shot("desk.png", ".area")
+    assert shots == ["race_control"], f"a shot in a record run tells the recorder which page it took: {shots}"
 
 
 def t_redact_hides_tokens_invites_and_timing_links():

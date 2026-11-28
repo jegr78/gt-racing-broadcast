@@ -471,8 +471,14 @@ class PageRole(Role):
     def shot(self, path, element=""):
         if self.pg is None:
             raise ShotUnavailable(f"role {self.name!r} has no open page")
+        self._screenshot(element, path, [self.pg.locator(s) for s in selectors.LINKS], PAGE_TIMEOUT_MS)
+
+    def _screenshot(self, element, path, mask, timeout):
+        """The page or its `element` into `path`; a record run notes the shot's window."""
         target = self.pg.locator(element).first if element else self.pg
-        target.screenshot(path=path, mask=[self.pg.locator(s) for s in selectors.LINKS], timeout=PAGE_TIMEOUT_MS)
+        rec = getattr(self.ctx, "recorder", None)
+        with rec.shooting(self.name) if rec is not None else contextlib.nullcontext():
+            target.screenshot(path=path, mask=mask, timeout=timeout)
 
     def fit_report(self, root):
         """FIT_SCRIPT's measure of the visible controls under `root`; None without `root`."""

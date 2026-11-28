@@ -266,9 +266,7 @@ class Surface(builtin.PageRole):
     def shot(self, path, element=""):
         if self.pg is None:
             raise ShotUnavailable(f"role {self.name!r} has no open page")
-        target = self.pg.locator(element).first if element else self.pg
-        target.screenshot(path=path, mask=[self.pg.locator(self.sel(k)) for k in self.masked],
-                          timeout=CONTROL_MS)
+        self._screenshot(element, path, [self.pg.locator(self.sel(k)) for k in self.masked], CONTROL_MS)
 
 
 class LiveColumn:

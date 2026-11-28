@@ -23,6 +23,7 @@ MAX_ACTION_S = 8.0       # a longer action plays this much in real time, the res
 RUN_SHOWN = 3            # of a run of steps with the same role and action, the later ones play sped up
 SWAP_HOLD_S = 6.0        # the hold of each step in a chapter with a four-view switch
 WAIT_SPEED = 8.0
+MAX_WAIT_S = 20.0        # a longer wait plays at the least whole speed that fits it into this much film
 MIN_WAIT_S = 4.0         # a shorter wait plays in real time, so the fast-forward mark does not flicker
 MOVE_S = 0.6
 CHAPTER_FRESH_S = 4.0
@@ -32,6 +33,8 @@ INTRO_S = 5.0            # card durations are whole frames, so the frames around
 CHAPTER_CARD_S = 3.0
 OUTRO_S = 6.0
 CARD_FADE_S = 0.6
+SHOT_LEAD_S = 0.3        # a page's recording lags the engine clock a little,
+SHOT_SETTLE_S = 2.5      # and shows a tall element shot's grey frames up to this long after it
 SCENARIOS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "event-sim", "scenarios")
 SCENARIO_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
@@ -210,14 +213,17 @@ def pace(steps, t0, t1, lead_in=LEAD_IN_S, hold=HOLD_S, speed=WAIT_SPEED, min_wa
             merged[-1][1] = max(merged[-1][1], b)
         else:
             merged.append([a, b])
+    def wait(a, b):
+        return 1.0 if b - a < min_wait else max(speed, float(math.ceil((b - a) / MAX_WAIT_S)))
+
     parts, at = [], t0
     for a, b in merged:
         if a > at:
-            parts.append((at, a, 1.0 if a - at < min_wait else speed))
+            parts.append((at, a, wait(at, a)))
         parts.append((a, b, 1.0))
         at = b
     if t1 > at:
-        parts.append((at, t1, 1.0 if t1 - at < min_wait else speed))
+        parts.append((at, t1, wait(at, t1)))
     # a step that started before the film did lines up at t0, behind the intro and its card
     events = sorted(((max(t0, e[0]), *e[1:]) for e in events), key=lambda e: (e[0], e[1]))
     out, segs, marks, k = 0.0, [], {}, 0
@@ -249,9 +255,10 @@ def pace(steps, t0, t1, lead_in=LEAD_IN_S, hold=HOLD_S, speed=WAIT_SPEED, min_wa
 
 
 def focus_layout(step, prev, views):
-    """The large views from a captioned step on: its focus, else its own role alone; a step
-    on no view keeps the previous layout. `views` are the views on the stage. A single large
-    view comes forward over the views large before."""
+    """The large views from a captioned step on: its focus, else its own role; a step on no
+    view keeps the previous layout. `views` are the views on the stage. A single large view
+    stands beside the view that was large before it (the program first), so it covers
+    nothing; only without one does it come forward alone."""
     named = step.get("focus") or []
     shown = [v for v in named if v in views]
     if len(named) == 4 and len(shown) == 4:
@@ -267,8 +274,10 @@ def focus_layout(step, prev, views):
         large = prev_large[:2] or tuple(views[:1])
     if len(large) != 1:
         return Layout(large)
-    before = prev.large + prev.behind if len(prev.large) == 1 and not prev.quarters else prev.large
-    return Layout(large, behind=tuple(v for v in before if v in views and v != large[0])[:2])
+    before = [v for v in prev.large + prev.behind if v in views and v != large[0]]
+    if before:
+        return Layout((large[0], PROGRAM if PROGRAM in before else before[0]))
+    return Layout(large)
 
 
 def label_rect(rect):
@@ -410,6 +419,9 @@ class Plan:
                     raise ValueError(f"the {s['id']} step's card needs a chapter on its step")
         intro, outro = (check_card(timeline[k], k) if timeline.get(k) is not None else None for k in ("intro", "outro"))
         self.recordings = list(timeline.get("recordings") or [])
+        self._shots = {}
+        for shot in timeline.get("shots") or []:
+            self._shots.setdefault(shot["view"], []).append((shot["start"], shot["end"]))
         self.durations = durations or {}
         self.available = available
         self.views = stage_views(self.recordings)
@@ -664,6 +676,10 @@ class Plan:
     # frames
 
     def _source(self, view, s):
+        for a, b in self._shots.get(view, ()):
+            if a - SHOT_LEAD_S <= s < b + SHOT_SETTLE_S:
+                s = a - SHOT_LEAD_S
+                break
         recs = self._by_view[view]
         k = bisect.bisect_right([start for start, _ in recs], s) - 1
         if k < 0:

@@ -257,6 +257,24 @@ def t_a_closed_page_s_recording_ends_and_a_reopened_one_is_a_new_recording():
     assert got == [(0.0, 30.0), (80.0, None)], f"the first recording ends at the close, the second runs on: {got}"
 
 
+def t_a_screenshot_s_window_lands_on_the_timeline_for_its_view():
+    now = [10.0]
+    rec = record.Recorder(_tmp(), clock=lambda: now[0])
+    assert "shots" not in rec.timeline(SimpleNamespace(name="t", steps=[]), [], start=10.0), "no shot, no list"
+    with rec.shooting("race_control"):
+        now[0] = 12.5
+    try:
+        with rec.shooting("director"):
+            now[0] = 14.0
+            raise RuntimeError("the shot failed")
+    except RuntimeError:
+        pass
+    tl = rec.timeline(SimpleNamespace(name="t", steps=[]), [], start=10.0)
+    assert tl["shots"] == [{"view": "race_control", "start": 0.0, "end": 2.5},
+                           {"view": "director", "start": 2.5, "end": 4.0}], \
+        f"each shot's window, a failed one too, since it may have disturbed the recording: {tl['shots']}"
+
+
 def t_a_recording_file_is_named_relative_to_the_record_dir_when_it_can_be():
     import ntpath
     import posixpath
