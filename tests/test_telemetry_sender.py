@@ -247,6 +247,17 @@ def t_status_line_reports_the_rate_of_the_last_interval():
     assert 59.0 <= rate <= 61.0, f"the status reports the interval's packet rate: {status[0]}"
 
 
+def _drain(sock):
+    """Every datagram waiting on sock, until a 0.3 s gap."""
+    sock.settimeout(0.3)
+    got = []
+    while True:
+        try:
+            got.append(sock.recvfrom(4096)[0])
+        except OSError:
+            return got
+
+
 class _Sink:
     def __init__(self):
         self.got, self.stats = [], {"posted": 0, "dropped": 0, "post_failed": 0}
@@ -269,7 +280,7 @@ def t_the_sender_forwards_every_packet_to_each_app_and_a_dead_one_stops_nothing(
         for data in packets:
             tx.sendto(data, sender.sock.getsockname())
             assert sender.receive_once(), "the packet arrives"
-        got = [[a.recvfrom(4096)[0] for _ in packets] for a in apps]
+        got = [_drain(a) for a in apps]
     finally:
         for sock in apps + [tx]:
             sock.close()
