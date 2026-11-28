@@ -1001,24 +1001,44 @@ def t_every_hud_element_of_the_base_layout_sits_inside_the_frame():
         page = f.read()
     css = ob.base_style(page)
     px = re.compile(r"(?<![-\w])(left|top|width|height)\s*:\s*(-?\d+(?:\.\d+)?)px")
+    # Text slots sized by their content; each still needs its top inside the frame.
+    unsized = {"tele-pred", "tele-pred-lbl", "tele-fuel", "tele-fuel-lbl", "tele-top", "tele-top-lbl",
+               "tele-avg", "tele-avg-lbl", "tele-dist", "tele-dist-lbl", "tele-clock"}
 
-    def props(body):
-        return {k: float(v) for k, v in px.findall(body)}
+    def own(sel):
+        # The element's own rules only: no descendant (`#x img`) or grouped selector.
+        return re.findall(r"(?:^|[\s}])" + sel + r"\s*\{([^}]*)\}", css)
 
-    checked = 0
+    checked, skipped = 0, set()
     for sid, classes in re.findall(r'<div id="([\w-]+)" class="([^"]*)"', page):
         box = {}
-        for cls in classes.split():
-            for body in re.findall(r"(?:^|[\s,}])\." + re.escape(cls) + r"\s*\{([^}]*)\}", css):
-                box.update(props(body))
-        box.update(ob.box_from_css(css, sid))
-        if not {"left", "top", "height"} <= box.keys():
+        for body in [b for cls in classes.split() for b in own(r"\." + re.escape(cls))] + own("#" + re.escape(sid)):
+            box.update({k: float(v) for k, v in px.findall(body)})
+        if "left" not in box or "top" not in box:
+            continue
+        assert box["left"] >= 0 and box["top"] >= 0, f"#{sid} starts outside the frame: {box}"
+        assert box["left"] + box.get("width", 0) <= 1920, f"#{sid} ends past x 1920"
+        if "height" not in box:
+            skipped.add(sid)
+            assert box["top"] < 1080, f"#{sid} starts below the frame"
             continue
         checked += 1
         assert box["top"] + box["height"] <= 1080, \
             f"#{sid} ends at y {box['top'] + box['height']:g}, below the 1080 px frame"
-        assert box["left"] + box.get("width", 0) <= 1920, f"#{sid} ends past x 1920"
+    assert skipped == unsized, f"slots without a height changed: {sorted(skipped ^ unsized)}"
     assert checked >= 20, f"only {checked} HUD boxes found to check"
+
+
+def t_the_team_brand_row_sits_below_the_team_name():
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
+        css = ob.base_style(f.read())
+    name_h = float(re.search(r"\.team-name\s*\{[^}]*?height:\s*(\d+)px", css).group(1))
+    for n in (1, 2, 3):
+        name = ob.box_from_css(css, f"team{n}-name")
+        for slot in ("brand", "quali"):
+            row = ob.box_from_css(css, f"team{n}-{slot}")
+            assert name["top"] + name_h <= row["top"], \
+                f"#team{n}-{slot} at y {row['top']} overlaps the name box ending at {name['top'] + name_h}"
 
 
 def t_ob_visible_is_a_box_prop():
