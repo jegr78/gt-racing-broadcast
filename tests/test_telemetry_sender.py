@@ -327,18 +327,15 @@ def t_forward_targets_resolve_once_and_a_bad_or_repeated_one_is_skipped():
 
 
 def t_cli_refuses_a_forward_port_out_of_range():
-    for bad in ("127.0.0.1:0", "127.0.0.1:207770", "h\u00e9st:20777"):
-        out, old = io.StringIO(), sys.stderr
-        sys.stderr = out
+    import argparse
+    for bad in ("127.0.0.1:0", "127.0.0.1:207770", "h\u00e9st:20777", "a b:1"):
         try:
-            snd.main(["--url", "u", "--key", "k", "--name", "n", "--forward", bad])
-        except SystemExit as exc:
-            assert exc.code == 2, bad
+            got = snd._hostport(bad)
+        except argparse.ArgumentTypeError as exc:
+            assert "port 1-65535" in str(exc), exc
         else:
-            raise AssertionError(f"--forward {bad} must be refused")
-        finally:
-            sys.stderr = old
-        assert "port 1-65535" in out.getvalue(), out.getvalue()
+            raise AssertionError(f"--forward {bad} must be refused, not {got}")
+    assert snd._hostport(":20777") == ("127.0.0.1", 20777), "no host means this device"
 
 
 def t_cli_takes_forward_more_than_once():
