@@ -101,6 +101,12 @@ program can receive it. Pick the line that matches what you already run:
 - **EzioDash on the same iPhone or iPad:** the app documents an experimental listening
   port for forwarded packets. This was not tested with the sender, so prefer a second
   device.
+- **Several of these apps on the same device:** repeat `--forward`, once per app, for
+  example `--forward 127.0.0.1:20777 --forward 127.0.0.1:33741`. Every app gets every
+  packet unchanged. A name is looked up once at start, and a repeated app counts once. An
+  app that is closed is named once and costs nothing else: the relay and the other apps
+  keep getting everything. `--check` lists every target with its sent and failed
+  packets, and fails when an app refused packets or got none.
 
 The sender finds the PlayStation by itself. Where the network refuses its search
 broadcast, as on an iPhone ("No route to host"), it sends the request to every other

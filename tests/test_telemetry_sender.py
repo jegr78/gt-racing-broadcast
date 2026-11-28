@@ -247,6 +247,111 @@ def t_status_line_reports_the_rate_of_the_last_interval():
     assert 59.0 <= rate <= 61.0, f"the status reports the interval's packet rate: {status[0]}"
 
 
+def _drain(sock):
+    """Every datagram waiting on sock, until a 0.3 s gap."""
+    sock.settimeout(0.3)
+    got = []
+    while True:
+        try:
+            got.append(sock.recvfrom(4096)[0])
+        except OSError:
+            return got
+
+
+class _Sink:
+    def __init__(self):
+        self.got, self.stats = [], {"posted": 0, "dropped": 0, "post_failed": 0}
+
+    def put(self, data):
+        self.got.append(data)
+
+
+def _closed_port():
+    """The discard port: no system hands it out as an ephemeral port, unlike a just closed one."""
+    return ("127.0.0.1", 9)
+
+
+def t_the_sender_forwards_every_packet_to_each_app_and_a_dead_one_stops_nothing():
+    apps = [_udp(), _udp()]
+    dead = _closed_port()
+    sink, said = _Sink(), []
+    apps_t = [apps[0].getsockname(), apps[1].getsockname()]
+    sender = snd.Sender(sink, listen=0, bind="127.0.0.1",
+                        forward=[apps_t[0], dead, apps_t[1]], say=said.append)
+    tx = _udp()
+    packets = [bytes([n]) * 300 for n in range(5)]
+    try:
+        for data in packets:
+            tx.sendto(data, sender.sock.getsockname())
+            assert sender.receive_once(), "the packet arrives"
+        got = [_drain(a) for a in apps]
+    finally:
+        for sock in apps + [tx]:
+            sock.close()
+        sender.close()
+    assert got == [packets, packets], "each app gets every packet byte-identical, in order"
+    assert sink.got == packets, "the relay upload gets everything though one app is dead"
+    per = sender.forward_stats
+    assert [per[t]["sent"] for t in apps_t] == [5, 5] and per[dead]["failed"] >= 1, per
+    assert sender.stats["forwarded"] == 10 + per[dead]["sent"], (per, sender.stats)
+    assert sum(_target(dead) in line for line in said) == 1, f"a closed app is named once: {said}"
+
+
+def _target(t):
+    return "%s:%d" % t
+
+
+def t_forward_targets_resolve_once_and_a_bad_or_repeated_one_is_skipped():
+    asked, said = [], []
+
+    def resolve(host, port):
+        asked.append(host)
+        if host == "gone.example":
+            raise OSError("name not known")
+        return ("127.0.0.1", port)
+    real, snd._resolve = snd._resolve, resolve
+    try:
+        sender = snd.Sender(_Sink(), listen=0, bind="127.0.0.1", say=said.append,
+                            forward=[("localhost", 20777), ("127.0.0.1", 20777), ("gone.example", 5300)])
+    finally:
+        snd._resolve = real
+    try:
+        assert sender.forward == [("localhost", 20777)], sender.forward
+        assert asked == ["localhost", "127.0.0.1", "gone.example"], f"each name is looked up once: {asked}"
+        assert any("127.0.0.1:20777 skipped: the same app as localhost:20777" in x for x in said), said
+        assert any("gone.example:5300 skipped: name not known" in x for x in said), said
+    finally:
+        sender.close()
+
+
+def t_cli_refuses_a_forward_port_out_of_range():
+    import argparse
+    for bad in ("127.0.0.1:0", "127.0.0.1:207770", "h\u00e9st:20777", "a b:1"):
+        try:
+            got = snd._hostport(bad)
+        except argparse.ArgumentTypeError as exc:
+            assert "port 1-65535" in str(exc), exc
+        else:
+            raise AssertionError(f"--forward {bad} must be refused, not {got}")
+    assert snd._hostport(":20777") == ("127.0.0.1", 20777), "no host means this device"
+
+
+def t_cli_takes_forward_more_than_once():
+    seen = {}
+
+    class Refuse(snd.Sender):
+        def __init__(self, *_a, forward=None, **_k):
+            seen["forward"] = forward
+            raise OSError("stop here")
+    real, snd.Sender = snd.Sender, Refuse
+    try:
+        code = snd.main(["--url", "u", "--key", "k", "--name", "n", "--forward", "127.0.0.1:20777",
+                         "--forward", "192.0.2.9:33740"])
+    finally:
+        snd.Sender = real
+    assert code == 2 and seen["forward"] == [("127.0.0.1", 20777), ("192.0.2.9", 33740)], seen
+
+
 def t_cli_refuses_listen_with_forward_and_bad_names():
     out = io.StringIO()
     old = sys.stderr
@@ -1135,6 +1240,77 @@ def t_check_in_listen_mode_skips_the_heartbeat():
         f"listen mode: heartbeat skipped, 60 packets at 60/s, check output:\n{text}"
     assert sender.stats["heartbeats"] == 0, "listen mode leaves the console to the other app"
     assert up.pending() == 0, "packets of a check are counted, never queued for upload"
+
+
+def t_check_reports_each_forward_target_and_fails_on_a_dead_one():
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None,
+                      opener=lambda req, timeout: _Reply(b'{"ok": true}'))
+    said, clock = [], [0.0]
+    app = _udp()
+    app.settimeout(0.2)
+    dead = _closed_port()
+    sender = snd.Sender(up, listen=0, bind="127.0.0.1", forward=[app.getsockname(), dead],
+                        say=said.append, clock=lambda: clock[0])
+    other = _udp()
+    for _ in range(60):
+        other.sendto(b"\0" * 296, ("127.0.0.1", sender.sock.getsockname()[1]))
+    real = sender.receive_once
+
+    def receive_once():
+        got = real()
+        clock[0] += 1 / 60
+        return got
+    sender.receive_once = receive_once
+    try:
+        code = snd.self_check(sender, up, duration=1.0, say=said.append)
+    finally:
+        sender.close()
+        other.close()
+        app.close()
+    line = next((x for x in said if " forward: " in x), "")
+    assert code == 1 and "forward: FAIL" in line and "sent 60, failed 0" in line \
+        and _target(dead) + " sent" in line and "is the app running" in line, \
+        f"the check names each app, a closed one fails it: {said}"
+    assert said[-1] == "RESULT: FAIL (forward)", said[-1]
+
+
+def t_a_closed_app_reported_on_the_receive_counts_as_failed():
+    class WindowsUdp:
+        """Takes every send and reports the earlier ICMP port unreachable on the receive."""
+        def send(self, data):
+            return len(data)
+
+        def recv(self, _n):
+            raise ConnectionResetError(10054, "forcibly closed")
+
+        def close(self):
+            pass  # nothing to release
+    said = []
+    sender = snd.Sender(_Sink(), listen=0, bind="127.0.0.1", say=said.append)
+    target = ("127.0.0.1", 20777)
+    sender.forward, sender._fwd = [target], {target: WindowsUdp()}
+    sender.forward_stats = {target: {"sent": 0, "failed": 0}}
+    tx = _udp()
+    try:
+        tx.sendto(b"\0" * 296, sender.sock.getsockname())
+        assert sender.receive_once()
+    finally:
+        tx.close()
+        sender.close()
+    assert sender.forward_stats[target] == {"sent": 0, "failed": 1}, sender.forward_stats
+    assert any("127.0.0.1:20777 failed" in x for x in said), said
+
+
+def t_check_skips_the_forward_part_without_packets():
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None,
+                      opener=lambda req, timeout: _Reply(b'{"ok": true}'))
+    said, app = [], _udp()
+    sender = snd.Sender(up, listen=0, bind="127.0.0.1", forward=[app.getsockname()], say=said.append)
+    try:
+        snd.self_check(sender, up, duration=0.3, say=said.append)
+    finally:
+        app.close()
+    assert any("forward: skipped" in x for x in said), f"an untested forward never reads OK: {said}"
 
 
 def t_sender_stats_carry_the_post_latency_the_relay_keeps():
