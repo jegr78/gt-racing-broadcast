@@ -331,7 +331,8 @@ connection line sits under **Troubleshoot**. In short:
   listed under **Approved drivers** with **Correct** and **Reject**. See
   [approving drivers](Driver-Telemetry#approving-drivers).
 - the finish mode, in a single lobby the lap count, **Final lap** and **Finish**; in
-  endurance each stint's lap count under **Stint laps** and, while the red flag is out,
+  endurance each stint's lap count under **Stint laps** (with classes one column per
+  class after the first) and, while the red flag is out,
   the [restart plan](Driver-Telemetry#red-flag-rejoin-and-corrections)
 - **Hold race (red flag)**, the restart mode and **Restart released**. The panel's own
   `RED FLAG` button holds the race as well when it raises the cover. Over a race already

@@ -48,6 +48,18 @@ the race ends on the race timer with Final lap pressed by hand.
   live column shows the lobby on air as `Lobby lap 9 / 12`. Overlay, HUD and public
   timing do not change.
 
+## Class lap counts per stint (2026-11-28, #1382)
+
+In a multiclass event every class after the first has its own count in every stint
+lobby, the row's `Laps <Class>` cell. It works like `Laps`: the desk's Stint laps table has
+one column per class, a change is live in the relay at once (its own pending save per row
+and class), and the Apps Script v9 writes the cell. A v8 script or a tab without that
+column holds the count in the relay and says so on the desk. The relay passes the class
+counts of the row on air to the race on every stint watch tick. Each class shows the crew
+its lobby lap (the highest GT7 counter of its cars) against its count. **Take** in the
+restart plan sets only the stint's overall count; Race Control sets the class counts of
+the restart lobby in their columns.
+
 ## The restart plan after a red flag
 
 While the red flag is out, from **RED FLAG** until **Restart released**, the desk shows a

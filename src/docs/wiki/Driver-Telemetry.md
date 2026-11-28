@@ -371,18 +371,23 @@ except on the tower.
   follow by the best position each holds.
 - **Lap count per class**: the first class takes the lap count above. The first class is
   the first named class in the current overall order (an unclassed leader does not
-  count), so the count can move to another class during the race. For
-  every other class Race Control or the director type the count into the desk's **Class
-  laps** row (1 to 999, empty clears it). It belongs to the stint on air, shows in the
-  class header and never finishes a car. It shows only while the overall count shows, so
-  never in a timed race, and in an endurance event only once the final lobby's cars are
-  on the line: it belongs to the final lobby's row. An optional Schedule column
-  `Laps <Class>` fills it when that row goes on air, unless the desk already holds a
-  value or cleared it for that stint. Like the overall count it is GT7's lobby count and
-  shows converted to race laps for the class leader. Until a count shows, the header shows the class
-  leader's lap only. Once the overall leader has taken the flag, the class header on the
-  tower, the desks, the public page and the cockpit never reads a lap past the class
-  count, the same rule as the overall lap.
+  count), so the count can move to another class during the race. Every other class has
+  its own lap count in every stint lobby, the `Laps <Class>` cell of that stint's row in
+  the [Schedule tab](Sheet-Template#schedule-tab). Race Control or the director see and
+  change each stint's class count on the desk under **Race → Stint laps**, one column per
+  class (1 to 999, empty clears it): the relay uses a change at once and writes the cell
+  in the background. A class count never finishes a car. In every lobby the desks and
+  the cockpit show each class's **Lobby lap** (the highest GT7 counter of its cars on the
+  road) next to its race lap, on the desks against the class's count of the lobby on air;
+  the first class reads its lobby lap against the stint's `Laps`. The tower and the
+  public page never show a lobby lap. The class header's count in race laps shows only
+  while the overall count shows, so never in a timed race, and in an endurance event
+  only once the final lobby's cars are on the line, from the final lobby's class count.
+  Like the overall count it is GT7's lobby count and shows converted to race laps for
+  the class leader. Until a count shows, the header shows the class leader's lap only.
+  Once the overall leader has taken the flag, the class header on the tower, the desks,
+  the public page and the cockpit never reads a lap past the class count, the same rule
+  as the overall lap.
 - **Fastest lap**: the relay keeps one per class next to the overall one. On the desk's
   fastest lap form a class picked in the class selector narrows **Clear fastest lap**
   and **Set fastest lap** to that class's lap; the overall lap stays. A race reset

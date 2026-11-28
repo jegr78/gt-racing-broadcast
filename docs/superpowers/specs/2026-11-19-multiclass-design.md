@@ -11,9 +11,12 @@ Status: implemented. Changes against the draft below:
 - A tower page stays for one full GAP and INT cycle (30 s), not 15 s, so every class
   shows both. When the tower pages, the fastest-lap box shows the page's class; it
   cycles every 15 s only when all classes fit on one page.
-- A class lap count shows only where the overall count shows: in an endurance event once
-  the final lobby's cars run on its counter, so `Laps <Class>` belongs to the final
-  lobby's row. A count Race Control cleared stays cleared for that stint.
+- Every stint lobby has a lap count per class after the first (2026-11-28, #1382): the
+  `Laps <Class>` cell of each Schedule row, set per stint in the desk's Stint laps table and
+  written back like `Laps` (Apps Script v9). Each class shows the crew its lobby lap
+  against that count in every lobby. The class header's count in race laps shows only
+  where the overall count shows: in an endurance event once the final lobby's cars run on
+  its counter, from the final lobby's class count.
 - Race Control can void or set one class's fastest lap without touching the overall one.
 - The CSV adds `class` and `class_pos` only for a recording with class-mode samples.
 - The driver change timing hint is not part of this implementation; its spec is still a
@@ -59,10 +62,12 @@ lobby as one field.
 
 ## Lap count per class
 
-- The fastest class takes the Schedule's `Laps` cell. For every other class Race
-  Control enters the lap count on the desk near the end of the lobby (one field per
-  class, kept in the actions file per stint, audited with the person). An optional
-  Schedule column `Laps <Class>` (e.g. `Laps GT3`) pre-fills it.
+- The fastest class takes the Schedule's `Laps` cell. Every other class has its own count
+  per stint lobby, the Schedule's `Laps <Class>` cell (e.g. `Laps GT3`) of that stint's
+  row. Race Control sets it on the desk in the Stint laps table, one column per class,
+  near the end of the lobby or before; the relay applies it at once and writes the cell
+  in the background, as for `Laps` (spec 2026-11-26-stint-laps-design.md). It is audited
+  with the person.
 - The class lap count shows in the class header ("LAP 48 / 54") and on the desks and the
   public page. Until it is set, the class header shows the class leader's lap only.
 - The driver change timing hint (`2026-11-19-driver-change-timing-design.md`) uses the
